@@ -27,8 +27,8 @@ server.
 
 - **Stash stays the source of truth.** All edits are written back to Stash. Anything the viewer
   stores locally is a cache and can be deleted without losing data.
-- **Your server, your keys.** The only server the viewer talks to is the Stash server you
-  configure. API keys are kept in your operating system's credential store.
+- **Your server only.** The only server the viewer talks to is the Stash server you configure.
+  Each server's address and API key are saved in the viewer's local config.
 - **Rust core, web frontend.** A Rust core handles all Stash I/O and the semantic engine. The
   Tauri webview only draws the interface.
 

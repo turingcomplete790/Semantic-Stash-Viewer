@@ -34,7 +34,7 @@ Principles III, IV, V, and VII in place before any features are built on it.
       Tauri (Principle III), and a frontend with its framework chosen and justified
 - [ ] Stash adapter: one Rust module owning all GraphQL I/O, with typed operations generated from
       Stash's schema and recorded fixtures for tests
-- [ ] Connection profiles: endpoint URL, optional API key stored in the OS keyring, and multiple
+- [ ] Connection profiles: endpoint URL, optional API key saved in the local config, and multiple
       saved servers
 - [ ] Version check on connect: refuse servers older than **Stash v0.31.1** with a clear message
 - [ ] TLS: validation off by default, a per-profile setting to turn strict validation on, and a
@@ -48,7 +48,7 @@ Principles III, IV, V, and VII in place before any features are built on it.
 - [ ] CI: `cargo fmt`, `cargo clippy`, the frontend linter, and core unit tests
 
 **Exit criteria:** you can add a server profile, connect, see server info, and play one scene in
-mpv, with no API key visible in the webview or the logs.
+mpv.
 
 **Suggested specs:** `connect-to-stash`, `mpv-playback-spike`
 

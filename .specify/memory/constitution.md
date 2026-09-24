@@ -57,7 +57,7 @@ two diverge, the user loses the ability to use either one safely.
   archetype inheritance, caching — MUST live in Rust crates/modules that have no dependency on
   Tauri, the webview, or the frontend framework.
 - The frontend MUST reach Stash only through typed Tauri commands/events exposed by the Rust
-  core; it MUST NOT issue its own GraphQL requests or hold the API key.
+  core; it MUST NOT issue its own GraphQL requests.
 - Layering inside the core mirrors the plugin: a single Stash adapter owns all network I/O; the
   semantic engine consumes the adapter; the UI consumes the engine. Cross-layer shortcuts are
   violations.
@@ -96,8 +96,7 @@ navigation. Batching and indexing locally is where a native client earns its spe
 - The viewer MUST NOT request Stash's transcoded streams (HLS/DASH/MP4 transcode endpoints) by
   default. Transcoding MAY be used only as an explicit, user-visible fallback when mpv cannot play
   a source, and the fallback MUST be logged.
-- Authentication for streams MUST use the configured API key without leaking it into logs,
-  window titles, or crash reports.
+- Streams MUST authenticate with the profile's configured API key.
 - Playback features that depend on Stash data (resume position, play count, O-counter, markers,
   Timeline slots/Stages as chapters) MUST sync back to Stash per Principle I.
 - Images and image decks MAY render in the webview but MUST use appropriately sized
@@ -126,14 +125,15 @@ and makes low-power Stash hosts viable.
 **Rationale**: "Near-native" is a measurable promise. Budgets make regressions visible and keep
 the experience from sliding back toward a sluggish web page in a window.
 
-### VII. User-Owned Connection & Credential Safety
+### VII. User-Owned Connection
 
 - The user supplies the Stash endpoint URL and optional API key; the viewer MUST work with
   API-key-less instances and with remote (non-LAN, HTTPS) instances. Multiple saved server
   profiles SHOULD be supported.
-- API keys MUST be stored in the OS credential store (Keychain, Windows Credential Manager,
-  Secret Service/libsecret), never in plain-text config, and MUST never be sent to the webview,
-  written to logs, or included in telemetry.
+- The API key is ordinary profile configuration. It is stored with the rest of the profile in the
+  viewer's local config file, and the UI MAY display and edit it. The viewer MUST NOT add OS
+  keyring integration, session-only key modes, or other key-hiding machinery unless this
+  principle is amended.
 - The viewer MUST NOT phone home. Any network destination other than the user's configured Stash
   server(s) requires an explicit feature spec and user opt-in.
 - TLS certificate validation is OFF by default, because typical self-hosted Stash instances use
@@ -143,10 +143,11 @@ the experience from sliding back toward a sluggish web page in a window.
 - Destructive operations against the library (deleting media, bulk tag removal, schema
   migrations) MUST require confirmation and SHOULD be previewable.
 
-**Rationale**: The viewer holds the keys to a private library. Handling credentials and network
-access conservatively is a baseline requirement, not a feature. TLS validation is the one
-deliberate exception: it defaults to off so that connecting to a typical home-lab Stash just
-works, and the connection's security state stays visible to the user.
+**Rationale**: The viewer is a personal client for the user's own Stash server. Protecting the API
+key from the user's own machine isn't a goal. Plain config keeps setup simple and portable, and
+avoids platform-specific keyring failures. TLS validation defaults to off for the same reason:
+connecting to a typical home-lab Stash should just work, while the security state stays visible
+and strict checking stays available per server.
 
 ### VIII. Stash Web UI Feature Parity
 
@@ -181,13 +182,13 @@ marker or run a scraper fails the "Jellyfin-style client" promise.
 - **Application shell**: Tauri (v2 or later) with a Rust backend. Business logic lives in Rust
   per Principle III.
 - **Frontend**: a web UI rendered in the Tauri webview. The specific framework is chosen in the
-  first implementation plan and MUST satisfy Principle VI's budgets; it holds no credentials and
-  performs no direct network I/O.
+  first implementation plan and MUST satisfy Principle VI's budgets; it performs no direct
+  network I/O.
 - **Stash API**: GraphQL only, via a single Rust adapter module. Typed operations (e.g. generated
   from Stash's schema) are preferred over hand-built query strings.
 - **Playback**: mpv/libmpv as the sole default video pipeline (Principle V).
 - **Local persistence**: limited to caches, derived semantic indexes, preferences, and profile
-  metadata (Principle I); credentials only in the OS keyring (Principle VII).
+  profiles, including their API keys (Principles I and VII).
 - **Target platforms**: Linux is the primary development and release platform; Windows and macOS
   SHOULD be supported where Tauri and mpv allow, and platform-specific gaps MUST be documented.
 - **Stash compatibility**: the minimum supported version is **Stash v0.31.1** (latest stable at
@@ -238,4 +239,4 @@ marker or run a scraper fails the "Jellyfin-style client" promise.
   structure, Principle II's parity expectations MUST be re-evaluated and parity work added to the
   backlog.
 
-**Version**: 2.0.0 | **Ratified**: 2026-09-23 | **Last Amended**: 2026-09-23
+**Version**: 3.0.0 | **Ratified**: 2026-09-23 | **Last Amended**: 2026-09-24
