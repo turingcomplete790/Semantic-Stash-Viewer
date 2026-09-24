@@ -1,10 +1,15 @@
 //! Tauri commands (contracts/tauri-commands.md). Each is a thin call into `stash-core`.
 
+use std::time::Duration;
+
 use stash_core::connection::connect::{self, ConnectOptions, TestResult};
-use stash_core::profiles::{service, ProfileDraft, ProfileSummary};
+use stash_core::connection::manager::{ConnectRequest, Target};
+use stash_core::connection::snapshot::{ConnectionSnapshot, SessionState};
+use stash_core::profiles::{service, ProfileDraft, ProfileSummary, ServerProfile};
 use stash_core::AppError;
 use tauri::State;
 use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 
 use crate::state::AppState;
 
@@ -37,7 +42,7 @@ pub async fn test_connection(
     result.map(|outcome| TestResult::from(&outcome))
 }
 
-/// Cancel an in-flight `test_connection` (or `connect`, later). Unknown ids are ignored.
+/// Cancel an in-flight `test_connection` or `connect`. Unknown ids are ignored.
 #[tauri::command]
 #[specta::specta]
 pub fn cancel_request(state: State<'_, AppState>, request_id: String) -> Result<(), AppError> {
@@ -63,6 +68,102 @@ pub async fn create_profile(
     )
     .await?;
     Ok(ProfileSummary::from(&profile))
+}
+
+/// Make a profile active and connect to it. Resolves once the attempt settles (connected,
+/// offline, auth failed, or failed); progress also arrives as `connection-state` events.
+/// Cancellable via `cancel_request`, which returns the session to Idle.
+#[tauri::command]
+#[specta::specta]
+pub async fn connect(
+    state: State<'_, AppState>,
+    profile_id: Uuid,
+    request_id: String,
+) -> Result<ConnectionSnapshot, AppError> {
+    let profile = get_profile(&state, profile_id)?;
+    let mut rx = state.manager.subscribe();
+    let token = register(&state, &request_id)?;
+    start_session(&state, &profile, false);
+
+    // Generous upper bound; the probe itself times out after 15 s.
+    let deadline = tokio::time::sleep(Duration::from_secs(30));
+    tokio::pin!(deadline);
+    let result = loop {
+        tokio::select! {
+            () = token.cancelled() => {
+                state.manager.disconnect();
+                break Err(AppError::Cancelled);
+            }
+            () = &mut deadline => break Ok(state.manager.snapshot()),
+            received = rx.recv() => match received {
+                Ok(s) if s.profile_id == Some(profile_id)
+                    && !matches!(s.state, SessionState::Connecting { .. }) => break Ok(s),
+                Ok(_) => {}
+                Err(_) => break Ok(state.manager.snapshot()),
+            },
+        }
+    };
+    unregister(&state, &request_id);
+    result
+}
+
+/// End the session (Idle).
+#[tauri::command]
+#[specta::specta]
+pub fn disconnect(state: State<'_, AppState>) {
+    state.manager.disconnect();
+}
+
+/// Current connection state, for UI hydration on window load.
+#[tauri::command]
+#[specta::specta]
+pub fn get_connection_snapshot(state: State<'_, AppState>) -> ConnectionSnapshot {
+    state.manager.snapshot()
+}
+
+/// Update a profile from a full draft (FR-013). The new settings are checked first; with
+/// `force`, they are saved even if the check fails. If the profile is active, the session
+/// reconnects with the new settings.
+#[tauri::command]
+#[specta::specta]
+pub async fn update_profile(
+    state: State<'_, AppState>,
+    profile_id: Uuid,
+    draft: ProfileDraft,
+    force: bool,
+) -> Result<ProfileSummary, AppError> {
+    let updated = service::update_profile(
+        &state.profiles,
+        profile_id,
+        &draft,
+        force,
+        &CancellationToken::new(),
+        ConnectOptions::default(),
+    )
+    .await?;
+    if state.manager.active_profile_id() == Some(profile_id) {
+        start_session(&state, &updated, false);
+    }
+    Ok(ProfileSummary::from(&updated))
+}
+
+/// Start a session for a profile (also used for auto-connect at launch).
+pub fn start_session(state: &AppState, profile: &ServerProfile, is_launch: bool) {
+    state.manager.connect(ConnectRequest {
+        target: Target::from(profile),
+        is_launch,
+        has_connected_before: profile.last_used_at.is_some(),
+    });
+}
+
+fn get_profile(state: &AppState, id: Uuid) -> Result<ServerProfile, AppError> {
+    state
+        .profiles
+        .lock()
+        .map_err(lock_err)?
+        .get(id)
+        .cloned()
+        .ok_or(AppError::ProfileNotFound { id })
 }
 
 fn register(state: &AppState, request_id: &str) -> Result<CancellationToken, AppError> {

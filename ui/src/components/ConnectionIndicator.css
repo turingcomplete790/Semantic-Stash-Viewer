@@ -1,0 +1,41 @@
+.conn-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+}
+
+.conn-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.conn-connected .conn-dot {
+  background: var(--ok);
+}
+
+.conn-connecting .conn-dot,
+.conn-offline .conn-dot {
+  background: var(--warn);
+}
+
+.conn-authFailed .conn-dot,
+.conn-failed .conn-dot {
+  background: var(--danger);
+}
+
+.conn-detail,
+.conn-profile {
+  color: var(--muted);
+}
+
+.conn-profile::before {
+  content: "· ";
+}
+
+.conn-action {
+  padding: 3px 10px;
+  font-size: 0.85rem;
+}

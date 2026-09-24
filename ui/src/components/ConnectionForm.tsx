@@ -1,6 +1,7 @@
 import { createSignal, Match, Show, Switch } from "solid-js";
 import { commands } from "../bindings";
 import type { AppError, ProfileDraft, ProfileSummary, TestResult } from "../bindings";
+import { newRequestId } from "../lib/requestId";
 import { appErrorMessage } from "../messages/failures";
 import ServerSummary from "./ServerSummary";
 import "./ConnectionForm.css";
@@ -11,12 +12,6 @@ type Phase =
   | { kind: "failed"; error: AppError }
   | { kind: "connected"; result: TestResult }
   | { kind: "saving"; result: TestResult };
-
-let requestCounter = 0;
-function newRequestId(): string {
-  requestCounter += 1;
-  return globalThis.crypto?.randomUUID?.() ?? `req-${Date.now()}-${requestCounter}`;
-}
 
 /** First-run / add-server screen (US1): address + optional API key → check → save. */
 export default function ConnectionForm(props: {

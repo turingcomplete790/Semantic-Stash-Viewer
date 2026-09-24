@@ -121,14 +121,20 @@ async fn try_candidates(
 
 /// Apply the version gate and build the outcome.
 fn accept(data: ProbeData) -> Result<ConnectOutcome, AppError> {
-    let version_status = version::check(data.version.as_deref(), data.app_schema, &data.status)?;
+    let server = server_info(&data)?;
     Ok(ConnectOutcome {
         base_url: data.final_base_url,
-        server: ServerInfo {
-            version: data.version.unwrap_or_else(|| "unknown".into()),
-            version_status,
-            app_schema: i32::try_from(data.app_schema).unwrap_or(i32::MAX),
-            counts: data.counts,
-        },
+        server,
+    })
+}
+
+/// Apply the version gate to probe data (shared with the connection manager's re-probe).
+pub(crate) fn server_info(data: &ProbeData) -> Result<ServerInfo, ConnectFailure> {
+    let version_status = version::check(data.version.as_deref(), data.app_schema, &data.status)?;
+    Ok(ServerInfo {
+        version: data.version.clone().unwrap_or_else(|| "unknown".into()),
+        version_status,
+        app_schema: i32::try_from(data.app_schema).unwrap_or(i32::MAX),
+        counts: data.counts,
     })
 }

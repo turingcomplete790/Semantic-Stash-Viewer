@@ -3,6 +3,8 @@
 pub mod address;
 pub mod connect;
 pub mod failure;
+pub mod manager;
+pub mod snapshot;
 pub mod version;
 
 use serde::Serialize;

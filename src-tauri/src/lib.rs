@@ -2,13 +2,14 @@
 //! No domain logic lives here (constitution Principle III).
 
 mod commands;
+mod events;
 mod logging;
 mod state;
 
 use std::path::PathBuf;
 
 use tauri::Manager;
-use tauri_specta::{collect_commands, Builder};
+use tauri_specta::{collect_commands, collect_events, Builder};
 
 use state::AppState;
 
@@ -20,12 +21,18 @@ pub const BINDINGS_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../ui/src/
 
 /// Every command and event exposed to the UI. Shared by the app and the `export-bindings` bin.
 pub fn specta_builder() -> Builder<tauri::Wry> {
-    Builder::<tauri::Wry>::new().commands(collect_commands![
-        commands::list_profiles,
-        commands::test_connection,
-        commands::cancel_request,
-        commands::create_profile,
-    ])
+    Builder::<tauri::Wry>::new()
+        .commands(collect_commands![
+            commands::list_profiles,
+            commands::test_connection,
+            commands::cancel_request,
+            commands::create_profile,
+            commands::update_profile,
+            commands::connect,
+            commands::disconnect,
+            commands::get_connection_snapshot,
+        ])
+        .events(collect_events![events::ConnectionStateEvent])
 }
 
 /// Write `ui/src/bindings.ts`.
@@ -56,10 +63,25 @@ pub fn run() {
             app.manage(log_guard);
 
             let config_dir: PathBuf = app.path().config_dir()?.join(APP_DIR);
-            let state = AppState::open(&config_dir.join("profiles.json"))?;
+            let runtime = tauri::async_runtime::handle().inner().clone();
+            let state = AppState::open(&config_dir.join("profiles.json"), runtime)?;
+            events::forward_connection_state(app.handle().clone(), &state.manager);
+            auto_connect(&state);
             app.manage(state);
             Ok(())
         })
         .run(tauri::generate_context!())
         .expect("error while running Semantic Stash Viewer");
+}
+
+/// Reconnect to the last-used profile at launch without blocking window creation (FR-014).
+fn auto_connect(state: &AppState) {
+    let last = state.profiles.lock().ok().and_then(|store| {
+        let id = store.last_used_profile_id()?;
+        store.get(id).cloned()
+    });
+    if let Some(profile) = last {
+        tracing::info!(id = %profile.id, "auto-connecting to last-used profile");
+        commands::start_session(state, &profile, true);
+    }
 }

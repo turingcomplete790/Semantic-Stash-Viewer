@@ -210,6 +210,10 @@ galleries / 542 performers) with `curl`. Everything else is a design decision.
     unparseable cases), state-machine transitions with a fake clock, and the probe
     classification. Network fixtures are replayed through `wiremock` using responses captured
     from the local v0.31.1 server, including the observed `401 FormBased` case.
+  - `ConnectionManager` takes a `Prober` trait. Its state-machine tests use a scripted fake with
+    paused tokio time, not wiremock: with real sockets, paused time auto-advances past reqwest's
+    timeouts. The real HTTP path stays covered by the probe tests. *(Decided during
+    implementation.)*
   - An integration test (`#[ignore]`, opt-in through `STASH_TEST_URL`) runs against a real Stash.
   - A persistence test (SC-004) saves a profile with a key, reopens the store from the same
     file, and checks the key and settings come back unchanged.

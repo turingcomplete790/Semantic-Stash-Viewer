@@ -1,18 +1,19 @@
-import type { ProfileSummary, TestResult } from "../bindings";
+import type { ServerInfo } from "../bindings";
 import ServerSummary from "./ServerSummary";
 import "./ConnectionForm.css";
 
 /** Minimal "connected" view for the MVP: which server, its version, and library counts. */
 export default function ConnectedSummary(props: {
-  profile: ProfileSummary;
-  result: TestResult;
+  name: string;
+  url: string;
+  server: ServerInfo;
   onAddAnother: () => void;
 }) {
   return (
     <section class="connect-card" aria-labelledby="connected-title">
-      <h1 id="connected-title">Connected to {props.profile.displayName}</h1>
-      <p class="lede">Saved. The viewer will use this server next time you open it.</p>
-      <ServerSummary url={props.result.normalizedUrl} server={props.result.server} />
+      <h1 id="connected-title">Connected to {props.name}</h1>
+      <p class="lede">The viewer reconnects to this server automatically when it starts.</p>
+      <ServerSummary url={props.url} server={props.server} />
       <div class="actions" style={{ "margin-top": "18px" }}>
         <button type="button" onClick={() => props.onAddAnother()}>
           Connect to another server

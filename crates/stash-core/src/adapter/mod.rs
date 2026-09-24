@@ -1,6 +1,7 @@
 //! The Stash adapter: the **only** module in the workspace allowed to make network calls
 //! (constitution Principle III). Everything else reaches Stash through `StashClient`.
 
+pub mod health;
 pub mod probe;
 
 use std::error::Error as _;
