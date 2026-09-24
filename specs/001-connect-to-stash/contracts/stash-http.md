@@ -11,9 +11,14 @@ Check (Principle IV).
 - Header `ApiKey: <key>` when the profile has a key. The key is never put in a query string.
 - No cookies or session login (API-key-only, spec Assumptions).
 
-## 1. Connect probe: `POST {base}/graphql`
+## 1. Connect probe: `GET {base}/healthz`, then `POST {base}/graphql`
 
-One round trip gets the server's identity, version, readiness, and library summary.
+First, an unauthenticated `GET {base}/healthz` follows any redirects to find the final base URL.
+This is needed because reqwest (like browsers) turns a POST into a GET when following a 301 or
+302, which would break the GraphQL request behind a typical http→https redirect. A non-2xx answer
+here isn't a failure; the POST decides whether it's Stash. *(Added during implementation.)*
+
+Then one GraphQL round trip gets the server's identity, version, readiness, and library summary.
 
 ```graphql
 query ConnectProbe {
@@ -41,8 +46,8 @@ query ConnectProbe {
 | No response within the overall 15 s budget | `Timeout` |
 | Anything else | `NotStash(status)` |
 
-**Requests per connect**: 1 (2 for a key sent to a server without auth; ×2 candidates when the
-address had no scheme and https fails).
+**Requests per connect**: 2 (`/healthz` + the probe); 3 for a key sent to a server without auth;
+×2 candidates when the address had no scheme and https fails.
 
 ## 2. Health check: `GET {base}/healthz`
 

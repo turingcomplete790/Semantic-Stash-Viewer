@@ -1,0 +1,32 @@
+[package]
+name = "semantic-stash-viewer"
+description = "Semantic Stash Viewer desktop app (Tauri shell)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+default-run = "semantic-stash-viewer"
+
+[lib]
+name = "semantic_stash_viewer"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+stash-core = { path = "../crates/stash-core", features = ["specta"] }
+tauri = { version = "2", features = [] }
+tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
+specta = { workspace = true }
+specta-typescript = "0.0.12"
+tokio = { workspace = true }
+tokio-util = "0.7"
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+
+[lints]
+workspace = true

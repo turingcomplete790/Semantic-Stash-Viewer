@@ -2,10 +2,17 @@
 /target/
 /src-tauri/target/
 /src-tauri/gen/
+*.rs.bk
 
 # Frontend
 node_modules/
 /dist/
+/ui/dist/
+coverage/
+
+# Logs and local env
+*.log
+.env*
 
 # Local Claude Code settings
 .claude/settings.local.json
@@ -14,3 +21,6 @@ node_modules/
 .vscode/
 .idea/
 .DS_Store
+Thumbs.db
+*.swp
+*.tmp
