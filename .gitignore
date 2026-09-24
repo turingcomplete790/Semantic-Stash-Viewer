@@ -1,0 +1,16 @@
+# Rust / Tauri
+/target/
+/src-tauri/target/
+/src-tauri/gen/
+
+# Frontend
+node_modules/
+/dist/
+
+# Local Claude Code settings
+.claude/settings.local.json
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
