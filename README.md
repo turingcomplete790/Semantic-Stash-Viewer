@@ -46,8 +46,9 @@ This project uses spec-driven development. Features go through:
 /speckit-specify → /speckit-plan → /speckit-tasks → /speckit-implement
 ```
 
-Every plan must pass the constitution's checks. Build instructions will be added here once the
-first feature is implemented.
+Every plan must pass the constitution's checks. The order features are built in is set out in
+the [roadmap](ROADMAP.md). Build instructions will be added here once the first feature is
+implemented.
 
 ## Related
 
