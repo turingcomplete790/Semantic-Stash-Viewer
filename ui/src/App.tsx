@@ -1,4 +1,4 @@
-import { createSignal, Match, onMount, Show, Switch, type JSX } from "solid-js";
+import { createEffect, createSignal, Match, onMount, Show, Switch, type JSX } from "solid-js";
 import { commands } from "./bindings";
 import ConnectionForm from "./components/ConnectionForm";
 import ConnectionIndicator from "./components/ConnectionIndicator";
@@ -6,6 +6,8 @@ import KeyPrompt from "./components/KeyPrompt";
 import ProfileManager from "./components/ProfileManager";
 import ProfilePicker from "./components/ProfilePicker";
 import SessionView from "./components/SessionView";
+import PlayerScreen from "./player/PlayerScreen";
+import { initPlayer } from "./player/state";
 import { newRequestId } from "./lib/requestId";
 import { connection, initConnection, refreshProfiles } from "./state/connection";
 import "./App.css";
@@ -22,10 +24,17 @@ export default function App() {
   const [adding, setAdding] = createSignal(false);
   const [managerOpen, setManagerOpen] = createSignal(false);
   const [keyPromptOpen, setKeyPromptOpen] = createSignal(false);
+  const [playerOpen, setPlayerOpen] = createSignal(false);
 
   onMount(() => {
     void initConnection();
     void refreshProfiles();
+    void initPlayer();
+  });
+
+  // Leaving the server closes the player screen (the core stops playback itself, FR-007).
+  createEffect(() => {
+    if (connection.snapshot().profileId === null) setPlayerOpen(false);
   });
 
   const hasProfiles = () => connection.profiles().length > 0;
@@ -52,6 +61,9 @@ export default function App() {
   return (
     <AppLayout indicator={indicator}>
       <Switch>
+        <Match when={playerOpen() && !noActive()}>
+          <PlayerScreen onExit={() => setPlayerOpen(false)} />
+        </Match>
         <Match when={adding() || (noActive() && !hasProfiles())}>
           <div class="stack">
             <Show when={adding() && hasProfiles()}>
@@ -81,6 +93,7 @@ export default function App() {
               if (id) connectTo(id);
             }}
             onUpdateKey={() => setKeyPromptOpen(true)}
+            onOpenPlayer={() => setPlayerOpen(true)}
           />
         </Match>
       </Switch>

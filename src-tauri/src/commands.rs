@@ -114,6 +114,7 @@ pub async fn connect(
 #[tauri::command]
 #[specta::specta]
 pub fn disconnect(state: State<'_, AppState>) {
+    stop_playback(&state);
     state.manager.disconnect();
 }
 
@@ -162,6 +163,7 @@ pub fn delete_profile(
 ) -> Result<(), AppError> {
     service::delete_profile(&state.profiles, profile_id)?;
     if state.manager.active_profile_id() == Some(profile_id) {
+        stop_playback(&state);
         state.manager.disconnect();
     }
     emit_profiles_changed(&app, &state);
@@ -183,11 +185,19 @@ pub fn reorder_profiles(
 
 /// Start a session for a profile (also used for auto-connect at launch).
 pub fn start_session(state: &AppState, profile: &ServerProfile, is_launch: bool) {
+    stop_playback(state);
     state.manager.connect(ConnectRequest {
         target: Target::from(profile),
         is_launch,
         has_connected_before: profile.last_used_at.is_some(),
     });
+}
+
+/// Stop any playback when the server changes or goes away (FR-007).
+fn stop_playback(state: &AppState) {
+    if let Some(player) = &state.player {
+        player.close();
+    }
 }
 
 fn get_profile(state: &AppState, id: Uuid) -> Result<ServerProfile, AppError> {

@@ -86,6 +86,17 @@ export function appErrorMessage(error: AppError): FailureMessage {
       return connectFailureMessage(error.failure);
     case "invalidDisplayName":
       return { title: "That name can't be used", detail: `The display name ${error.reason}.` };
+    case "sceneNotFound":
+      return {
+        title: "That scene doesn't exist",
+        detail: `The server has no scene with ID ${error.id}.`,
+        hint: "Check the ID, or pick a scene from the list.",
+      };
+    case "noPlayableFile":
+      return {
+        title: "This scene has no video file",
+        detail: `Scene ${error.id} has no file the player can open.`,
+      };
     case "profileNotFound":
       return {
         title: "That profile no longer exists",

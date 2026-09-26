@@ -3,8 +3,12 @@
 
 pub mod health;
 pub mod probe;
+pub mod scenes;
 
 use std::error::Error as _;
+
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 use std::time::Duration;
 
 use url::Url;
@@ -98,6 +102,48 @@ impl StashClient {
     /// Start a GET to `{base}/{path}` without authentication.
     pub(crate) fn get(&self, path: &str) -> reqwest::RequestBuilder {
         self.http.get(self.endpoint(path))
+    }
+
+    /// Send a typed GraphQL operation (with the API key) and return its `data`.
+    ///
+    /// Transport failures and 401s map to connection failures; GraphQL errors and missing
+    /// `data` map to `AppError::Internal` with Stash's message.
+    pub(crate) async fn graphql<Q: Serialize, R: DeserializeOwned>(
+        &self,
+        body: &Q,
+    ) -> Result<R, AppError> {
+        let response = self
+            .graphql_request(true)
+            .json(body)
+            .send()
+            .await
+            .map_err(|e| AppError::from(self.classify_transport_error(&e)))?;
+        let status = response.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(if self.has_api_key() {
+                ConnectFailure::ApiKeyRejected
+            } else {
+                ConnectFailure::ApiKeyRequired
+            }
+            .into());
+        }
+        if !status.is_success() {
+            return Err(AppError::Internal {
+                message: format!("Stash answered HTTP {}", status.as_u16()),
+            });
+        }
+        let parsed: graphql_client::Response<R> =
+            response.json().await.map_err(|e| AppError::Internal {
+                message: format!("unexpected response from Stash: {e}"),
+            })?;
+        if let Some(error) = parsed.errors.as_ref().and_then(|errors| errors.first()) {
+            return Err(AppError::Internal {
+                message: format!("Stash reported an error: {}", error.message),
+            });
+        }
+        parsed.data.ok_or_else(|| AppError::Internal {
+            message: "Stash returned no data".into(),
+        })
     }
 
     /// Classify a transport-level error (no HTTP response was received).

@@ -4,9 +4,15 @@
 mod commands;
 mod events;
 mod logging;
+mod player_commands;
 mod state;
+#[cfg(target_os = "linux")]
+mod video_surface;
 
 use std::path::PathBuf;
+use std::sync::Arc;
+
+use player::{Player, PlayerConfig};
 
 use tauri::Manager;
 use tauri_specta::{collect_commands, collect_events, Builder};
@@ -33,10 +39,15 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::connect,
             commands::disconnect,
             commands::get_connection_snapshot,
+            player_commands::player_snapshot,
+            player_commands::list_recent_scenes,
+            player_commands::player_open,
+            player_commands::player_close,
         ])
         .events(collect_events![
             events::ConnectionStateEvent,
-            events::ProfilesChangedEvent
+            events::ProfilesChangedEvent,
+            player_commands::PlayerStateEvent
         ])
 }
 
@@ -69,7 +80,8 @@ pub fn run() {
 
             let config_dir: PathBuf = app.path().config_dir()?.join(APP_DIR);
             let runtime = tauri::async_runtime::handle().inner().clone();
-            let state = AppState::open(&config_dir.join("profiles.json"), runtime)?;
+            let player = start_player(app);
+            let state = AppState::open(&config_dir.join("profiles.json"), runtime, player)?;
             events::forward_connection_state(
                 app.handle().clone(),
                 &state.manager,
@@ -93,4 +105,29 @@ fn auto_connect(state: &AppState) {
         tracing::info!(id = %profile.id, "auto-connecting to last-used profile");
         commands::start_session(state, &profile, true);
     }
+}
+
+/// Start mpv (render mode) and host its video under the webview. Playback is optional: if
+/// libmpv or the video surface fails, the app keeps working without it.
+fn start_player(app: &tauri::App) -> Option<Arc<Player>> {
+    let player = match Player::new(PlayerConfig::render()) {
+        Ok(player) => Arc::new(player),
+        Err(e) => {
+            tracing::error!(error = %e, "video player unavailable");
+            return None;
+        }
+    };
+    player_commands::forward_player_state(app.handle().clone(), &player);
+
+    #[cfg(target_os = "linux")]
+    match app.get_webview_window("main") {
+        Some(window) => {
+            if let Err(e) = video_surface::install(&window, Arc::clone(&player)) {
+                tracing::error!(error = %e, "could not install the video surface");
+            }
+        }
+        None => tracing::error!("main window not found; no video surface"),
+    }
+
+    Some(player)
 }

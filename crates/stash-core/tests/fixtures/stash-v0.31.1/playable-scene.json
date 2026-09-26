@@ -1,0 +1,22 @@
+{
+ "data": {
+  "findScene": {
+   "id": "1",
+   "title": "",
+   "files": [
+    {
+     "basename": "scene-a.mp4",
+     "duration": 4653.48,
+     "width": 960,
+     "height": 640,
+     "video_codec": "h264",
+     "audio_codec": "aac",
+     "format": "mp4",
+     "frame_rate": 24,
+     "bit_rate": 2650500,
+     "size": 1541757510
+    }
+   ]
+  }
+ }
+}

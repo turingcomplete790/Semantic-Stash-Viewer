@@ -88,6 +88,11 @@ Tauri 2.11.6 (tauri-runtime-wry 2.11.4, wry 0.55.1, webkit2gtk crate 2.0.2).
   VA-API → EGL interop. If it's unavailable for a codec, mpv decodes in software (FR-005); the
   `hwdec-current` property says which one is active.
 
+- **Locale (found during implementation)**: `mpv_create` returns NULL unless `LC_NUMERIC` is
+  `"C"`. GTK sets the process locale from the environment (`en_US.UTF-8` here), so the app must
+  reset `LC_NUMERIC` to `"C"` right before creating mpv. Headless tests don't initialise GTK
+  and never hit this. `player::Player::new` does it.
+
 ## R5. Render loop and threading
 
 - **Decision**:

@@ -41,11 +41,20 @@ export const commands = {
 	disconnect: () => __TAURI_INVOKE<void>("disconnect"),
 	/**  Current connection state, for UI hydration on window load. */
 	getConnectionSnapshot: () => __TAURI_INVOKE<ConnectionSnapshot>("get_connection_snapshot"),
+	/**  Current player state, for UI hydration. */
+	playerSnapshot: () => typedError<PlayerSnapshot, AppError>(__TAURI_INVOKE("player_snapshot")),
+	/**  The 20 most recently added scenes on the active server (FR-001). */
+	listRecentScenes: () => typedError<SceneListItem[], AppError>(__TAURI_INVOKE("list_recent_scenes")),
+	/**  Look up a scene and start playing its direct stream (FR-001, FR-003, FR-004). */
+	playerOpen: (sceneId: string) => typedError<PlayerSnapshot, AppError>(__TAURI_INVOKE("player_open", { sceneId })),
+	/**  Stop playback and release audio/video (FR-007). */
+	playerClose: () => typedError<null, AppError>(__TAURI_INVOKE("player_close")),
 };
 
 /** Events */
 export const events = {
 	connectionState: makeEvent<ConnectionStateEvent>("connection-state"),
+	playerState: makeEvent<PlayerStateEvent>("player-state"),
 	profilesChanged: makeEvent<ProfilesChangedEvent>("profiles-changed"),
 };
 
@@ -57,6 +66,10 @@ export const events = {
 export type AppError = { kind: "connect"; failure: ConnectFailure } | 
 /**  The display name is empty after trimming, or longer than 64 characters. */
 { kind: "invalidDisplayName"; reason: string } | { kind: "profileNotFound"; id: string } | 
+/**  Stash has no scene with this id. */
+{ kind: "sceneNotFound"; id: string } | 
+/**  The scene exists but has no file to play. */
+{ kind: "noPlayableFile"; id: string } | 
 /**
  *  `profiles.json` has a newer schema version than this build understands. It is left
  *  untouched rather than overwritten.
@@ -118,6 +131,40 @@ export type LibraryCounts = {
 	performers: number,
 };
 
+export type PlayerError = { kind: "notConnected" } | { kind: "sceneNotFound" } | { kind: "noPlayableFile" } | 
+/**  The stream couldn't be opened (network error, 401/403, 404). */
+{ kind: "streamUnreachable" } | 
+/**  mpv couldn't decode the file. */
+{ kind: "unsupportedFormat" } | { kind: "playbackFailed"; detail: string };
+
+export type PlayerSnapshot = {
+	sceneId: string | null,
+	title: string | null,
+	state: PlayerStateKind,
+	positionSeconds: number | null,
+	durationSeconds: number | null,
+	paused: boolean,
+	/**  0.25–4.0. */
+	speed: number | null,
+	/**  0–100. */
+	volume: number | null,
+	muted: boolean,
+	fullscreen: boolean,
+	/**  mpv `hwdec-current`, e.g. `vaapi`, or `no` for software decoding. */
+	hwdec: string | null,
+	/**  Embedded tracks (FR-014); read-only in the spike. */
+	tracks: Track[],
+	error: PlayerError | null,
+};
+
+/**  Emitted on every player state change; position updates are throttled to ~4/s. */
+export type PlayerStateEvent = PlayerSnapshot;
+
+/**  Player state (data-model.md "PlayerState and transitions"). */
+export type PlayerStateKind = "idle" | "loading" | "playing" | "paused" | 
+/**  End of file reached; the last frame stays up with a replay option (FR-015). */
+"ended" | "error";
+
 /**  What the connection form submits for `test_connection`, `create_profile`, `update_profile`. */
 export type ProfileDraft = {
 	displayName?: string | null,
@@ -141,6 +188,18 @@ export type ProfileSummary = {
 
 /**  Emitted after every profile create, update, delete, or reorder, with the full list. */
 export type ProfilesChangedEvent = ProfileSummary[];
+
+/**  One row of the "recently added" picker. */
+export type SceneListItem = {
+	id: string,
+	/**  The scene title, or the primary file's basename when the title is empty. */
+	title: string,
+	durationSeconds: number | null,
+	/**  `width×height`, e.g. `1920×1080`. */
+	resolution: string | null,
+	videoCodec: string | null,
+	container: string | null,
+};
 
 /**  How secure the current connection is, shown in the connection indicator at all times. */
 export type SecurityState = 
@@ -174,6 +233,19 @@ export type TestResult = {
 	security: SecurityState,
 	server: ServerInfo,
 };
+
+export type Track = {
+	/**  mpv's per-kind track id (`track-list/N/id`); small, so `i32` (TypeScript-safe). */
+	id: number,
+	kind: TrackKind,
+	title: string | null,
+	language: string | null,
+	codec: string | null,
+	default: boolean,
+	external: boolean,
+};
+
+export type TrackKind = "video" | "audio" | "subtitle";
 
 /**  How confident we are that the server is compatible. */
 export type VersionStatus = 

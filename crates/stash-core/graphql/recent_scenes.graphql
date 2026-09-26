@@ -1,0 +1,18 @@
+# The 20 most recently added scenes, for the player's scene picker (FR-001).
+# Only what the list shows (constitution Principle IV).
+query RecentScenes {
+  findScenes(filter: { per_page: 20, sort: "created_at", direction: DESC }) {
+    scenes {
+      id
+      title
+      files {
+        basename
+        duration
+        width
+        height
+        video_codec
+        format
+      }
+    }
+  }
+}

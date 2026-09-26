@@ -25,6 +25,14 @@ pub enum AppError {
     #[error("no profile with id {id}")]
     ProfileNotFound { id: Uuid },
 
+    /// Stash has no scene with this id.
+    #[error("no scene with id {id}")]
+    SceneNotFound { id: String },
+
+    /// The scene exists but has no file to play.
+    #[error("scene {id} has no playable file")]
+    NoPlayableFile { id: String },
+
     /// `profiles.json` has a newer schema version than this build understands. It is left
     /// untouched rather than overwritten.
     #[error("profiles.json has unsupported version {found}")]
