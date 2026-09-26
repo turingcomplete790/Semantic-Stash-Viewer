@@ -30,14 +30,14 @@ from Phases 0–2. Parts of Phase 3 (scrapers, tasks) can run alongside Phase 4 
 **Goal:** a Tauri app that connects to a real Stash server, with the architecture from
 Principles III, IV, V, and VII in place before any features are built on it.
 
-- [ ] Project scaffold: Tauri v2 workspace, a headless Rust core crate that doesn't depend on
+- [x] Project scaffold: Tauri v2 workspace, a headless Rust core crate that doesn't depend on
       Tauri (Principle III), and a frontend with its framework chosen and justified
-- [ ] Stash adapter: one Rust module owning all GraphQL I/O, with typed operations generated from
+- [x] Stash adapter: one Rust module owning all GraphQL I/O, with typed operations generated from
       Stash's schema and recorded fixtures for tests
-- [ ] Connection profiles: endpoint URL, optional API key saved in the local config, and multiple
+- [x] Connection profiles: endpoint URL, optional API key saved in the local config, and multiple
       saved servers
-- [ ] Version check on connect: refuse servers older than **Stash v0.31.1** with a clear message
-- [ ] TLS: validation off by default, a per-profile setting to turn strict validation on, and a
+- [x] Version check on connect: refuse servers older than **Stash v0.31.1** with a clear message
+- [x] TLS: validation off by default, a per-profile setting to turn strict validation on, and a
       connection-security indicator (unencrypted / unverified / verified)
 - [ ] Cache layer: discardable local cache, mutation-driven invalidation, and a manual "clear
       cache" control
@@ -50,7 +50,8 @@ Principles III, IV, V, and VII in place before any features are built on it.
 **Exit criteria:** you can add a server profile, connect, see server info, and play one scene in
 mpv.
 
-**Suggested specs:** `connect-to-stash`, `mpv-playback-spike`
+**Suggested specs:** `connect-to-stash` (done: [specs/001-connect-to-stash](specs/001-connect-to-stash/)),
+`mpv-playback-spike`
 
 ---
 

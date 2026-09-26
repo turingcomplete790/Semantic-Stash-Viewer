@@ -175,12 +175,12 @@ shell), and `ui/` (SolidJS + TypeScript).
 
 ## Phase 7: Polish & Cross-Cutting Concerns
 
-- [ ] T056 [P] Add the opt-in live integration test in `crates/stash-core/tests/live_stash.rs` (`#[ignore]`, reads `STASH_TEST_URL` and optional `STASH_TEST_API_KEY` from the environment): test the connection, assert the version is ≥ v0.31.1 and the counts are > 0
-- [ ] T057 [P] Set the window title to "Semantic Stash Viewer — {display name}" in `src-tauri/src/events.rs` on connect
-- [ ] T058 [P] Keyboard accessibility pass on `ui/src/components/ConnectionForm.tsx`, `ConnectionIndicator.tsx`, `ConnectionDetails.tsx`, `ProfileManager.tsx`, and `KeyPrompt.tsx`: tab order, Enter submits, Esc closes popovers and dialogs, visible focus (Principle VI)
-- [ ] T059 Measure the relaunch-to-connected time (SC-002, ≤ 2 s) and the offline detection time (SC-005, ≤ 10 s) against the local Stash, and record the results in `specs/001-connect-to-stash/quickstart.md` under a new "Measured results" section
-- [ ] T060 Update `README.md` Development section with the prerequisites (Tauri CLI, `libwebkit2gtk-4.1`), `cargo tauri dev`, and the test commands from [quickstart.md](quickstart.md#automated-checks)
-- [ ] T061 Run every scenario in [quickstart.md](quickstart.md) (V1–V9), and tick off the matching items in `ROADMAP.md` Phase 0 ("Connection profiles", "Version check on connect", "TLS")
+- [X] T056 [P] Add the opt-in live integration test in `crates/stash-core/tests/live_stash.rs` (`#[ignore]`, reads `STASH_TEST_URL` and optional `STASH_TEST_API_KEY` from the environment): test the connection, assert the version is ≥ v0.31.1 and the counts are > 0
+- [X] T057 [P] Set the window title to "Semantic Stash Viewer — {display name}" in `src-tauri/src/events.rs` on connect
+- [X] T058 [P] Keyboard accessibility pass on `ui/src/components/ConnectionForm.tsx`, `ConnectionIndicator.tsx`, `ConnectionDetails.tsx`, `ProfileManager.tsx`, and `KeyPrompt.tsx`: tab order, Enter submits, Esc closes popovers and dialogs, visible focus (Principle VI)
+- [X] T059 Measure the relaunch-to-connected time (SC-002, ≤ 2 s) and the offline detection time (SC-005, ≤ 10 s) against the local Stash, and record the results in `specs/001-connect-to-stash/quickstart.md` under a new "Measured results" section
+- [X] T060 Update `README.md` Development section with the prerequisites (Tauri CLI, `libwebkit2gtk-4.1`), `cargo tauri dev`, and the test commands from [quickstart.md](quickstart.md#automated-checks)
+- [X] T061 Run every scenario in [quickstart.md](quickstart.md) (V1–V9), and tick off the matching items in `ROADMAP.md` Phase 0 ("Connection profiles", "Version check on connect", "TLS")
 
 ---
 

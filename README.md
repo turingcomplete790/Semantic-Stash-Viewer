@@ -5,7 +5,9 @@ A fast, native desktop client for [Stash](https://github.com/stashapp/stash), bu
 one, and browse and play your library the way Jellyfin desktop clients work with a Jellyfin
 server.
 
-> **Status:** pre-alpha. Nothing is implemented yet. The project is being specified with
+> **Status:** pre-alpha. The first feature works: connecting to Stash servers, saved server
+> profiles, automatic reconnection, and a connection-security indicator. Browsing and playback
+> come next (see the [roadmap](ROADMAP.md)). The project is specified with
 > [Spec Kit](https://github.com/github/spec-kit), and its governing rules live in the
 > [constitution](.specify/memory/constitution.md).
 
@@ -40,15 +42,57 @@ server.
 
 ## Development
 
-This project uses spec-driven development. Features go through:
+### Prerequisites
+
+- Rust 1.80 or newer, Node 20 or newer, npm
+- Tauri CLI v2: `cargo install tauri-cli --version "^2"`
+- Linux: the WebKitGTK 4.1 development package (for example `libwebkit2gtk-4.1-dev` on
+  Debian/Ubuntu, `webkit2gtk-4.1` on Arch/Manjaro)
+
+### Run
+
+```bash
+npm --prefix ui install
+cargo tauri dev
+```
+
+Saved server profiles, including their API keys, live in
+`~/.config/semantic-stash-viewer/profiles.json`. Logs go to
+`~/.local/share/semantic-stash-viewer/logs/`.
+
+### Layout
+
+| Path | What |
+|---|---|
+| `crates/stash-core/` | Headless Rust core: the only code that talks to Stash, plus connection and profile logic. Never depends on Tauri. |
+| `src-tauri/` | Thin Tauri shell: typed commands and events over `stash-core` |
+| `ui/` | SolidJS + TypeScript frontend. `ui/src/bindings.ts` is generated from Rust. |
+| `specs/` | Spec Kit feature specs, plans, and task lists |
+
+### Checks
+
+```bash
+cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+npm --prefix ui run lint && npm --prefix ui run typecheck && npm --prefix ui test
+
+# Opt-in test against a real Stash (use a disposable instance)
+STASH_TEST_URL=http://localhost:9998 cargo test -p stash-core --test live_stash -- --ignored
+
+# Regenerate ui/src/bindings.ts after changing a command or DTO (CI fails on drift)
+cargo run -p semantic-stash-viewer --bin export-bindings
+```
+
+### Workflow
+
+Features go through Spec Kit:
 
 ```text
 /speckit-specify → /speckit-plan → /speckit-tasks → /speckit-implement
 ```
 
 Every plan must pass the constitution's checks. The order features are built in is set out in
-the [roadmap](ROADMAP.md). Build instructions will be added here once the first feature is
-implemented.
+the [roadmap](ROADMAP.md).
 
 ## Related
 

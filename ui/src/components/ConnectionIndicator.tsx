@@ -14,6 +14,11 @@ export default function ConnectionIndicator(props: {
   const state = () => connection.snapshot().state;
   const security = () => connection.snapshot().security;
   const [detailsOpen, setDetailsOpen] = createSignal(false);
+  let securityButton: HTMLButtonElement | undefined;
+  const closeDetails = (viaKeyboard?: boolean) => {
+    setDetailsOpen(false);
+    if (viaKeyboard) securityButton?.focus();
+  };
 
   // Ticks once a second so the offline countdown stays current.
   const [now, setNow] = createSignal(Date.now());
@@ -64,6 +69,7 @@ export default function ConnectionIndicator(props: {
 
       <Show when={connection.snapshot().profileId}>
         <button
+          ref={securityButton}
           type="button"
           class={`conn-security sec-${security() ?? "unknown"}`}
           aria-haspopup="dialog"
@@ -81,7 +87,7 @@ export default function ConnectionIndicator(props: {
           url={connection.snapshot().finalUrl ?? connection.activeProfile()?.baseUrl ?? ""}
           security={security() ?? null}
           strictTls={connection.activeProfile()?.strictTls ?? false}
-          onClose={() => setDetailsOpen(false)}
+          onClose={closeDetails}
           onManage={() => props.onManage?.()}
         />
       </Show>

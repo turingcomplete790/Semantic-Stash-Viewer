@@ -1,4 +1,4 @@
-import { createSignal, Match, Show, Switch } from "solid-js";
+import { createSignal, Match, onMount, Show, Switch } from "solid-js";
 import { commands } from "../bindings";
 import type { AppError, ProfileDraft, ProfileSummary, TestResult } from "../bindings";
 import { newRequestId } from "../lib/requestId";
@@ -24,6 +24,8 @@ export default function ConnectionForm(props: {
   const [displayName, setDisplayName] = createSignal("");
   const [strictTls, setStrictTls] = createSignal(false);
   const [phase, setPhase] = createSignal<Phase>({ kind: "idle" });
+  let addressInput: HTMLInputElement | undefined;
+  onMount(() => addressInput?.focus());
 
   const draft = (): ProfileDraft => ({
     address: address().trim(),
@@ -88,6 +90,7 @@ export default function ConnectionForm(props: {
         <div class="field">
           <label for="connect-address">Server address</label>
           <input
+            ref={addressInput}
             id="connect-address"
             type="text"
             placeholder="192.168.1.10:9999"

@@ -1,6 +1,7 @@
 import { createSignal, onMount, Show, untrack } from "solid-js";
 import { commands } from "../bindings";
 import type { AppError, ProfileSummary } from "../bindings";
+import { useFocusTrap } from "../lib/focus";
 import { appErrorMessage } from "../messages/failures";
 import "./ConnectionForm.css";
 import "./KeyPrompt.css";
@@ -20,8 +21,10 @@ export default function KeyPrompt(props: {
   const [saving, setSaving] = createSignal(false);
   const [error, setError] = createSignal<AppError | null>(null);
   let input: HTMLInputElement | undefined;
+  let dialog: HTMLDivElement | undefined;
 
   onMount(() => input?.focus());
+  useFocusTrap(() => dialog);
 
   async function save() {
     setSaving(true);
@@ -44,6 +47,7 @@ export default function KeyPrompt(props: {
   return (
     <div class="modal-backdrop">
       <div
+        ref={dialog}
         class="modal connect-card"
         role="dialog"
         aria-modal="true"

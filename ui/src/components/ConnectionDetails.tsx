@@ -8,13 +8,14 @@ export default function ConnectionDetails(props: {
   url: string;
   security: SecurityState | null;
   strictTls: boolean;
-  onClose: () => void;
+  /** `viaKeyboard` is true when closed with Escape (focus should return to the trigger). */
+  onClose: (viaKeyboard?: boolean) => void;
   onManage: () => void;
 }) {
   let panel: HTMLDivElement | undefined;
 
   const onKey = (e: KeyboardEvent) => {
-    if (e.key === "Escape") props.onClose();
+    if (e.key === "Escape") props.onClose(true);
   };
   const onPointer = (e: PointerEvent) => {
     if (panel && !panel.contains(e.target as Node)) props.onClose();

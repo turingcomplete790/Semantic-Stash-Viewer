@@ -70,7 +70,11 @@ pub fn run() {
             let config_dir: PathBuf = app.path().config_dir()?.join(APP_DIR);
             let runtime = tauri::async_runtime::handle().inner().clone();
             let state = AppState::open(&config_dir.join("profiles.json"), runtime)?;
-            events::forward_connection_state(app.handle().clone(), &state.manager);
+            events::forward_connection_state(
+                app.handle().clone(),
+                &state.manager,
+                std::sync::Arc::clone(&state.profiles),
+            );
             auto_connect(&state);
             app.manage(state);
             Ok(())

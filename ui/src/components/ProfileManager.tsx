@@ -1,6 +1,7 @@
 import { createSignal, For, Show, untrack } from "solid-js";
 import { commands } from "../bindings";
 import type { AppError, ProfileSummary } from "../bindings";
+import { useFocusTrap } from "../lib/focus";
 import { newRequestId } from "../lib/requestId";
 import { appErrorMessage } from "../messages/failures";
 import { connection } from "../state/connection";
@@ -14,6 +15,10 @@ export default function ProfileManager(props: { onClose: () => void; onAdd: () =
   const [confirmDelete, setConfirmDelete] = createSignal<ProfileSummary | null>(null);
 
   const activeId = () => connection.snapshot().profileId;
+  let dialog: HTMLDivElement | undefined;
+  let confirmBox: HTMLDivElement | undefined;
+  // While the delete confirmation is open, focus stays inside it.
+  useFocusTrap(() => (confirmDelete() ? confirmBox : dialog));
 
   function switchTo(id: string) {
     void commands.connect(id, newRequestId());
@@ -36,12 +41,18 @@ export default function ProfileManager(props: { onClose: () => void; onAdd: () =
   return (
     <div class="modal-backdrop">
       <div
+        ref={dialog}
         class="modal connect-card profile-manager"
         role="dialog"
         aria-modal="true"
         aria-labelledby="profile-manager-title"
         onKeyDown={(e) => {
-          if (e.key === "Escape" && !confirmDelete()) props.onClose();
+          if (e.key !== "Escape") return;
+          e.stopPropagation();
+          // Escape backs out one level: confirmation → editor → manager.
+          if (confirmDelete()) setConfirmDelete(null);
+          else if (editing()) setEditing(null);
+          else props.onClose();
         }}
       >
         <div class="pm-header">
@@ -133,6 +144,11 @@ export default function ProfileManager(props: { onClose: () => void; onAdd: () =
         <Show when={confirmDelete()}>
           {(profile) => (
             <div
+              ref={(el) => {
+                confirmBox = el;
+                // Default to the safe choice.
+                queueMicrotask(() => el.querySelector<HTMLButtonElement>(".pm-cancel")?.focus());
+              }}
               class="pm-confirm"
               role="alertdialog"
               aria-labelledby="pm-confirm-title"
@@ -147,7 +163,7 @@ export default function ProfileManager(props: { onClose: () => void; onAdd: () =
                 <button type="button" class="danger" onClick={() => void remove(profile())}>
                   Delete
                 </button>
-                <button type="button" onClick={() => setConfirmDelete(null)}>
+                <button type="button" class="pm-cancel" onClick={() => setConfirmDelete(null)}>
                   Cancel
                 </button>
               </div>

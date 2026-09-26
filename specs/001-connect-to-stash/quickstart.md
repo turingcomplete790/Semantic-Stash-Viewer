@@ -120,3 +120,37 @@ Run the app with `cargo tauri dev`. Reset between runs by deleting
 3. Copy `~/.config/semantic-stash-viewer/profiles.json` to a second machine (or a second user
    account) that can reach S-auth, and launch the viewer there. **Expect**: it connects with no
    setup.
+
+## Measured results
+
+Measured 2026-09-25 on the development machine (Linux, debug build) with the core's real
+`StashProber` and default `ManagerConfig`, against the user's library (`:9999`, ~28k scenes)
+and the disposable test instance (`:9998`, empty).
+
+| Criterion | Target | Measured |
+|---|---|---|
+| SC-002: launch auto-connect → Connected (core) | ≤ 2 s | 56–102 ms on `:9999`, 3–39 ms on `:9998` over 30 runs each; one outlier of 3.8 s in an earlier batch did not reproduce in 40 further runs |
+| SC-005: offline detected after the server stops | ≤ 10 s | 0.1–2.7 s over 3 outages (depends on where the 5 s health tick falls) |
+| SC-005: reconnected after the server returns | ≤ 60 s | 0.7 s (3 s outage), 4.4 s (12 s outage), 23.1 s (40 s outage, waiting out the 32 s backoff step) |
+
+Outages were simulated with a TCP proxy in front of the test instance that was stopped and
+restarted, so no real server was touched. The SC-002 figure covers the connection only; window
+creation and first paint aren't included (they weren't measured headlessly). The user confirmed
+the relaunch reconnects without prompts on test and production servers.
+
+## Validation run (2026-09-25)
+
+| Scenario | Result | How |
+|---|---|---|
+| V1 First connection, no auth | ✅ | Live: `localhost:9999` → https tried, fell back to http; v0.31.1, real counts, Unencrypted. User confirmed in the app. |
+| V2 API key required / wrong / correct | ✅ | User verified against the test instance after enabling a username/password (2026-09-25); also covered by probe tests with the captured `401 FormBased` response. |
+| V3 Invalid key on an open server | ✅ | Live against `:9999`: "doesn't need a key, but the one entered is wrong". |
+| V4 Old version / nothing listening / not Stash | ✅ (old version automated) | Live: dead port → Unreachable (both URLs listed); local non-Stash web server → NotStash (HTTP 501). Old version via fixture tests. |
+| V5 Auto-reconnect and offline | ✅ | User confirmed relaunch reconnects. Offline/recovery measured through a proxy (see Measured results). |
+| V6 Key revoked | ⚠️ Automated only | State-machine test (401 on re-probe → AuthFailed, retries stop) and KeyPrompt tests. Needs an auth-enabled server. |
+| V7 Connection security | ⚠️ http live, https automated | User confirmed "Unencrypted". Self-signed https strict on/off and http→https redirect covered by TLS tests against a local self-signed server; no real https Stash available. |
+| V8 Multiple profiles | ✅ | User confirmed switching, editing, and deleting across test and production servers. |
+| V9 Saved and portable profiles | ✅ steps 1–2; step 3 not run | Relaunch reconnects (user); `profiles.json` holds the profiles with `api_key` fields; the key field is shown and edited as plain text (UI tests). Copying to a second machine not tried. |
+
+Remaining manual checks: V6 (regenerate the key while connected) on the auth-enabled test
+instance, V7 on a real https server, and V9 step 3.
