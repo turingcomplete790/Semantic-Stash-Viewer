@@ -3,7 +3,10 @@
 
 use std::time::Duration;
 
-use player::{OpenRequest, Player, PlayerConfig, PlayerError, PlayerSnapshot, PlayerStateKind};
+use player::{
+    CacheLimits, OpenRequest, Player, PlayerCommand, PlayerConfig, PlayerError, PlayerSnapshot,
+    PlayerStateKind,
+};
 use tokio::sync::watch;
 
 const TEST_SRC: &str = "av://lavfi:testsrc=duration=5:size=320x240:rate=30";
@@ -32,14 +35,19 @@ fn headless() -> Player {
     Player::new(PlayerConfig::headless()).expect("mpv initialises")
 }
 
-fn open(player: &Player, source: &str) {
-    player.open(OpenRequest {
+fn request(source: &str) -> OpenRequest {
+    OpenRequest {
         source: source.into(),
         scene_id: Some("test".into()),
         title: Some("Test source".into()),
         api_key: None,
         strict_tls: false,
-    });
+        cache: None,
+    }
+}
+
+fn open(player: &Player, source: &str) {
+    player.open(request(source));
 }
 
 /// Wait until `pred` holds for the latest snapshot (up to 10 s).
@@ -109,6 +117,33 @@ async fn exact_seek_lands_on_target() {
     })
     .await;
     assert!(s.duration_seconds.is_some_and(|d| (d - 5.0).abs() < 0.2));
+}
+
+#[tokio::test]
+async fn a_whole_file_cache_is_accepted_and_seeks_still_land() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let Some(clip) = seekable_file(dir.path()) else {
+        return;
+    };
+    let player = headless();
+    let mut rx = player.subscribe();
+    player.open(OpenRequest {
+        cache: Some(CacheLimits {
+            forward_bytes: 300 << 20,
+            back_bytes: 300 << 20,
+        }),
+        ..request(&clip)
+    });
+    until(&mut rx, "playing", |s| s.state == PlayerStateKind::Playing).await;
+    player.set_paused(true);
+    player.seek(3.0, true);
+    until(&mut rx, "position ~3.0", |s| {
+        (s.position_seconds - 3.0).abs() < 0.1
+    })
+    .await;
+    // The next file goes back to the defaults without error.
+    open(&player, &clip);
+    until(&mut rx, "playing", |s| s.state == PlayerStateKind::Playing).await;
 }
 
 #[tokio::test]
@@ -217,4 +252,59 @@ async fn reports_whether_hardware_decoding_is_used() {
     let s = until(&mut rx, "hwdec known", |s| s.hwdec.is_some()).await;
     // The raw test source is decoded in software.
     assert_eq!(s.hwdec.as_deref(), Some("no"));
+}
+
+#[tokio::test]
+async fn dispatch_returns_immediately_and_applies_in_order() {
+    let player = headless();
+    let mut rx = player.subscribe();
+    open(&player, TEST_SRC);
+    until(&mut rx, "playing", |s| s.state == PlayerStateKind::Playing).await;
+
+    let started = std::time::Instant::now();
+    player.dispatch(PlayerCommand::SetPaused(true));
+    player.dispatch(PlayerCommand::SetVolume(40.0));
+    player.dispatch(PlayerCommand::SetSpeed(2.0));
+    // Queuing must not wait on mpv (contract invariant 1).
+    assert!(started.elapsed() < std::time::Duration::from_millis(20));
+
+    until(&mut rx, "paused, volume 40, speed 2", |s| {
+        s.paused && (s.volume - 40.0).abs() < 1e-6 && (s.speed - 2.0).abs() < 1e-6
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn drag_seeks_are_coalesced_and_the_release_seek_wins() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let Some(clip) = seekable_file(dir.path()) else {
+        return;
+    };
+    let player = headless();
+    let mut rx = player.subscribe();
+    open(&player, &clip);
+    until(&mut rx, "playing", |s| s.state == PlayerStateKind::Playing).await;
+    player.set_paused(true);
+    until(&mut rx, "paused", |s| s.paused).await;
+
+    // A burst of drag positions, like scrubbing, then the exact seek on release.
+    for i in 0..50 {
+        player.dispatch(PlayerCommand::Seek {
+            position_seconds: 0.5 + f64::from(i) * 0.05,
+            exact: false,
+        });
+    }
+    player.dispatch(PlayerCommand::Seek {
+        position_seconds: 3.0,
+        exact: true,
+    });
+
+    let s = until(&mut rx, "lands on 3.0", |s| {
+        (s.position_seconds - 3.0).abs() < 0.05
+    })
+    .await;
+    assert!(s.paused);
+    // Nothing queued afterwards moves it off the release position.
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert!((player.snapshot().position_seconds - 3.0).abs() < 0.05);
 }

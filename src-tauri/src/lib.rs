@@ -41,8 +41,20 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::get_connection_snapshot,
             player_commands::player_snapshot,
             player_commands::list_recent_scenes,
+            player_commands::list_test_scenes,
             player_commands::player_open,
             player_commands::player_close,
+            player_commands::player_toggle_pause,
+            player_commands::player_set_paused,
+            player_commands::player_seek,
+            player_commands::player_seek_relative,
+            player_commands::player_set_speed,
+            player_commands::player_set_volume,
+            player_commands::player_set_muted,
+            player_commands::player_frame_step,
+            player_commands::player_replay,
+            player_commands::player_set_fullscreen,
+            player_commands::player_stats,
         ])
         .events(collect_events![
             events::ConnectionStateEvent,
@@ -119,9 +131,10 @@ fn start_player(app: &tauri::App) -> Option<Arc<Player>> {
     };
     player_commands::forward_player_state(app.handle().clone(), &player);
 
-    #[cfg(target_os = "linux")]
     match app.get_webview_window("main") {
         Some(window) => {
+            player_commands::sync_fullscreen_flag(&window, &player);
+            #[cfg(target_os = "linux")]
             if let Err(e) = video_surface::install(&window, Arc::clone(&player)) {
                 tracing::error!(error = %e, "could not install the video surface");
             }

@@ -1,8 +1,11 @@
 //! Scene queries and the direct-stream guard (spec FR-001, FR-003; research R6).
 
-use stash_core::adapter::scenes::{playable_scene, recent_scenes};
+use stash_core::adapter::scenes::{playable_scene, recent_scenes, test_scenes};
 use stash_core::adapter::StashClient;
-use stash_core::scenes::{direct_stream_url, is_direct_stream};
+use stash_core::scenes::{
+    direct_stream_url, is_direct_stream, PlayableScene, SceneFile, SeekCache,
+    LARGE_FILE_BACK_CACHE_BYTES, MAX_FORWARD_CACHE_BYTES,
+};
 use stash_core::AppError;
 use url::Url;
 use wiremock::matchers::{method, path};
@@ -11,6 +14,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 const RECENT: &str = include_str!("fixtures/stash-v0.31.1/recent-scenes.json");
 const PLAYABLE: &str = include_str!("fixtures/stash-v0.31.1/playable-scene.json");
 const NOT_FOUND: &str = include_str!("fixtures/stash-v0.31.1/scene-not-found.json");
+const TEST_SET: &str = include_str!("fixtures/stash-v0.31.1/test-scenes.json");
 
 fn url(s: &str) -> Url {
     Url::parse(s).expect("url")
@@ -119,4 +123,88 @@ async fn scene_without_files_is_no_playable_file() {
         .await
         .expect_err("no file");
     assert_eq!(err, AppError::NoPlayableFile { id: "7".into() });
+}
+
+#[tokio::test]
+async fn test_scenes_come_back_as_labelled_groups_in_order() {
+    let server = stash_answering(TEST_SET).await;
+    let groups = test_scenes(&client(&server)).await.expect("test set");
+
+    let labels: Vec<&str> = groups.iter().map(|g| g.label.as_str()).collect();
+    assert_eq!(
+        labels,
+        [
+            "4K H.264",
+            "4K HEVC",
+            "Above 4K",
+            "WMV above 720p",
+            "VP9 WebM above 720p",
+            "AV1",
+            "MPEG-4 Part 2 (AVI/DivX)",
+            "FLV",
+        ]
+    );
+    let wmv = &groups[3];
+    assert!(!wmv.scenes.is_empty());
+    assert!(
+        wmv.scenes
+            .iter()
+            .all(|s| s.video_codec.as_deref() == Some("wmv3")
+                && s.container.as_deref() == Some("wmv"))
+    );
+    assert!(groups[0]
+        .scenes
+        .iter()
+        .all(|s| s.resolution.as_deref() == Some("3840×2160")));
+}
+
+#[tokio::test]
+async fn empty_test_groups_are_dropped() {
+    let body = r#"{"data":{
+        "fourKH264":{"scenes":[]},"fourKHevc":{"scenes":[]},"aboveFourK":{"scenes":[]},
+        "wmvHd":{"scenes":[{"id":"9","title":"","files":[{"basename":"x.wmv","duration":60.0,"width":1920,"height":1080,"video_codec":"wmv3","format":"wmv"}]}]},
+        "vp9Hd":{"scenes":[]},"av1":{"scenes":[]},"mpeg4":{"scenes":[]},"flv":{"scenes":[]}}}"#;
+    let server = stash_answering(body).await;
+    let groups = test_scenes(&client(&server)).await.expect("test set");
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].label, "WMV above 720p");
+    assert_eq!(groups[0].scenes[0].title, "x.wmv");
+}
+
+#[test]
+fn legacy_formats_and_short_clips_get_a_sized_cache() {
+    const MIB: u64 = 1 << 20;
+    let scene = |container: &str, duration_seconds: f64, size: Option<u64>| PlayableScene {
+        id: "1".into(),
+        title: "t".into(),
+        stream_url: Url::parse("http://stash.local/scene/1/stream").expect("url"),
+        duration_seconds,
+        file: SceneFile {
+            container: Some(container.into()),
+            size,
+            ..SceneFile::default()
+        },
+    };
+    // Modern containers keep mpv's defaults.
+    assert_eq!(scene("mp4", 1800.0, Some(900 * MIB)).seek_cache(), None);
+    assert_eq!(scene("matroska", 600.0, Some(200 * MIB)).seek_cache(), None);
+    // Short clips of any format are cached whole.
+    let clip = scene("webm", 45.0, Some(20 * MIB))
+        .seek_cache()
+        .expect("cache");
+    assert!(clip.forward_bytes > 20 * MIB && clip.forward_bytes < 40 * MIB);
+    assert_eq!(clip.back_bytes, clip.forward_bytes);
+    // Legacy containers: whole file up to 1 GiB, then capped.
+    for container in ["flv", "AVI", "wmv"] {
+        let c = scene(container, 1800.0, Some(230 * MIB))
+            .seek_cache()
+            .expect(container);
+        assert!(c.forward_bytes > 230 * MIB && c.forward_bytes < 260 * MIB);
+    }
+    let capped = Some(SeekCache {
+        forward_bytes: MAX_FORWARD_CACHE_BYTES,
+        back_bytes: LARGE_FILE_BACK_CACHE_BYTES,
+    });
+    assert_eq!(scene("avi", 7250.0, Some(1400 * MIB)).seek_cache(), capped);
+    assert_eq!(scene("flv", 1800.0, None).seek_cache(), capped);
 }

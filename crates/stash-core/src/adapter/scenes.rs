@@ -4,7 +4,9 @@ use graphql_client::GraphQLQuery;
 
 use super::StashClient;
 use crate::error::AppError;
-use crate::scenes::{self, direct_stream_url, display_title, resolution, SceneFile, SceneListItem};
+use crate::scenes::{
+    self, direct_stream_url, display_title, resolution, SceneFile, SceneGroup, SceneListItem,
+};
 
 /// Stash's custom `Int64` scalar (file sizes).
 type Int64 = i64;
@@ -24,6 +26,77 @@ pub struct RecentScenes;
     response_derives = "Debug"
 )]
 pub struct PlayableScene;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "graphql/schema.json",
+    query_path = "graphql/test_scenes.graphql",
+    response_derives = "Debug"
+)]
+pub struct TestScenes;
+
+/// Build a list row from a scene's id, title, and primary file fields.
+fn list_item(
+    id: String,
+    title: Option<&str>,
+    file: Option<(&str, f64, i64, i64, &str, &str)>,
+) -> SceneListItem {
+    let (basename, duration, width, height, codec, format) = match file {
+        Some(f) => (Some(f.0), f.1, Some(f.2), Some(f.3), Some(f.4), Some(f.5)),
+        None => (None, 0.0, None, None, None, None),
+    };
+    SceneListItem {
+        title: display_title(title, basename),
+        duration_seconds: duration,
+        resolution: resolution(width, height),
+        video_codec: codec.filter(|c| !c.is_empty()).map(str::to_owned),
+        container: format.filter(|c| !c.is_empty()).map(str::to_owned),
+        id,
+    }
+}
+
+/// The spike's test set (002 research R7): up to 3 random scenes from each hard-to-play group,
+/// in one request. Groups keep a fixed order; empty groups are dropped.
+pub async fn test_scenes(client: &StashClient) -> Result<Vec<SceneGroup>, AppError> {
+    let body = TestScenes::build_query(test_scenes::Variables);
+    let data: test_scenes::ResponseData = client.graphql(&body).await?;
+    let rows = |scenes: Vec<test_scenes::TestSceneRow>| -> Vec<SceneListItem> {
+        scenes
+            .into_iter()
+            .map(|s| {
+                let file = s.files.first().map(|f| {
+                    (
+                        f.basename.as_str(),
+                        f.duration,
+                        f.width,
+                        f.height,
+                        f.video_codec.as_str(),
+                        f.format.as_str(),
+                    )
+                });
+                list_item(s.id.clone(), s.title.as_deref(), file)
+            })
+            .collect()
+    };
+    let groups = [
+        ("4K H.264", rows(data.four_kh264.scenes)),
+        ("4K HEVC", rows(data.four_k_hevc.scenes)),
+        ("Above 4K", rows(data.above_four_k.scenes)),
+        ("WMV above 720p", rows(data.wmv_hd.scenes)),
+        ("VP9 WebM above 720p", rows(data.vp9_hd.scenes)),
+        ("AV1", rows(data.av1.scenes)),
+        ("MPEG-4 Part 2 (AVI/DivX)", rows(data.mpeg4.scenes)),
+        ("FLV", rows(data.flv.scenes)),
+    ];
+    Ok(groups
+        .into_iter()
+        .filter(|(_, scenes)| !scenes.is_empty())
+        .map(|(label, scenes)| SceneGroup {
+            label: label.to_owned(),
+            scenes,
+        })
+        .collect())
+}
 
 /// The 20 most recently added scenes (FR-001).
 pub async fn recent_scenes(client: &StashClient) -> Result<Vec<SceneListItem>, AppError> {

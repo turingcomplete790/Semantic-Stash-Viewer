@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => {
     commands: {
       playerSnapshot: vi.fn(),
       listRecentScenes: vi.fn(),
+      listTestScenes: vi.fn(),
       playerOpen: vi.fn(),
       playerClose: vi.fn(),
     },
@@ -58,6 +59,37 @@ beforeEach(async () => {
   vi.clearAllMocks();
   mocks.commands.playerSnapshot.mockResolvedValue({ status: "ok", data: idle });
   mocks.commands.listRecentScenes.mockResolvedValue({ status: "ok", data: scenes(20) });
+  mocks.commands.listTestScenes.mockResolvedValue({
+    status: "ok",
+    data: [
+      {
+        label: "4K HEVC",
+        scenes: [
+          {
+            id: "401",
+            title: "Big file",
+            durationSeconds: 600,
+            resolution: "3840×2160",
+            videoCodec: "hevc",
+            container: "mp4",
+          },
+        ],
+      },
+      {
+        label: "WMV above 720p",
+        scenes: [
+          {
+            id: "501",
+            title: "Old file",
+            durationSeconds: 60,
+            resolution: "1920×1080",
+            videoCodec: "wmv3",
+            container: "wmv",
+          },
+        ],
+      },
+    ],
+  });
   mocks.commands.playerOpen.mockResolvedValue({
     status: "ok",
     data: { ...idle, state: "loading" },
@@ -78,6 +110,23 @@ describe("PlayerScreen", () => {
     expect(screen.getAllByRole("button", { name: /^Play Scene/ })).toHaveLength(20);
     // 3725 s → 1:02:05
     expect(screen.getByText("1:02:05")).toBeInTheDocument();
+  });
+
+  it("shows the test set grouped by format and plays from it", async () => {
+    render(() => <PlayerScreen onExit={() => {}} />);
+    const wmv = await screen.findByRole("region", { name: "WMV above 720p" });
+    expect(wmv).toHaveTextContent("1920×1080 · wmv3 · wmv");
+    expect(screen.getByRole("region", { name: "4K HEVC" })).toHaveTextContent("3840×2160");
+    fireEvent.click(screen.getByRole("button", { name: "Play Old file" }));
+    expect(mocks.commands.playerOpen).toHaveBeenCalledWith("501");
+  });
+
+  it("Shuffle reloads the test set", async () => {
+    render(() => <PlayerScreen onExit={() => {}} />);
+    await screen.findByRole("region", { name: "4K HEVC" });
+    expect(mocks.commands.listTestScenes).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Shuffle" }));
+    await waitFor(() => expect(mocks.commands.listTestScenes).toHaveBeenCalledTimes(2));
   });
 
   it("plays a scene from the list", async () => {

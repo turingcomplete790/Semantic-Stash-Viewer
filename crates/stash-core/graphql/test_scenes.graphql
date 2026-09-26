@@ -1,0 +1,94 @@
+# Spike test set (002 research R7): a few random scenes from each hard-to-play group, in one
+# request. Read-only. Codec-based filters (not path) so e.g. "*.wmv" in a folder name can't
+# match an MP4.
+query TestScenes {
+  fourKH264: findScenes(
+    filter: { per_page: 3, sort: "random" }
+    scene_filter: {
+      resolution: { value: FOUR_K, modifier: EQUALS }
+      video_codec: { value: "h264", modifier: EQUALS }
+    }
+  ) {
+    scenes {
+      ...TestSceneRow
+    }
+  }
+  fourKHevc: findScenes(
+    filter: { per_page: 3, sort: "random" }
+    scene_filter: {
+      resolution: { value: FOUR_K, modifier: EQUALS }
+      video_codec: { value: "hevc", modifier: EQUALS }
+    }
+  ) {
+    scenes {
+      ...TestSceneRow
+    }
+  }
+  aboveFourK: findScenes(
+    filter: { per_page: 3, sort: "random" }
+    scene_filter: { resolution: { value: FOUR_K, modifier: GREATER_THAN } }
+  ) {
+    scenes {
+      ...TestSceneRow
+    }
+  }
+  wmvHd: findScenes(
+    filter: { per_page: 3, sort: "random" }
+    scene_filter: {
+      video_codec: { value: "wmv3", modifier: EQUALS }
+      resolution: { value: STANDARD_HD, modifier: GREATER_THAN }
+    }
+  ) {
+    scenes {
+      ...TestSceneRow
+    }
+  }
+  vp9Hd: findScenes(
+    filter: { per_page: 3, sort: "random" }
+    scene_filter: {
+      video_codec: { value: "vp9", modifier: EQUALS }
+      resolution: { value: STANDARD_HD, modifier: GREATER_THAN }
+    }
+  ) {
+    scenes {
+      ...TestSceneRow
+    }
+  }
+  av1: findScenes(
+    filter: { per_page: 3, sort: "random" }
+    scene_filter: { video_codec: { value: "av1", modifier: EQUALS } }
+  ) {
+    scenes {
+      ...TestSceneRow
+    }
+  }
+  mpeg4: findScenes(
+    filter: { per_page: 3, sort: "random" }
+    scene_filter: { video_codec: { value: "mpeg4", modifier: EQUALS } }
+  ) {
+    scenes {
+      ...TestSceneRow
+    }
+  }
+  flv: findScenes(
+    filter: { per_page: 3, sort: "random" }
+    scene_filter: { path: { value: ".flv", modifier: INCLUDES } }
+  ) {
+    scenes {
+      ...TestSceneRow
+    }
+  }
+}
+
+fragment TestSceneRow on Scene {
+  id
+  title
+  files {
+    basename
+    duration
+    width
+    height
+    video_codec
+    format
+  }
+}

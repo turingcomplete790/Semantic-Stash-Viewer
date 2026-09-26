@@ -110,6 +110,59 @@ Tauri 2.11.6 (tauri-runtime-wry 2.11.4, wry 0.55.1, webkit2gtk crate 2.0.2).
   measures main-thread CPU during 1080p and 4K playback. Over ~50% of a core, or drops beyond
   SC-003, triggers fallback 1.
 
+## R5b. Scrubbing (found during implementation)
+
+- **Problem 1**: one seek per seek-bar input event flooded mpv while dragging; each seek restarts
+  decoding from a keyframe, which flickered on high-res files. **Fix**: coalesce drag seeks
+  (while a seek settles, keep only the latest position; send it on `playback-restart`; the
+  release seek supersedes; a seek unsettled after 500 ms stops blocking).
+- **Problem 2**: keyframe-only drag seeks show the nearest keyframe (often seconds away), so the
+  exact seek on release visibly jumped to a different frame. **Fix**: all seeks are exact;
+  coalescing adapts the update rate to decode speed. A release on the spot the last drag seek
+  already reached is skipped.
+- **Measured** (paused seek → `playback-restart`, 10 seeks each, via Stash direct stream):
+
+  | Scene | Keyframe median | Exact median / max |
+  |---|---|---|
+  | 4K H.264 mp4 | 38 ms | 107 / 189 ms |
+  | 4K HEVC mp4 | 49 ms | 297 / 616 ms |
+  | 1080p H.264 mkv, 90 min | 58 ms | 145 / 268 ms |
+
+- **Follow-up (Phase 1)**: seek-bar thumbnails from Stash's preview sprites, so dragging shows a
+  preview without decoding, with one seek on release. That's the smooth path for heavy 4K HEVC.
+- **Problem 3**: on slow seeks (WMV, software decode, ~1 s) the seek bar snapped back to the old
+  position after release until mpv arrived. **Fix** (UI): the bar shows the seek target until the
+  reported position is within 1 s of it (5 s fallback); ±10 s and arrow keys do the same.
+
+## R5c. Seek cache: unindexed FLV and spinning disks (found during implementation)
+
+- **Problem 1**: FLV seeks took 0.3–8 s on 360p H.264 files (keyframes every 5 s). Keyframe seeks
+  and local-disk playback were just as slow, so it's neither decoding nor HTTP. These files
+  carry no keyframe index (`onMetaData.keyframes`), and FFmpeg's FLV demuxer has no timestamp
+  reader, so a seek into an unread region reads every packet from the last indexed point.
+  Seeking by byte position isn't reachable: mpv turns percent seeks into time seeks.
+- **Problem 2**: AVI/MPEG-4 scrubbing felt laggy. The files are indexed (one stream seek per
+  seek), but the library is on spinning disks: a seek outside mpv's cache costs a disk seek plus
+  a new HTTP range request, 160–770 ms, even for keyframe seeks.
+- **Fix**: size the demuxer cache (`demuxer-max-bytes` / `demuxer-max-back-bytes`) per file.
+  Files up to 1 GiB (plus headroom) are cached whole; larger or unknown-size files get 1 GiB
+  ahead and 256 MiB behind (~1.3 GiB RAM at most). mpv reads ahead in the background during
+  playback, building the index and caching the packets, so later seeks come from memory.
+- **Scope (user testing)**: applied to legacy containers (FLV, AVI, WMV) and to clips under
+  2 minutes of any format (e.g. WebMs used as GIFs). On modern GPU-decoded files the background
+  read-ahead added a little lag and seeks were already fast, so they keep mpv's defaults.
+- **Measured** (exact seeks after 10 s of playback, direct stream, 8 seeks each):
+
+  | File | Default cache | Sized cache |
+  |---|---|---|
+  | FLV 360p, 230 MB | 33–1968 ms | 33–82 ms |
+  | AVI MPEG-4, 206 MB | 39–766 ms | 39–41 ms |
+  | AVI MPEG-4, 1.4 GB (capped) | 60–236 ms | 10–106 ms |
+
+- **Limit**: a seek in the first seconds after opening, before the read-ahead passes the target,
+  still takes the slow path (seconds on unindexed FLV). A server-side fix is to add the index to
+  the file (e.g. `yamdi`, `flvmeta`), which the viewer won't do (no writes).
+
 ## R6. Which Stash stream to play (no transcoding)
 
 - **(observed)** `sceneStreams` for a scene on `:9999` lists "Direct stream" at

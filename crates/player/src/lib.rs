@@ -4,14 +4,16 @@
 //! This crate must never depend on Tauri or GTK (constitution Principle III); the window-system
 //! code that hosts the video lives in `src-tauri/src/video_surface/`.
 
+pub mod commands;
 pub mod error;
 pub mod render;
 pub mod session;
 pub mod snapshot;
 pub mod tracks;
 
+pub use commands::{FrameDirection, PlayerCommand};
 pub use error::PlayerError;
 pub use render::{GetProcAddress, Renderer};
-pub use session::{OpenRequest, Player, PlayerConfig, MAX_SPEED, MIN_SPEED};
-pub use snapshot::{PlayerSnapshot, PlayerStateKind};
+pub use session::{CacheLimits, OpenRequest, Player, PlayerConfig, MAX_SPEED, MIN_SPEED};
+pub use snapshot::{PlayerSnapshot, PlayerStateKind, PlayerStats};
 pub use tracks::{Track, TrackKind};

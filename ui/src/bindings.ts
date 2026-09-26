@@ -45,10 +45,38 @@ export const commands = {
 	playerSnapshot: () => typedError<PlayerSnapshot, AppError>(__TAURI_INVOKE("player_snapshot")),
 	/**  The 20 most recently added scenes on the active server (FR-001). */
 	listRecentScenes: () => typedError<SceneListItem[], AppError>(__TAURI_INVOKE("list_recent_scenes")),
+	/**
+	 *  The spike's test set: a few random 4K, WMV, VP9, AV1, MPEG-4, and FLV scenes, in one
+	 *  request (research R7). Each call reshuffles.
+	 */
+	listTestScenes: () => typedError<SceneGroup[], AppError>(__TAURI_INVOKE("list_test_scenes")),
 	/**  Look up a scene and start playing its direct stream (FR-001, FR-003, FR-004). */
 	playerOpen: (sceneId: string) => typedError<PlayerSnapshot, AppError>(__TAURI_INVOKE("player_open", { sceneId })),
 	/**  Stop playback and release audio/video (FR-007). */
 	playerClose: () => typedError<null, AppError>(__TAURI_INVOKE("player_close")),
+	/**
+	 *  Play/pause (FR-008). All control commands return immediately; results arrive as
+	 *  `player-state` events (contract invariant 1).
+	 */
+	playerTogglePause: () => typedError<null, AppError>(__TAURI_INVOKE("player_toggle_pause")),
+	playerSetPaused: (paused: boolean) => typedError<null, AppError>(__TAURI_INVOKE("player_set_paused", { paused })),
+	/**  Absolute seek: keyframe-fast while dragging, `exact` on release. */
+	playerSeek: (positionSeconds: number | null, exact: boolean) => typedError<null, AppError>(__TAURI_INVOKE("player_seek", { positionSeconds, exact })),
+	/**  Relative seek (±10 s for skip buttons and arrow keys). */
+	playerSeekRelative: (seconds: number | null) => typedError<null, AppError>(__TAURI_INVOKE("player_seek_relative", { seconds })),
+	/**  Clamped to 0.25–4.0 by the player. */
+	playerSetSpeed: (speed: number | null) => typedError<null, AppError>(__TAURI_INVOKE("player_set_speed", { speed })),
+	/**  Clamped to 0–100 by the player. */
+	playerSetVolume: (volume: number | null) => typedError<null, AppError>(__TAURI_INVOKE("player_set_volume", { volume })),
+	playerSetMuted: (muted: boolean) => typedError<null, AppError>(__TAURI_INVOKE("player_set_muted", { muted })),
+	/**  One frame forward or back; only while paused. */
+	playerFrameStep: (direction: FrameDirection) => typedError<null, AppError>(__TAURI_INVOKE("player_frame_step", { direction })),
+	/**  From the ended state: back to the start and play (FR-015). */
+	playerReplay: () => typedError<null, AppError>(__TAURI_INVOKE("player_replay")),
+	/**  Enter or leave fullscreen (the window), mirrored into the player snapshot. */
+	playerSetFullscreen: (fullscreen: boolean) => typedError<null, AppError>(__TAURI_INVOKE("player_set_fullscreen", { fullscreen })),
+	/**  Measurements for the decision record. Debug builds only. */
+	playerStats: () => typedError<PlayerStats, AppError>(__TAURI_INVOKE("player_stats")),
 };
 
 /** Events */
@@ -123,6 +151,8 @@ export type ConnectionSnapshot = {
 /**  Emitted on every connection state transition. */
 export type ConnectionStateEvent = ConnectionSnapshot;
 
+export type FrameDirection = "forward" | "back";
+
 /**  Library summary shown after connecting (FR-007). */
 export type LibraryCounts = {
 	scenes: number,
@@ -165,6 +195,17 @@ export type PlayerStateKind = "idle" | "loading" | "playing" | "paused" |
 /**  End of file reached; the last frame stays up with a replay option (FR-015). */
 "ended" | "error";
 
+/**  Playback measurements for the spike's decision record (debug builds only). */
+export type PlayerStats = {
+	/**  From opening a scene to its first rendered frame (filled in by T031). */
+	openToFirstFrameMs: number | null,
+	/**  From the last seek to the next rendered frame (filled in by T031). */
+	lastSeekToFrameMs: number | null,
+	/**  mpv `frame-drop-count` + `decoder-frame-drop-count`; `i32` keeps it TypeScript-safe. */
+	droppedFrames: number,
+	hwdec: string | null,
+};
+
 /**  What the connection form submits for `test_connection`, `create_profile`, `update_profile`. */
 export type ProfileDraft = {
 	displayName?: string | null,
@@ -188,6 +229,12 @@ export type ProfileSummary = {
 
 /**  Emitted after every profile create, update, delete, or reorder, with the full list. */
 export type ProfilesChangedEvent = ProfileSummary[];
+
+/**  A labelled group of scenes (the spike's test set: 4K, WMV, …). */
+export type SceneGroup = {
+	label: string,
+	scenes: SceneListItem[],
+};
 
 /**  One row of the "recently added" picker. */
 export type SceneListItem = {

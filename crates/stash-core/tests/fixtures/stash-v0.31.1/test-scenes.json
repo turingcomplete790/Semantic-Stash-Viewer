@@ -1,0 +1,358 @@
+{
+ "data": {
+  "fourKH264": {
+   "scenes": [
+    {
+     "id": "19810",
+     "title": "Test scene 1",
+     "files": [
+      {
+       "basename": "test-1.mp4",
+       "duration": 11.84,
+       "width": 3840,
+       "height": 2160,
+       "video_codec": "h264",
+       "format": "mp4"
+      }
+     ]
+    },
+    {
+     "id": "19594",
+     "title": "Test scene 2",
+     "files": [
+      {
+       "basename": "test-2.mp4",
+       "duration": 30.17,
+       "width": 3840,
+       "height": 2160,
+       "video_codec": "h264",
+       "format": "mp4"
+      }
+     ]
+    },
+    {
+     "id": "19351",
+     "title": "Test scene 3",
+     "files": [
+      {
+       "basename": "test-3.mp4",
+       "duration": 10.01,
+       "width": 3840,
+       "height": 2160,
+       "video_codec": "h264",
+       "format": "mp4"
+      }
+     ]
+    }
+   ]
+  },
+  "fourKHevc": {
+   "scenes": [
+    {
+     "id": "15564",
+     "title": "",
+     "files": [
+      {
+       "basename": "test-4.mp4",
+       "duration": 59.09,
+       "width": 3840,
+       "height": 2160,
+       "video_codec": "hevc",
+       "format": "mp4"
+      }
+     ]
+    },
+    {
+     "id": "17743",
+     "title": "Test scene 5",
+     "files": [
+      {
+       "basename": "test-5.mp4",
+       "duration": 60.06,
+       "width": 2160,
+       "height": 3840,
+       "video_codec": "hevc",
+       "format": "mp4"
+      }
+     ]
+    },
+    {
+     "id": "18836",
+     "title": "Test scene 6",
+     "files": [
+      {
+       "basename": "test-6.mp4",
+       "duration": 60.86,
+       "width": 3840,
+       "height": 2160,
+       "video_codec": "hevc",
+       "format": "mp4"
+      }
+     ]
+    }
+   ]
+  },
+  "aboveFourK": {
+   "scenes": [
+    {
+     "id": "11647",
+     "title": "Test scene 7",
+     "files": [
+      {
+       "basename": "test-7.mp4",
+       "duration": 3849.56,
+       "width": 6912,
+       "height": 3456,
+       "video_codec": "hevc",
+       "format": "mp4"
+      }
+     ]
+    },
+    {
+     "id": "11648",
+     "title": "",
+     "files": [
+      {
+       "basename": "test-8.mp4",
+       "duration": 3947.35,
+       "width": 6912,
+       "height": 3456,
+       "video_codec": "hevc",
+       "format": "mp4"
+      }
+     ]
+    }
+   ]
+  },
+  "wmvHd": {
+   "scenes": [
+    {
+     "id": "23413",
+     "title": "Test scene 9",
+     "files": [
+      {
+       "basename": "test-9.wmv",
+       "duration": 1624.79,
+       "width": 1920,
+       "height": 1080,
+       "video_codec": "wmv3",
+       "format": "wmv"
+      }
+     ]
+    },
+    {
+     "id": "23242",
+     "title": "Test scene 10",
+     "files": [
+      {
+       "basename": "test-10.wmv",
+       "duration": 1799.96,
+       "width": 1920,
+       "height": 1080,
+       "video_codec": "wmv3",
+       "format": "wmv"
+      }
+     ]
+    },
+    {
+     "id": "23230",
+     "title": "Test scene 11",
+     "files": [
+      {
+       "basename": "test-11.wmv",
+       "duration": 1363.89,
+       "width": 1920,
+       "height": 1080,
+       "video_codec": "wmv3",
+       "format": "wmv"
+      }
+     ]
+    }
+   ]
+  },
+  "vp9Hd": {
+   "scenes": [
+    {
+     "id": "8203",
+     "title": "",
+     "files": [
+      {
+       "basename": "test-12.webm",
+       "duration": 11.84,
+       "width": 1920,
+       "height": 1080,
+       "video_codec": "vp9",
+       "format": "webm"
+      }
+     ]
+    },
+    {
+     "id": "29520",
+     "title": "Test scene 13",
+     "files": [
+      {
+       "basename": "test-13.webm",
+       "duration": 12.9,
+       "width": 1920,
+       "height": 1080,
+       "video_codec": "vp9",
+       "format": "webm"
+      }
+     ]
+    },
+    {
+     "id": "16263",
+     "title": "Test scene 14",
+     "files": [
+      {
+       "basename": "test-14.webm",
+       "duration": 10,
+       "width": 1670,
+       "height": 1080,
+       "video_codec": "vp9",
+       "format": "webm"
+      }
+     ]
+    }
+   ]
+  },
+  "av1": {
+   "scenes": [
+    {
+     "id": "8784",
+     "title": "Test scene 15",
+     "files": [
+      {
+       "basename": "test-15.mp4",
+       "duration": 683.6,
+       "width": 1280,
+       "height": 720,
+       "video_codec": "av1",
+       "format": "mp4"
+      }
+     ]
+    },
+    {
+     "id": "19137",
+     "title": "",
+     "files": [
+      {
+       "basename": "test-16.mp4",
+       "duration": 60.22,
+       "width": 3840,
+       "height": 2160,
+       "video_codec": "av1",
+       "format": "mp4"
+      }
+     ]
+    },
+    {
+     "id": "15592",
+     "title": "Test scene 17",
+     "files": [
+      {
+       "basename": "test-17.mp4",
+       "duration": 322.32,
+       "width": 1920,
+       "height": 1080,
+       "video_codec": "av1",
+       "format": "mp4"
+      }
+     ]
+    }
+   ]
+  },
+  "mpeg4": {
+   "scenes": [
+    {
+     "id": "4551",
+     "title": "Test scene 18",
+     "files": [
+      {
+       "basename": "test-18.avi",
+       "duration": 844.28,
+       "width": 640,
+       "height": 480,
+       "video_codec": "mpeg4",
+       "format": "avi"
+      }
+     ]
+    },
+    {
+     "id": "666",
+     "title": "Test scene 19",
+     "files": [
+      {
+       "basename": "test-19.mp4",
+       "duration": 5288.05,
+       "width": 640,
+       "height": 480,
+       "video_codec": "mpeg4",
+       "format": "mp4"
+      }
+     ]
+    },
+    {
+     "id": "9598",
+     "title": "",
+     "files": [
+      {
+       "basename": "test-20.avi",
+       "duration": 2540.17,
+       "width": 512,
+       "height": 288,
+       "video_codec": "mpeg4",
+       "format": "avi"
+      }
+     ]
+    }
+   ]
+  },
+  "flv": {
+   "scenes": [
+    {
+     "id": "27343",
+     "title": "Test scene 21",
+     "files": [
+      {
+       "basename": "test-21.flv",
+       "duration": 1278.68,
+       "width": 640,
+       "height": 360,
+       "video_codec": "h264",
+       "format": "flv"
+      }
+     ]
+    },
+    {
+     "id": "27351",
+     "title": "Test scene 22",
+     "files": [
+      {
+       "basename": "test-22.flv",
+       "duration": 1264.93,
+       "width": 640,
+       "height": 360,
+       "video_codec": "h264",
+       "format": "flv"
+      }
+     ]
+    },
+    {
+     "id": "27348",
+     "title": "Test scene 23",
+     "files": [
+      {
+       "basename": "test-23.flv",
+       "duration": 1480.91,
+       "width": 640,
+       "height": 360,
+       "video_codec": "h264",
+       "format": "flv"
+      }
+     ]
+    }
+   ]
+  }
+ }
+}

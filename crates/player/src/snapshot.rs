@@ -62,3 +62,17 @@ impl Default for PlayerSnapshot {
         }
     }
 }
+
+/// Playback measurements for the spike's decision record (debug builds only).
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct PlayerStats {
+    /// From opening a scene to its first rendered frame (filled in by T031).
+    pub open_to_first_frame_ms: Option<f64>,
+    /// From the last seek to the next rendered frame (filled in by T031).
+    pub last_seek_to_frame_ms: Option<f64>,
+    /// mpv `frame-drop-count` + `decoder-frame-drop-count`; `i32` keeps it TypeScript-safe.
+    pub dropped_frames: i32,
+    pub hwdec: Option<String>,
+}

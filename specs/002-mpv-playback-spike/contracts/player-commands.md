@@ -78,7 +78,7 @@ type PlayerStats = {           // debug builds only
 | `player_open` | `sceneId: string` | `PlayerSnapshot` | Looks up the scene, builds the direct stream URL, starts playback. Fails with `AppError` if not connected; playback errors arrive as `state: "error"` |
 | `player_close` | — | `void` | Stops mpv, releases audio/video, hides the video surface (FR-007) |
 | `player_toggle_pause` | — | `void` | Also `player_set_paused(paused: boolean)` |
-| `player_seek` | `positionSeconds: number` | `void` | Absolute seek; keyframe-fast while dragging, exact on release (`exact: boolean`) |
+| `player_seek` | `positionSeconds: number`, `exact: boolean` | `void` | Absolute seek, always to the exact frame. `exact: false` = drag position (coalesced: only the latest is sent while a seek settles); `exact: true` = release (supersedes queued drag positions) |
 | `player_seek_relative` | `seconds: number` | `void` | ±10 for skip and arrow keys |
 | `player_set_speed` | `speed: number` | `void` | Clamped to 0.25–4.0; pitch preserved |
 | `player_set_volume` | `volume: number` | `void` | 0–100 |

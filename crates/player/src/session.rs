@@ -14,8 +14,9 @@ use libmpv2::events::{Event, PropertyData};
 use libmpv2::{mpv_end_file_reason, Format, Mpv};
 use tokio::sync::watch;
 
+use crate::commands::{spawn_worker, FrameDirection, PlayerCommand};
 use crate::error::PlayerError;
-use crate::snapshot::{PlayerSnapshot, PlayerStateKind};
+use crate::snapshot::{PlayerSnapshot, PlayerStateKind, PlayerStats};
 use crate::tracks::read_tracks;
 
 /// Minimum spacing between position-only updates while playing.
@@ -53,7 +54,19 @@ pub struct OpenRequest {
     pub api_key: Option<String>,
     /// Profile's strict certificate checking (`tls-verify`).
     pub strict_tls: bool,
+    /// Demuxer cache for this file, or `None` for mpv's defaults (research R5c).
+    pub cache: Option<CacheLimits>,
 }
+
+/// Demuxer cache limits: `demuxer-max-bytes` and `demuxer-max-back-bytes`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CacheLimits {
+    pub forward_bytes: u64,
+    pub back_bytes: u64,
+}
+
+/// mpv's defaults for `demuxer-max-bytes` / `demuxer-max-back-bytes`.
+const DEFAULT_CACHE: (&str, &str) = ("150MiB", "50MiB");
 
 pub(crate) struct Inner {
     pub(crate) mpv: Mpv,
@@ -63,17 +76,27 @@ pub(crate) struct Inner {
     last_position_emit: Mutex<Instant>,
     /// A seek is in flight (until mpv's `playback-restart`). mpv drops frame steps sent during
     /// a seek, so they're queued in `pending_step` and sent once it settles.
-    seeking: AtomicBool,
-    pending_step: Mutex<Option<&'static str>>,
+    pub(crate) seeking: AtomicBool,
+    pub(crate) pending_step: Mutex<Option<&'static str>>,
     /// Unpause again once the in-flight seek settles (replay). An unpause sent together with the
     /// seek can race it: at end of file with `keep-open`, mpv would pause itself again.
-    resume_after_seek: AtomicBool,
+    pub(crate) resume_after_seek: AtomicBool,
+    /// Latest drag seek waiting for the in-flight one to settle, and when that one started.
+    /// Coalescing drag seeks stops scrubbing from flooding mpv (visible flicker on high-res
+    /// files, where each seek restarts decoding from a keyframe).
+    pub(crate) pending_seek: Mutex<Option<f64>>,
+    pub(crate) seek_started: Mutex<Instant>,
+    /// Target of the last seek sent to mpv, so a release on the same spot isn't re-decoded.
+    pub(crate) last_seek_target: Mutex<Option<f64>>,
 }
 
 /// One mpv core. At most one scene plays at a time.
 pub struct Player {
     pub(crate) inner: Arc<Inner>,
     events: Option<JoinHandle<()>>,
+    /// Queue for `dispatch`; `None` once dropped (stops the worker).
+    commands: Option<std::sync::mpsc::Sender<PlayerCommand>>,
+    command_worker: Option<JoinHandle<()>>,
 }
 
 // Observed property ids.
@@ -87,7 +110,7 @@ const P_EOF: u64 = 7;
 const P_HWDEC: u64 = 8;
 const P_TRACKS: u64 = 9;
 
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
 }
 
@@ -159,6 +182,9 @@ impl Player {
             seeking: AtomicBool::new(false),
             pending_step: Mutex::new(None),
             resume_after_seek: AtomicBool::new(false),
+            pending_seek: Mutex::new(None),
+            seek_started: Mutex::new(Instant::now()),
+            last_seek_target: Mutex::new(None),
         });
 
         let for_thread = Arc::clone(&inner);
@@ -169,9 +195,16 @@ impl Player {
                 detail: format!("could not start the mpv event thread: {e}"),
             })?;
 
+        let (commands, command_worker) =
+            spawn_worker(Arc::clone(&inner)).map_err(|e| PlayerError::PlaybackFailed {
+                detail: format!("could not start the mpv command thread: {e}"),
+            })?;
+
         Ok(Self {
             inner,
             events: Some(events),
+            commands: Some(commands),
+            command_worker: Some(command_worker),
         })
     }
 
@@ -204,9 +237,23 @@ impl Player {
             .as_deref()
             .map(|key| format!("ApiKey: {key}"))
             .unwrap_or_default();
+        let (forward, back) = request.cache.map_or(
+            (DEFAULT_CACHE.0.to_owned(), DEFAULT_CACHE.1.to_owned()),
+            |c| (c.forward_bytes.to_string(), c.back_bytes.to_string()),
+        );
         let result = inner
             .mpv
             .set_property("http-header-fields", header.as_str())
+            .and_then(|()| {
+                inner
+                    .mpv
+                    .set_property("demuxer-max-bytes", forward.as_str())
+            })
+            .and_then(|()| {
+                inner
+                    .mpv
+                    .set_property("demuxer-max-back-bytes", back.as_str())
+            })
             .and_then(|()| inner.mpv.set_property("tls-verify", request.strict_tls))
             .and_then(|()| inner.mpv.set_property("speed", 1.0))
             .and_then(|()| inner.mpv.set_property("pause", false))
@@ -229,72 +276,74 @@ impl Player {
         });
     }
 
+    /// Queue a command for the `mpv-commands` worker and return immediately (contract
+    /// invariant 1: a UI click never waits on mpv).
+    pub fn dispatch(&self, command: PlayerCommand) {
+        if let Some(tx) = &self.commands {
+            let _ = tx.send(command);
+        }
+    }
+
     pub fn toggle_pause(&self) {
-        let _ = self.inner.mpv.command("cycle", &["pause"]);
+        self.inner.apply(PlayerCommand::TogglePause);
     }
 
     pub fn set_paused(&self, paused: bool) {
-        let _ = self.inner.mpv.set_property("pause", paused);
+        self.inner.apply(PlayerCommand::SetPaused(paused));
     }
 
-    /// Absolute seek. `exact` for a precise landing (on release); otherwise keyframe-fast
-    /// (while dragging).
+    /// Absolute seek. `exact` for a precise landing; otherwise keyframe-fast.
     pub fn seek(&self, position_seconds: f64, exact: bool) {
-        let flags = if exact {
-            "absolute+exact"
-        } else {
-            "absolute+keyframes"
-        };
-        let target = format!("{:.3}", position_seconds.max(0.0));
-        self.inner.seeking.store(true, Ordering::SeqCst);
-        let _ = self.inner.mpv.command("seek", &[&target, flags]);
+        self.inner.apply(PlayerCommand::Seek {
+            position_seconds,
+            exact,
+        });
     }
 
     pub fn seek_relative(&self, seconds: f64) {
-        let offset = format!("{seconds:.3}");
-        self.inner.seeking.store(true, Ordering::SeqCst);
-        let _ = self.inner.mpv.command("seek", &[&offset, "relative+exact"]);
+        self.inner.apply(PlayerCommand::SeekRelative(seconds));
     }
 
-    /// Clamped to 0.25–4.0; pitch is preserved (`audio-pitch-correction`).
+    /// Clamped to 0.25–4.0; pitch is preserved.
     pub fn set_speed(&self, speed: f64) {
-        let _ = self
-            .inner
-            .mpv
-            .set_property("speed", speed.clamp(MIN_SPEED, MAX_SPEED));
+        self.inner.apply(PlayerCommand::SetSpeed(speed));
     }
 
     /// Clamped to 0–100.
     pub fn set_volume(&self, volume: f64) {
-        let _ = self
-            .inner
-            .mpv
-            .set_property("volume", volume.clamp(0.0, 100.0));
+        self.inner.apply(PlayerCommand::SetVolume(volume));
     }
 
     pub fn set_muted(&self, muted: bool) {
-        let _ = self.inner.mpv.set_property("mute", muted);
+        self.inner.apply(PlayerCommand::SetMuted(muted));
     }
 
     /// One frame forward. Ignored unless paused (mpv would pause as a side effect).
     pub fn frame_step_forward(&self) {
-        self.inner.frame_step("frame-step");
+        self.inner
+            .apply(PlayerCommand::FrameStep(FrameDirection::Forward));
     }
 
     /// One frame back. Ignored unless paused.
     pub fn frame_step_back(&self) {
-        self.inner.frame_step("frame-back-step");
+        self.inner
+            .apply(PlayerCommand::FrameStep(FrameDirection::Back));
     }
 
     /// From Ended (or anywhere): back to the start and play (FR-015).
     pub fn replay(&self) {
-        // Unpause now, and again once the seek settles: at end of file with `keep-open`, mpv
-        // can re-pause if the unpause lands before the seek does. The second unpause is a no-op
-        // when the first one stuck.
-        self.inner.resume_after_seek.store(true, Ordering::SeqCst);
-        self.inner.seeking.store(true, Ordering::SeqCst);
-        let _ = self.inner.mpv.command("seek", &["0", "absolute+exact"]);
-        let _ = self.inner.mpv.set_property("pause", false);
+        self.inner.apply(PlayerCommand::Replay);
+    }
+
+    /// Measurements for the decision record (debug builds expose this to the UI).
+    pub fn stats(&self) -> PlayerStats {
+        let count = |name: &str| self.inner.mpv.get_property::<i64>(name).unwrap_or(0);
+        let dropped = count("frame-drop-count") + count("decoder-frame-drop-count");
+        PlayerStats {
+            dropped_frames: i32::try_from(dropped).unwrap_or(i32::MAX),
+            hwdec: self.snapshot().hwdec,
+            ..PlayerStats::default()
+        }
     }
 
     /// Mirror the window's fullscreen state into snapshots (the window itself is toggled by
@@ -306,6 +355,11 @@ impl Player {
 
 impl Drop for Player {
     fn drop(&mut self) {
+        // Closing the queue ends the command worker once it has drained.
+        self.commands.take();
+        if let Some(handle) = self.command_worker.take() {
+            let _ = handle.join();
+        }
         self.inner.shutdown.store(true, Ordering::SeqCst);
         if let Some(handle) = self.events.take() {
             let _ = handle.join();
@@ -326,7 +380,22 @@ impl Inner {
     }
 
     /// Send a frame-step command now, or queue it until an in-flight seek settles.
-    fn frame_step(&self, command: &'static str) {
+    /// Issue an exact seek immediately and mark it in flight.
+    ///
+    /// Always exact, including while dragging: keyframe seeks show the nearest keyframe (often
+    /// seconds away on high-res files), and the exact seek on release then visibly jumps to a
+    /// different frame. Coalescing keeps exact drag seeks affordable: measured on the dev
+    /// machine, exact seeks take ~110 ms (4K H.264), ~150 ms (1080p), ~300 ms (4K HEVC).
+    pub(crate) fn seek_now(&self, position_seconds: f64) {
+        let position = position_seconds.max(0.0);
+        let target = format!("{position:.3}");
+        self.seeking.store(true, Ordering::SeqCst);
+        *lock(&self.seek_started) = Instant::now();
+        *lock(&self.last_seek_target) = Some(position);
+        let _ = self.mpv.command("seek", &[&target, "absolute+exact"]);
+    }
+
+    pub(crate) fn frame_step(&self, command: &'static str) {
         if !lock(&self.state).paused {
             return;
         }
@@ -385,6 +454,11 @@ impl Inner {
                     if self.resume_after_seek.swap(false, Ordering::SeqCst) {
                         let _ = self.mpv.set_property("pause", false);
                     }
+                    // Send the latest coalesced drag position, if any.
+                    let pending = lock(&self.pending_seek).take();
+                    if let Some(position) = pending {
+                        self.seek_now(position);
+                    }
                 }
                 Ok(Event::EndFile(reason)) => {
                     // Errors surface as `Err` below; a stop leaves the state `close` set.
@@ -418,6 +492,14 @@ impl Inner {
     fn on_property(&self, id: u64, change: PropertyData<'_>) {
         match (id, change) {
             (P_TIME_POS, PropertyData::Double(pos)) => {
+                // Once playback has moved away from the last seek target, a release on that
+                // spot is a real seek again.
+                {
+                    let mut last = lock(&self.last_seek_target);
+                    if last.is_some_and(|t| (pos - t).abs() > 0.5) {
+                        last.take();
+                    }
+                }
                 let paused = lock(&self.state).paused;
                 let due = lock(&self.last_position_emit).elapsed() >= POSITION_THROTTLE;
                 if paused || due {

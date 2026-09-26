@@ -1,9 +1,19 @@
-import { createEffect, createResource, createSignal, For, onCleanup, Show } from "solid-js";
+import {
+  createEffect,
+  createResource,
+  createSignal,
+  For,
+  onCleanup,
+  onMount,
+  Show,
+} from "solid-js";
 import { commands } from "../bindings";
-import type { AppError } from "../bindings";
+import type { AppError, SceneListItem } from "../bindings";
 import { appErrorMessage } from "../messages/failures";
 import { playerErrorMessage } from "../messages/player";
+import Controls from "./Controls";
 import { formatDuration } from "./format";
+import { handlePlayerKey } from "./keyboard";
 import { player } from "./state";
 import "../components/ConnectionForm.css";
 import "../components/ProfileManager.css";
@@ -20,6 +30,12 @@ export default function PlayerScreen(props: { onExit: () => void }) {
     if (res.status === "error") throw res.error;
     return res.data;
   });
+  // Spike test set: random 4K / WMV / VP9 / AV1 / MPEG-4 / FLV scenes (research R7).
+  const [testSets, { refetch: shuffleTestSets }] = createResource(async () => {
+    const res = await commands.listTestScenes();
+    if (res.status === "error") throw res.error;
+    return res.data;
+  });
   const [sceneId, setSceneId] = createSignal("");
   const [openError, setOpenError] = createSignal<AppError | null>(null);
 
@@ -28,6 +44,15 @@ export default function PlayerScreen(props: { onExit: () => void }) {
     document.documentElement.classList.toggle("player-open", player.isOpen());
   });
   onCleanup(() => document.documentElement.classList.remove("player-open"));
+
+  // Keyboard map while a scene is open (FR-009).
+  const onKey = (e: KeyboardEvent) => {
+    handlePlayerKey(e, player.snapshot());
+  };
+  onMount(() => document.addEventListener("keydown", onKey));
+  onCleanup(() => document.removeEventListener("keydown", onKey));
+
+  const showControls = () => ["playing", "paused", "ended"].includes(player.snapshot().state);
 
   async function play(id: string) {
     const trimmed = id.trim();
@@ -50,6 +75,10 @@ export default function PlayerScreen(props: { onExit: () => void }) {
             ✕
           </button>
         </div>
+
+        <Show when={showControls()}>
+          <Controls />
+        </Show>
 
         <Show when={player.snapshot().state === "loading"}>
           <div class="player-center">Loading…</div>
@@ -119,33 +148,59 @@ export default function PlayerScreen(props: { onExit: () => void }) {
         <h2 class="player-subtitle">Recently added</h2>
         <Show when={!recent.error} fallback={<p class="lede">Couldn't load recent scenes.</p>}>
           <Show when={recent()} fallback={<p class="lede">Loading…</p>}>
-            {(items) => (
-              <ul class="player-list">
-                <For each={items()}>
-                  {(scene) => (
-                    <li>
-                      <button
-                        type="button"
-                        class="player-row"
-                        aria-label={`Play ${scene.title}`}
-                        onClick={() => void play(scene.id)}
-                      >
-                        <span class="player-row-title">{scene.title}</span>
-                        <span class="player-row-meta">
-                          {[scene.resolution, scene.videoCodec].filter(Boolean).join(" · ")}
-                        </span>
-                        <span class="player-row-duration">
-                          {formatDuration(scene.durationSeconds ?? 0)}
-                        </span>
-                      </button>
-                    </li>
-                  )}
-                </For>
-              </ul>
+            {(items) => <SceneList scenes={items()} onPlay={(id) => void play(id)} />}
+          </Show>
+        </Show>
+
+        <div class="player-subtitle-row">
+          <h2 class="player-subtitle">Test scenes</h2>
+          <button type="button" onClick={() => void shuffleTestSets()}>
+            Shuffle
+          </button>
+        </div>
+        <p class="lede">
+          Random picks of hard-to-play formats: 4K, WMV, VP9, AV1, and older codecs.
+        </p>
+        <Show when={!testSets.error} fallback={<p class="lede">Couldn't load test scenes.</p>}>
+          <Show when={testSets()} fallback={<p class="lede">Loading…</p>}>
+            {(groups) => (
+              <For each={groups()}>
+                {(group) => (
+                  <section class="player-group" aria-label={group.label}>
+                    <h3 class="player-group-title">{group.label}</h3>
+                    <SceneList scenes={group.scenes} onPlay={(id) => void play(id)} />
+                  </section>
+                )}
+              </For>
             )}
           </Show>
         </Show>
       </section>
     );
   }
+}
+
+function SceneList(props: { scenes: SceneListItem[]; onPlay: (id: string) => void }) {
+  return (
+    <ul class="player-list">
+      <For each={props.scenes}>
+        {(scene) => (
+          <li>
+            <button
+              type="button"
+              class="player-row"
+              aria-label={`Play ${scene.title}`}
+              onClick={() => props.onPlay(scene.id)}
+            >
+              <span class="player-row-title">{scene.title}</span>
+              <span class="player-row-meta">
+                {[scene.resolution, scene.videoCodec, scene.container].filter(Boolean).join(" · ")}
+              </span>
+              <span class="player-row-duration">{formatDuration(scene.durationSeconds ?? 0)}</span>
+            </button>
+          </li>
+        )}
+      </For>
+    </ul>
+  );
 }
