@@ -159,15 +159,15 @@ shell), and `ui/` (SolidJS + TypeScript).
 
 ### Tests for User Story 4 ⚠️
 
-- [ ] T050 [US4] Extend `crates/stash-core/tests/profile_service.rs` (after T033): `delete_profile` removes the profile and clears `last_used_profile_id` when it matched; creating a duplicate `base_url` → `DuplicateProfile { existing_id }`; reorder persists across a store reopen
-- [ ] T051 [P] [US4] Profile manager component test in `ui/src/__tests__/ProfileManager.test.tsx`: lists profiles, with the API key visible in edit mode; delete asks for confirmation before calling `delete_profile`; a duplicate error offers "Open existing"; switching calls `connect` with the chosen id
+- [X] T050 [US4] Extend `crates/stash-core/tests/profile_service.rs` (after T033): `delete_profile` removes the profile and clears `last_used_profile_id` when it matched; creating a duplicate `base_url` → `DuplicateProfile { existing_id }`; reorder persists across a store reopen
+- [X] T051 [P] [US4] Profile manager component test in `ui/src/__tests__/ProfileManager.test.tsx`: lists profiles, with the API key visible in edit mode; delete asks for confirmation before calling `delete_profile`; a duplicate error offers "Open existing"; switching calls `connect` with the chosen id
 
 ### Implementation for User Story 4
 
-- [ ] T052 [US4] Add `delete_profile(id)` and `reorder_profiles(ids)` to `crates/stash-core/src/profiles/service.rs` (FR-011, FR-012). If the deleted profile is active, disconnect through `ConnectionManager` and clear `last_used_profile_id`
-- [ ] T053 [US4] Expose `delete_profile` and `reorder_profiles` in `src-tauri/src/commands.rs`, emit `profiles-changed` from `src-tauri/src/events.rs` after every mutation (create, update, delete, reorder), and regenerate `ui/src/bindings.ts`
-- [ ] T054 [US4] Build `ui/src/components/ProfileManager.tsx` (opened from the indicator's details popover and from the connection screen): a list with display name, address, and security setting; add (reuses `ConnectionForm`), edit with the API key shown as plain text (with the "save anyway" choice when validation fails), rename, a delete confirmation dialog, drag or up/down reordering, and switch-to. On a `duplicateProfile` failure, offer "Open existing" (US4 AS1–AS4, FR-010)
-- [ ] T055 [US4] Handle deletion of the active profile in `ui/src/App.tsx`: return to the connection screen, or show the profile picker when other profiles exist (US4 AS3)
+- [X] T052 [US4] Add `delete_profile(id)` and `reorder_profiles(ids)` to `crates/stash-core/src/profiles/service.rs` (FR-011, FR-012). If the deleted profile is active, disconnect through `ConnectionManager` and clear `last_used_profile_id`
+- [X] T053 [US4] Expose `delete_profile` and `reorder_profiles` in `src-tauri/src/commands.rs`, emit `profiles-changed` from `src-tauri/src/events.rs` after every mutation (create, update, delete, reorder), and regenerate `ui/src/bindings.ts`
+- [X] T054 [US4] Build `ui/src/components/ProfileManager.tsx` (opened from the indicator's details popover and from the connection screen): a list with display name, address, and security setting; add (reuses `ConnectionForm`), edit with the API key shown as plain text (with the "save anyway" choice when validation fails), rename, a delete confirmation dialog, drag or up/down reordering, and switch-to. On a `duplicateProfile` failure, offer "Open existing" (US4 AS1–AS4, FR-010)
+- [X] T055 [US4] Handle deletion of the active profile in `ui/src/App.tsx`: return to the connection screen, or show the profile picker when other profiles exist (US4 AS3)
 
 **Checkpoint**: all user stories work on their own. Quickstart V8 and V9 pass.
 

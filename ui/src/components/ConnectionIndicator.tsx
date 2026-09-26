@@ -9,6 +9,7 @@ import "./ConnectionIndicator.css";
 export default function ConnectionIndicator(props: {
   profileName?: string;
   onUpdateKey: () => void;
+  onManage?: () => void;
 }) {
   const state = () => connection.snapshot().state;
   const security = () => connection.snapshot().security;
@@ -81,6 +82,7 @@ export default function ConnectionIndicator(props: {
           security={security() ?? null}
           strictTls={connection.activeProfile()?.strictTls ?? false}
           onClose={() => setDetailsOpen(false)}
+          onManage={() => props.onManage?.()}
         />
       </Show>
     </div>

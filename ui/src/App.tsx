@@ -1,20 +1,26 @@
-import { createSignal, onMount, Show, type JSX } from "solid-js";
+import { createSignal, Match, onMount, Show, Switch, type JSX } from "solid-js";
 import { commands } from "./bindings";
 import ConnectionForm from "./components/ConnectionForm";
 import ConnectionIndicator from "./components/ConnectionIndicator";
 import KeyPrompt from "./components/KeyPrompt";
+import ProfileManager from "./components/ProfileManager";
+import ProfilePicker from "./components/ProfilePicker";
 import SessionView from "./components/SessionView";
 import { newRequestId } from "./lib/requestId";
 import { connection, initConnection, refreshProfiles } from "./state/connection";
 import "./App.css";
 
 /**
- * Routes on the core's connection state: the connection screen when no profile is active (or
- * the user chose to add another server), otherwise the session view. The core auto-connects to
- * the last-used profile at launch (FR-014); this only follows its events.
+ * Routes on the core's connection state:
+ * - adding a server → connection form;
+ * - no active profile → profile picker if servers are saved (e.g. after deleting the active
+ *   one), otherwise the connection form;
+ * - otherwise → the session view.
+ * The core auto-connects to the last-used profile at launch (FR-014); this only follows events.
  */
 export default function App() {
   const [adding, setAdding] = createSignal(false);
+  const [managerOpen, setManagerOpen] = createSignal(false);
   const [keyPromptOpen, setKeyPromptOpen] = createSignal(false);
 
   onMount(() => {
@@ -22,14 +28,16 @@ export default function App() {
     void refreshProfiles();
   });
 
-  const showForm = () => adding() || connection.snapshot().profileId === null;
+  const hasProfiles = () => connection.profiles().length > 0;
+  const noActive = () => connection.snapshot().profileId === null;
 
   function connectTo(profileId: string) {
+    setAdding(false);
     void commands.connect(profileId, newRequestId());
   }
 
-  async function addAnother() {
-    await commands.disconnect();
+  function startAdding() {
+    setManagerOpen(false);
     setAdding(true);
   }
 
@@ -37,40 +45,54 @@ export default function App() {
     <ConnectionIndicator
       profileName={connection.activeProfile()?.displayName}
       onUpdateKey={() => setKeyPromptOpen(true)}
+      onManage={() => setManagerOpen(true)}
     />
   );
 
   return (
     <AppLayout indicator={indicator}>
-      <Show
-        when={!showForm()}
-        fallback={
-          <ConnectionForm
-            onSaved={(profile) => {
-              setAdding(false);
-              void refreshProfiles().then(() => connectTo(profile.id));
-            }}
+      <Switch>
+        <Match when={adding() || (noActive() && !hasProfiles())}>
+          <div class="stack">
+            <Show when={adding() && hasProfiles()}>
+              <button type="button" class="back" onClick={() => setAdding(false)}>
+                ← Back
+              </button>
+            </Show>
+            <ConnectionForm
+              onSaved={(profile) => void refreshProfiles().then(() => connectTo(profile.id))}
+              onOpenExisting={connectTo}
+            />
+          </div>
+        </Match>
+        <Match when={noActive()}>
+          <ProfilePicker
+            onConnect={connectTo}
+            onAdd={startAdding}
+            onManage={() => setManagerOpen(true)}
           />
-        }
-      >
-        <SessionView
-          profile={connection.activeProfile()}
-          onAddAnother={() => void addAnother()}
-          onRetry={() => {
-            const id = connection.snapshot().profileId;
-            if (id) connectTo(id);
-          }}
-          onUpdateKey={() => setKeyPromptOpen(true)}
-        />
+        </Match>
+        <Match when={!noActive()}>
+          <SessionView
+            profile={connection.activeProfile()}
+            onAddAnother={startAdding}
+            onRetry={() => {
+              const id = connection.snapshot().profileId;
+              if (id) connectTo(id);
+            }}
+            onUpdateKey={() => setKeyPromptOpen(true)}
+          />
+        </Match>
+      </Switch>
+
+      <Show when={managerOpen()}>
+        <ProfileManager onClose={() => setManagerOpen(false)} onAdd={startAdding} />
       </Show>
       <Show when={keyPromptOpen() && connection.activeProfile()}>
         {(profile) => (
           <KeyPrompt
             profile={profile()}
-            onDone={() => {
-              setKeyPromptOpen(false);
-              void refreshProfiles();
-            }}
+            onDone={() => setKeyPromptOpen(false)}
             onCancel={() => setKeyPromptOpen(false)}
           />
         )}

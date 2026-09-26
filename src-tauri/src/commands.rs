@@ -7,10 +7,11 @@ use stash_core::connection::manager::{ConnectRequest, Target};
 use stash_core::connection::snapshot::{ConnectionSnapshot, SessionState};
 use stash_core::profiles::{service, ProfileDraft, ProfileSummary, ServerProfile};
 use stash_core::AppError;
-use tauri::State;
+use tauri::{AppHandle, State};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use crate::events::emit_profiles_changed;
 use crate::state::AppState;
 
 fn lock_err<T>(_: T) -> AppError {
@@ -57,6 +58,7 @@ pub fn cancel_request(state: State<'_, AppState>, request_id: String) -> Result<
 #[tauri::command]
 #[specta::specta]
 pub async fn create_profile(
+    app: AppHandle,
     state: State<'_, AppState>,
     draft: ProfileDraft,
 ) -> Result<ProfileSummary, AppError> {
@@ -67,6 +69,7 @@ pub async fn create_profile(
         ConnectOptions::default(),
     )
     .await?;
+    emit_profiles_changed(&app, &state);
     Ok(ProfileSummary::from(&profile))
 }
 
@@ -127,6 +130,7 @@ pub fn get_connection_snapshot(state: State<'_, AppState>) -> ConnectionSnapshot
 #[tauri::command]
 #[specta::specta]
 pub async fn update_profile(
+    app: AppHandle,
     state: State<'_, AppState>,
     profile_id: Uuid,
     draft: ProfileDraft,
@@ -144,7 +148,37 @@ pub async fn update_profile(
     if state.manager.active_profile_id() == Some(profile_id) {
         start_session(&state, &updated, false);
     }
+    emit_profiles_changed(&app, &state);
     Ok(ProfileSummary::from(&updated))
+}
+
+/// Delete a profile (FR-012; the UI confirms first). If it was active, the session goes Idle.
+#[tauri::command]
+#[specta::specta]
+pub fn delete_profile(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    profile_id: Uuid,
+) -> Result<(), AppError> {
+    service::delete_profile(&state.profiles, profile_id)?;
+    if state.manager.active_profile_id() == Some(profile_id) {
+        state.manager.disconnect();
+    }
+    emit_profiles_changed(&app, &state);
+    Ok(())
+}
+
+/// Reorder profiles to match `profile_ids` (FR-011).
+#[tauri::command]
+#[specta::specta]
+pub fn reorder_profiles(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    profile_ids: Vec<Uuid>,
+) -> Result<(), AppError> {
+    service::reorder_profiles(&state.profiles, &profile_ids)?;
+    emit_profiles_changed(&app, &state);
+    Ok(())
 }
 
 /// Start a session for a profile (also used for auto-connect at launch).

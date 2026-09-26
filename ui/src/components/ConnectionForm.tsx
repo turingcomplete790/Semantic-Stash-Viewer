@@ -16,6 +16,8 @@ type Phase =
 /** First-run / add-server screen (US1): address + optional API key → check → save. */
 export default function ConnectionForm(props: {
   onSaved: (profile: ProfileSummary, result: TestResult) => void;
+  /** Called with the existing profile's id when the server is already saved (US4 AS4). */
+  onOpenExisting?: (profileId: string) => void;
 }) {
   const [address, setAddress] = createSignal("");
   const [apiKey, setApiKey] = createSignal("");
@@ -164,12 +166,25 @@ export default function ConnectionForm(props: {
           {(p) => {
             const msg = () => appErrorMessage(p().error);
             const isWrongKey = () => failureKind(p().error) === "apiKeyInvalidButNotRequired";
+            const existingId = () => {
+              const e = p().error;
+              return e.kind === "connect" && e.failure.kind === "duplicateProfile"
+                ? e.failure.existingId
+                : undefined;
+            };
             return (
               <div class="notice error" role="alert">
                 <strong>{msg().title}</strong>
                 <p>{msg().detail}</p>
                 <Show when={msg().hint}>
                   <p class="hint">{msg().hint}</p>
+                </Show>
+                <Show when={props.onOpenExisting && existingId()}>
+                  {(id) => (
+                    <button type="button" onClick={() => props.onOpenExisting?.(id())}>
+                      Open existing
+                    </button>
+                  )}
                 </Show>
                 <Show when={isWrongKey()}>
                   <button type="button" onClick={() => void connectWithoutKey()}>

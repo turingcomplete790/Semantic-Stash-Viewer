@@ -28,11 +28,16 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::cancel_request,
             commands::create_profile,
             commands::update_profile,
+            commands::delete_profile,
+            commands::reorder_profiles,
             commands::connect,
             commands::disconnect,
             commands::get_connection_snapshot,
         ])
-        .events(collect_events![events::ConnectionStateEvent])
+        .events(collect_events![
+            events::ConnectionStateEvent,
+            events::ProfilesChangedEvent
+        ])
 }
 
 /// Write `ui/src/bindings.ts`.

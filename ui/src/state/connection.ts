@@ -26,13 +26,16 @@ export const connection = {
 };
 
 let unlisten: (() => void) | undefined;
+let unlistenProfiles: (() => void) | undefined;
 
 /**
- * Subscribe to `connection-state`, then hydrate with `getConnectionSnapshot()`. Events that
+ * Subscribe to `connection-state` and `profiles-changed`, then hydrate with `getConnectionSnapshot()`. Events that
  * arrive while hydrating win over the (older) hydrated snapshot.
  */
 export async function initConnection(): Promise<void> {
   unlisten?.();
+  unlistenProfiles?.();
+  unlistenProfiles = await events.profilesChanged.listen((e) => setProfiles(e.payload));
   let sawEvent = false;
   unlisten = await events.connectionState.listen((e) => {
     sawEvent = true;

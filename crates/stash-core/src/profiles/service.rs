@@ -126,6 +126,20 @@ pub fn mark_used(store: &Mutex<ProfileStore>, id: Uuid) -> Result<(), AppError> 
     store.set_last_used(Some(id))
 }
 
+/// Delete a profile (FR-012; the UI confirms first). Its API key goes with it, since the key is
+/// stored on the profile. Clears `last_used_profile_id` if it pointed here. Disconnecting an
+/// active session is the caller's job.
+pub fn delete_profile(store: &Mutex<ProfileStore>, id: Uuid) -> Result<ServerProfile, AppError> {
+    let removed = lock(store)?.remove(id)?;
+    tracing::info!(%id, "profile deleted");
+    Ok(removed)
+}
+
+/// Reorder profiles to match `ids`; unlisted profiles keep their order at the end (FR-011).
+pub fn reorder_profiles(store: &Mutex<ProfileStore>, ids: &[Uuid]) -> Result<(), AppError> {
+    lock(store)?.reorder(ids)
+}
+
 /// Reject an over-long display name before touching the network.
 fn precheck_name(draft: &ProfileDraft) -> Result<(), AppError> {
     if let Some(name) = draft.display_name.as_deref() {

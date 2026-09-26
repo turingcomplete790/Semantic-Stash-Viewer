@@ -9,6 +9,7 @@ export default function ConnectionDetails(props: {
   security: SecurityState | null;
   strictTls: boolean;
   onClose: () => void;
+  onManage: () => void;
 }) {
   let panel: HTMLDivElement | undefined;
 
@@ -47,6 +48,16 @@ export default function ConnectionDetails(props: {
         <dt>Strict certificate checking</dt>
         <dd>{props.strictTls ? "On" : "Off"}</dd>
       </dl>
+      <button
+        type="button"
+        class="conn-manage"
+        onClick={() => {
+          props.onClose();
+          props.onManage();
+        }}
+      >
+        Manage servers
+      </button>
     </div>
   );
 }

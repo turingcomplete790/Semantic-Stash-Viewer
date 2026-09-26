@@ -2,7 +2,9 @@ use std::sync::Mutex;
 
 use stash_core::connection::connect::ConnectOptions;
 use stash_core::connection::ConnectFailure;
-use stash_core::profiles::service::{create_profile, update_profile};
+use stash_core::profiles::service::{
+    create_profile, delete_profile, reorder_profiles, update_profile,
+};
 use stash_core::profiles::{ProfileDraft, ProfileStore};
 use stash_core::AppError;
 use tokio_util::sync::CancellationToken;
@@ -284,4 +286,71 @@ async fn update_unknown_profile_is_not_found() {
     .await
     .expect_err("not found");
     assert_eq!(err, AppError::ProfileNotFound { id });
+}
+
+// ---- delete / reorder (T050, FR-011, FR-012) ----
+
+#[tokio::test]
+async fn delete_removes_profile_and_clears_last_used() {
+    let server_a = stash().await;
+    let server_b = stash().await;
+    let (dir, store) = store();
+    let a = saved(&server_a, &store, Some("key-a")).await;
+    let b = saved(&server_b, &store, None).await; // b is now last-used
+
+    let removed = delete_profile(&store, b).expect("delete");
+    assert_eq!(removed.id, b);
+    {
+        let s = store.lock().expect("lock");
+        assert_eq!(s.list().iter().map(|p| p.id).collect::<Vec<_>>(), vec![a]);
+        assert_eq!(s.last_used_profile_id(), None);
+    }
+
+    // Persisted: a fresh store from the same file agrees, and the deleted key is gone.
+    let reopened = ProfileStore::open(dir.path().join("profiles.json")).expect("reopen");
+    assert!(reopened.get(b).is_none());
+    let text = std::fs::read_to_string(dir.path().join("profiles.json")).expect("read");
+    assert!(text.contains("key-a"));
+    assert!(!text.contains(&b.to_string()));
+}
+
+#[tokio::test]
+async fn delete_keeps_last_used_when_it_points_elsewhere() {
+    let server_a = stash().await;
+    let server_b = stash().await;
+    let (_dir, store) = store();
+    let a = saved(&server_a, &store, None).await;
+    let b = saved(&server_b, &store, None).await;
+
+    delete_profile(&store, a).expect("delete");
+    assert_eq!(store.lock().expect("lock").last_used_profile_id(), Some(b));
+}
+
+#[tokio::test]
+async fn delete_unknown_profile_is_not_found() {
+    let (_dir, store) = store();
+    let id = uuid::Uuid::new_v4();
+    assert_eq!(
+        delete_profile(&store, id).expect_err("not found"),
+        AppError::ProfileNotFound { id }
+    );
+}
+
+#[tokio::test]
+async fn reorder_persists_across_reopen() {
+    let servers = [stash().await, stash().await, stash().await];
+    let (dir, store) = store();
+    let mut ids = Vec::new();
+    for server in &servers {
+        ids.push(saved(server, &store, None).await);
+    }
+
+    let wanted = vec![ids[2], ids[0], ids[1]];
+    reorder_profiles(&store, &wanted).expect("reorder");
+
+    let reopened = ProfileStore::open(dir.path().join("profiles.json")).expect("reopen");
+    assert_eq!(
+        reopened.list().iter().map(|p| p.id).collect::<Vec<_>>(),
+        wanted
+    );
 }

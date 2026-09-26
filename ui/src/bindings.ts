@@ -27,6 +27,10 @@ export const commands = {
 	 *  reconnects with the new settings.
 	 */
 	updateProfile: (profileId: string, draft: ProfileDraft, force: boolean) => typedError<ProfileSummary, AppError>(__TAURI_INVOKE("update_profile", { profileId, draft, force })),
+	/**  Delete a profile (FR-012; the UI confirms first). If it was active, the session goes Idle. */
+	deleteProfile: (profileId: string) => typedError<null, AppError>(__TAURI_INVOKE("delete_profile", { profileId })),
+	/**  Reorder profiles to match `profile_ids` (FR-011). */
+	reorderProfiles: (profileIds: string[]) => typedError<null, AppError>(__TAURI_INVOKE("reorder_profiles", { profileIds })),
 	/**
 	 *  Make a profile active and connect to it. Resolves once the attempt settles (connected,
 	 *  offline, auth failed, or failed); progress also arrives as `connection-state` events.
@@ -42,6 +46,7 @@ export const commands = {
 /** Events */
 export const events = {
 	connectionState: makeEvent<ConnectionStateEvent>("connection-state"),
+	profilesChanged: makeEvent<ProfilesChangedEvent>("profiles-changed"),
 };
 
 /* Types */
@@ -133,6 +138,9 @@ export type ProfileSummary = {
 	/**  ISO 8601. */
 	lastUsedAt: string | null,
 };
+
+/**  Emitted after every profile create, update, delete, or reorder, with the full list. */
+export type ProfilesChangedEvent = ProfileSummary[];
 
 /**  How secure the current connection is, shown in the connection indicator at all times. */
 export type SecurityState = 

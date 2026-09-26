@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => {
     emit: (payload: unknown) => handler?.({ payload }),
     commands: { getConnectionSnapshot: vi.fn() },
     events: {
+      profilesChanged: { listen: vi.fn(() => Promise.resolve(() => {})) },
       connectionState: {
         listen: vi.fn((h: (e: { payload: unknown }) => void) => {
           handler = h;

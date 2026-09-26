@@ -34,3 +34,8 @@
   font-size: 0.85rem;
   word-break: normal;
 }
+
+.conn-manage {
+  margin-top: 12px;
+  width: 100%;
+}
