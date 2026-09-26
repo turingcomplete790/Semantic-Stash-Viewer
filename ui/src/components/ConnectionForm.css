@@ -1,0 +1,104 @@
+.connect-card {
+  width: 100%;
+  max-width: 520px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 28px;
+}
+
+.connect-card h1 {
+  margin: 0 0 4px;
+  font-size: 1.4rem;
+}
+
+.lede {
+  margin: 0 0 20px;
+  color: var(--muted);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 14px;
+}
+
+.field > label {
+  font-weight: 500;
+}
+
+.field-check label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+
+.field small {
+  color: var(--muted);
+}
+
+.field input {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+button {
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.status {
+  color: var(--muted);
+}
+
+.notice {
+  margin-top: 20px;
+  padding: 14px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.notice.error {
+  border-color: var(--danger);
+}
+
+.notice.error strong {
+  color: var(--danger);
+}
+
+.notice p {
+  margin: 6px 0 0;
+}
+
+.notice .hint {
+  color: var(--muted);
+}
+
+.notice button {
+  margin-top: 10px;
+}

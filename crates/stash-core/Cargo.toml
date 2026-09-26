@@ -1,0 +1,38 @@
+[package]
+name = "stash-core"
+description = "Headless core for Semantic Stash Viewer: Stash adapter, connection logic, profiles"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# This crate MUST NOT depend on tauri (constitution Principle III).
+
+[features]
+default = []
+specta = ["dep:specta"]
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+url = { workspace = true }
+chrono = { workspace = true }
+specta = { workspace = true, optional = true }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "http2"] }
+graphql_client = "0.16"
+tokio-util = "0.7"
+semver = "1"
+
+[dev-dependencies]
+wiremock = "0.6"
+tempfile = "3"
+rcgen = "0.14"
+tokio-rustls = "0.26"
+tokio = { workspace = true, features = ["test-util", "net", "io-util"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,67 @@
+.conn-indicator {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.9rem;
+}
+
+.conn-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.conn-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.conn-connected .conn-dot {
+  background: var(--ok);
+}
+
+.conn-connecting .conn-dot,
+.conn-offline .conn-dot {
+  background: var(--warn);
+}
+
+.conn-authFailed .conn-dot,
+.conn-failed .conn-dot {
+  background: var(--danger);
+}
+
+.conn-detail,
+.conn-profile {
+  color: var(--muted);
+}
+
+.conn-profile::before {
+  content: "· ";
+}
+
+.conn-action,
+.conn-security {
+  padding: 3px 10px;
+  font-size: 0.85rem;
+}
+
+.conn-security {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sec-unencrypted {
+  color: var(--warn);
+}
+
+.sec-encryptedUnverified {
+  color: var(--text);
+}
+
+.sec-encryptedVerified {
+  color: var(--ok);
+}
