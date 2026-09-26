@@ -1,0 +1,36 @@
+.conn-details {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 320px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+  z-index: 5;
+}
+
+.conn-details dl {
+  margin: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.conn-details dt {
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin-top: 6px;
+}
+
+.conn-details dd {
+  margin: 0;
+  word-break: break-all;
+}
+
+.conn-details dd p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  word-break: normal;
+}

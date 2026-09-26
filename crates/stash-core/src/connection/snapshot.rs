@@ -5,6 +5,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use super::failure::ConnectFailure;
+use super::security::SecurityState;
 use super::ServerInfo;
 
 /// Session state (data-model.md "ConnectionState and transitions").
@@ -42,6 +43,8 @@ pub enum SessionState {
 pub struct ConnectionSnapshot {
     pub profile_id: Option<Uuid>,
     pub state: SessionState,
+    /// Known after the first successful handshake (FR-020).
+    pub security: Option<SecurityState>,
     /// Base URL after redirects, once known.
     pub final_url: Option<String>,
     /// From the last successful probe.

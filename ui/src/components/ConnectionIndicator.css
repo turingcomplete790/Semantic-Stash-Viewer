@@ -1,8 +1,15 @@
 .conn-indicator {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.9rem;
+}
+
+.conn-status {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 0.9rem;
 }
 
 .conn-dot {
@@ -35,7 +42,26 @@
   content: "· ";
 }
 
-.conn-action {
+.conn-action,
+.conn-security {
   padding: 3px 10px;
   font-size: 0.85rem;
+}
+
+.conn-security {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sec-unencrypted {
+  color: var(--warn);
+}
+
+.sec-encryptedUnverified {
+  color: var(--text);
+}
+
+.sec-encryptedVerified {
+  color: var(--ok);
 }

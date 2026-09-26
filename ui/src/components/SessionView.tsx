@@ -38,6 +38,7 @@ export default function SessionView(props: {
             name={name()}
             url={url()}
             server={server()}
+            security={snap().security}
             onAddAnother={props.onAddAnother}
           />
         )}

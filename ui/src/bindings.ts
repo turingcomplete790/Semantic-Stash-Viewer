@@ -92,6 +92,8 @@ export type ConnectFailure =
 export type ConnectionSnapshot = {
 	profileId: string | null,
 	state: SessionState,
+	/**  Known after the first successful handshake (FR-020). */
+	security: SecurityState | null,
 	/**  Base URL after redirects, once known. */
 	finalUrl: string | null,
 	/**  From the last successful probe. */
@@ -132,6 +134,15 @@ export type ProfileSummary = {
 	lastUsedAt: string | null,
 };
 
+/**  How secure the current connection is, shown in the connection indicator at all times. */
+export type SecurityState = 
+/**  Plain http. */
+"unencrypted" | 
+/**  https with certificate checking off (the default): encrypted, but nothing was verified. */
+"encryptedUnverified" | 
+/**  https with strict checking on and a successful handshake. */
+"encryptedVerified";
+
 /**  Facts read from the server on connect (data-model.md "ServerInfo"). */
 export type ServerInfo = {
 	/**  For example `v0.31.1`, or `unknown` if the server didn't report one. */
@@ -152,6 +163,7 @@ export type SessionState = { kind: "idle" } | { kind: "connecting"; attemptUrl: 
 export type TestResult = {
 	/**  Final base URL after redirects, as shown to the user. */
 	normalizedUrl: string,
+	security: SecurityState,
 	server: ServerInfo,
 };
 

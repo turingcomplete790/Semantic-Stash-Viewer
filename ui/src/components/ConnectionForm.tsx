@@ -20,13 +20,14 @@ export default function ConnectionForm(props: {
   const [address, setAddress] = createSignal("");
   const [apiKey, setApiKey] = createSignal("");
   const [displayName, setDisplayName] = createSignal("");
+  const [strictTls, setStrictTls] = createSignal(false);
   const [phase, setPhase] = createSignal<Phase>({ kind: "idle" });
 
   const draft = (): ProfileDraft => ({
     address: address().trim(),
     apiKey: apiKey().trim() || null,
     displayName: displayName().trim() || null,
-    strictTls: false,
+    strictTls: strictTls(),
   });
 
   async function connect() {
@@ -121,6 +122,23 @@ export default function ConnectionForm(props: {
             disabled={busy()}
           />
         </div>
+        <div class="field field-check">
+          <label>
+            <input
+              id="connect-strict"
+              type="checkbox"
+              checked={strictTls()}
+              onChange={(e) => setStrictTls(e.currentTarget.checked)}
+              disabled={busy()}
+              aria-describedby="connect-strict-hint"
+            />
+            Verify certificate (strict)
+          </label>
+          <small id="connect-strict-hint">
+            Off by default so self-hosted servers with self-signed certificates just work. Turn on
+            to refuse servers whose certificate can't be verified.
+          </small>
+        </div>
 
         <div class="actions">
           <Show
@@ -165,7 +183,11 @@ export default function ConnectionForm(props: {
         <Match when={checked()}>
           {(p) => (
             <div class="notice ok">
-              <ServerSummary url={p().result.normalizedUrl} server={p().result.server} />
+              <ServerSummary
+                url={p().result.normalizedUrl}
+                server={p().result.server}
+                security={p().result.security}
+              />
               <div class="actions">
                 <button
                   type="button"

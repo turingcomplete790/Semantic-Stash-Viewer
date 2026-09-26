@@ -25,6 +25,7 @@ import { connection, initConnection } from "../state/connection";
 const base: ConnectionSnapshot = {
   profileId: "p1",
   state: { kind: "idle" },
+  security: null,
   finalUrl: "http://localhost:9999",
   server: null,
   lastContactAt: null,
@@ -82,6 +83,34 @@ describe("ConnectionIndicator", () => {
     render(() => <ConnectionIndicator profileName="Home" onUpdateKey={() => {}} />);
     mocks.emit(snap({ kind: "failed", failure: { kind: "timeout" } }));
     await waitFor(() => expect(screen.getByText("Connection failed")).toBeInTheDocument());
+  });
+
+  it.each([
+    ["unencrypted", "Unencrypted"],
+    ["encryptedUnverified", "Encrypted, not verified"],
+    ["encryptedVerified", "Encrypted, verified"],
+  ] as const)("shows the %s security state", async (security, label) => {
+    render(() => <ConnectionIndicator profileName="Home" onUpdateKey={() => {}} />);
+    mocks.emit({ ...snap({ kind: "connected" }), security });
+    expect(await screen.findByText(label)).toBeInTheDocument();
+  });
+
+  it("opens details with the address, security state, and strict setting", async () => {
+    render(() => <ConnectionIndicator profileName="Home" onUpdateKey={() => {}} />);
+    mocks.emit({
+      ...snap({ kind: "connected" }),
+      security: "encryptedUnverified",
+      finalUrl: "https://stash.example.com",
+    });
+    fireEvent.click(await screen.findByRole("button", { name: /Encrypted, not verified/ }));
+    const details = screen.getByRole("dialog", { name: "Connection details" });
+    expect(details).toHaveTextContent("https://stash.example.com");
+    expect(details).toHaveTextContent("Encrypted, not verified");
+    expect(details).toHaveTextContent("Strict certificate checking");
+    expect(details).toHaveTextContent("Off");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 
   it("is a live status region", () => {

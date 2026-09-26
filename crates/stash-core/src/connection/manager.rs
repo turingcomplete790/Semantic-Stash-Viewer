@@ -17,6 +17,7 @@ use uuid::Uuid;
 
 use super::connect::server_info;
 use super::failure::ConnectFailure;
+use super::security::derive_security;
 use super::snapshot::{ConnectionSnapshot, SessionState};
 use super::ServerInfo;
 use crate::adapter::{health, probe, StashClient, DEFAULT_TIMEOUT};
@@ -314,6 +315,7 @@ impl<P: Prober> Inner<P> {
         let current = lock(&self.snapshot).clone();
         ConnectionSnapshot {
             profile_id: Some(target.profile_id),
+            security: current.security,
             final_url: current.final_url,
             server: current.server,
             last_contact_at: current.last_contact_at,
@@ -370,6 +372,7 @@ impl<P: Prober> Inner<P> {
                 ConnectionSnapshot {
                     profile_id: Some(target.profile_id),
                     state: SessionState::Connected,
+                    security: Some(derive_security(&target.base_url, target.strict_tls)),
                     final_url: Some(display_url(&target.base_url)),
                     server: Some(info),
                     last_contact_at: Some(now_iso()),

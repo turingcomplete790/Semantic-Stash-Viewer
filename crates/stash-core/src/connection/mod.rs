@@ -4,12 +4,14 @@ pub mod address;
 pub mod connect;
 pub mod failure;
 pub mod manager;
+pub mod security;
 pub mod snapshot;
 pub mod version;
 
 use serde::Serialize;
 
 pub use failure::ConnectFailure;
+pub use security::SecurityState;
 pub use version::VersionStatus;
 
 /// Library summary shown after connecting (FR-007).

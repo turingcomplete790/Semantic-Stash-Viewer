@@ -11,7 +11,9 @@ use stash_core::connection::manager::{
     ConnectRequest, ConnectionManager, ManagerConfig, Prober, Target,
 };
 use stash_core::connection::snapshot::{ConnectionSnapshot, SessionState};
-use stash_core::connection::{ConnectFailure, LibraryCounts, ServerInfo, VersionStatus};
+use stash_core::connection::{
+    ConnectFailure, LibraryCounts, SecurityState, ServerInfo, VersionStatus,
+};
 use tokio::sync::broadcast;
 use tokio::time::Instant;
 use url::Url;
@@ -160,6 +162,7 @@ async fn connects_then_goes_offline_on_health_failure() {
         Some("v0.31.1")
     );
     assert_eq!(connected.final_url.as_deref(), Some("http://stash:9999"));
+    assert_eq!(connected.security, Some(SecurityState::Unencrypted));
 
     let offline = next(&mut rx).await;
     assert_eq!(kind(&offline), "offline");

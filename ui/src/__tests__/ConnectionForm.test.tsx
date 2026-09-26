@@ -15,6 +15,7 @@ import ConnectionForm from "../components/ConnectionForm";
 
 const okResult: TestResult = {
   normalizedUrl: "http://localhost:9999",
+  security: "unencrypted",
   server: {
     version: "v0.31.1",
     versionStatus: "supported",
@@ -70,6 +71,28 @@ describe("ConnectionForm", () => {
       strictTls: false,
     });
     expect(typeof requestId).toBe("string");
+  });
+
+  it("has strict certificate checking off by default and sends it when turned on", async () => {
+    commands.testConnection.mockReturnValue(ok(okResult));
+    render(() => <ConnectionForm onSaved={() => {}} />);
+
+    const strict = screen.getByLabelText("Verify certificate (strict)");
+    expect(strict).not.toBeChecked();
+    fireEvent.click(strict);
+    fill("https://stash.example.com");
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+
+    await waitFor(() => expect(commands.testConnection).toHaveBeenCalledTimes(1));
+    expect(commands.testConnection.mock.calls[0][0].strictTls).toBe(true);
+  });
+
+  it("shows the connection security in the result", async () => {
+    commands.testConnection.mockReturnValue(ok(okResult));
+    render(() => <ConnectionForm onSaved={() => {}} />);
+    fill("localhost:9999");
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    expect(await screen.findByText("Unencrypted")).toBeInTheDocument();
   });
 
   it("shows Connecting immediately with a working Cancel", async () => {

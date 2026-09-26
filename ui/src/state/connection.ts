@@ -5,6 +5,7 @@ import type { ConnectionSnapshot, ProfileSummary } from "../bindings";
 const idle: ConnectionSnapshot = {
   profileId: null,
   state: { kind: "idle" },
+  security: null,
   finalUrl: null,
   server: null,
   lastContactAt: null,

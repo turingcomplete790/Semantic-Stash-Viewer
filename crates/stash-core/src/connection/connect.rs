@@ -9,6 +9,7 @@ use url::Url;
 
 use super::address::candidates;
 use super::failure::ConnectFailure;
+use super::security::{derive_security, SecurityState};
 use super::{version, ServerInfo};
 use crate::adapter::probe::{probe, ProbeData};
 use crate::adapter::{StashClient, DEFAULT_TIMEOUT};
@@ -34,6 +35,8 @@ impl Default for ConnectOptions {
 pub struct ConnectOutcome {
     /// Final base URL after redirects; this is what gets saved on the profile.
     pub base_url: Url,
+    /// From the final URL's scheme and the strict setting (FR-020).
+    pub security: SecurityState,
     pub server: ServerInfo,
 }
 
@@ -44,6 +47,7 @@ pub struct ConnectOutcome {
 pub struct TestResult {
     /// Final base URL after redirects, as shown to the user.
     pub normalized_url: String,
+    pub security: SecurityState,
     pub server: ServerInfo,
 }
 
@@ -51,6 +55,7 @@ impl From<&ConnectOutcome> for TestResult {
     fn from(o: &ConnectOutcome) -> Self {
         Self {
             normalized_url: display_url(&o.base_url),
+            security: o.security,
             server: o.server.clone(),
         }
     }
@@ -94,7 +99,7 @@ async fn try_candidates(
     for url in urls {
         let client = StashClient::with_timeout(url.clone(), strict_tls, api_key.clone(), timeout)?;
         match probe(&client).await {
-            Ok(data) => return accept(data),
+            Ok(data) => return accept(data, strict_tls),
             Err(f) if f.proves_stash() || f == ConnectFailure::CertificateNotVerified => {
                 return Err(f.into())
             }
@@ -120,9 +125,10 @@ async fn try_candidates(
 }
 
 /// Apply the version gate and build the outcome.
-fn accept(data: ProbeData) -> Result<ConnectOutcome, AppError> {
+fn accept(data: ProbeData, strict_tls: bool) -> Result<ConnectOutcome, AppError> {
     let server = server_info(&data)?;
     Ok(ConnectOutcome {
+        security: derive_security(&data.final_base_url, strict_tls),
         base_url: data.final_base_url,
         server,
     })

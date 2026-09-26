@@ -1,11 +1,16 @@
 import { For, Show } from "solid-js";
-import type { ServerInfo } from "../bindings";
+import type { SecurityState, ServerInfo } from "../bindings";
+import { securityText } from "../messages/security";
 import "./ServerSummary.css";
 
 const numberFormat = new Intl.NumberFormat("en-US");
 
 /** Address, Stash version, and library counts (FR-007). */
-export default function ServerSummary(props: { url: string; server: ServerInfo }) {
+export default function ServerSummary(props: {
+  url: string;
+  server: ServerInfo;
+  security?: SecurityState | null;
+}) {
   const counts = () => [
     { label: "Scenes", value: props.server.counts.scenes },
     { label: "Images", value: props.server.counts.images },
@@ -18,6 +23,14 @@ export default function ServerSummary(props: { url: string; server: ServerInfo }
       <dl class="server-facts">
         <dt>Address</dt>
         <dd>{props.url}</dd>
+        <Show when={props.security}>
+          {(sec) => (
+            <>
+              <dt>Connection</dt>
+              <dd>{securityText[sec()].label}</dd>
+            </>
+          )}
+        </Show>
         <dt>Stash version</dt>
         <dd>
           <span>{props.server.version}</span>
