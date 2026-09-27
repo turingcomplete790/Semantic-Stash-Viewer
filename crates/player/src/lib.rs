@@ -9,6 +9,7 @@ pub mod error;
 pub mod render;
 pub mod session;
 pub mod snapshot;
+mod timing;
 pub mod tracks;
 
 pub use commands::{FrameDirection, PlayerCommand};

@@ -197,9 +197,9 @@ export type PlayerStateKind = "idle" | "loading" | "playing" | "paused" |
 
 /**  Playback measurements for the spike's decision record (debug builds only). */
 export type PlayerStats = {
-	/**  From opening a scene to its first rendered frame (filled in by T031). */
+	/**  From opening a scene to its first rendered frame. */
 	openToFirstFrameMs: number | null,
-	/**  From the last seek to the next rendered frame (filled in by T031). */
+	/**  From the last seek to the next rendered frame. */
 	lastSeekToFrameMs: number | null,
 	/**  mpv `frame-drop-count` + `decoder-frame-drop-count`; `i32` keeps it TypeScript-safe. */
 	droppedFrames: number,

@@ -12,7 +12,7 @@ use player::{
 use serde::Serialize;
 use stash_core::adapter::scenes::{playable_scene, recent_scenes, test_scenes};
 use stash_core::adapter::StashClient;
-use stash_core::scenes::{is_direct_stream, SceneGroup, SceneListItem};
+use stash_core::scenes::{is_direct_stream, PlayableScene, SceneGroup, SceneListItem};
 use stash_core::AppError;
 use tauri::{AppHandle, Manager, State, WebviewWindow};
 use tauri_specta::Event;
@@ -74,7 +74,7 @@ pub fn sync_fullscreen_flag(window: &WebviewWindow, player: &Arc<Player>) {
     });
 }
 
-fn player(state: &AppState) -> Result<&Arc<Player>, AppError> {
+pub(crate) fn player(state: &AppState) -> Result<&Arc<Player>, AppError> {
     state.player.as_ref().ok_or_else(|| AppError::Internal {
         message: "the video player isn't available (libmpv failed to start; see the log)".into(),
     })
@@ -138,8 +138,17 @@ pub async fn player_open(
     state: State<'_, AppState>,
     scene_id: String,
 ) -> Result<PlayerSnapshot, AppError> {
-    let player = Arc::clone(player(&state)?);
-    let (client, api_key, strict_tls) = active_client(&state)?;
+    open_scene(&state, &scene_id).await?;
+    Ok(player(&state)?.snapshot())
+}
+
+/// Shared by `player_open` and the debug measurement mode.
+pub(crate) async fn open_scene(
+    state: &AppState,
+    scene_id: &str,
+) -> Result<PlayableScene, AppError> {
+    let player = Arc::clone(player(state)?);
+    let (client, api_key, strict_tls) = active_client(state)?;
     let scene = playable_scene(&client, scene_id.trim()).await?;
     if !is_direct_stream(&scene.stream_url) {
         // Can't happen (the URL is built by stash-core), but never hand mpv a transcode URL.
@@ -154,13 +163,13 @@ pub async fn player_open(
     tracing::info!(scene = %scene.id, sized_cache = cache.is_some(), "opening scene");
     player.open(OpenRequest {
         source: scene.stream_url.to_string(),
-        scene_id: Some(scene.id),
-        title: Some(scene.title),
+        scene_id: Some(scene.id.clone()),
+        title: Some(scene.title.clone()),
         api_key,
         strict_tls,
         cache,
     });
-    Ok(player.snapshot())
+    Ok(scene)
 }
 
 /// Stop playback and release audio/video (FR-007).

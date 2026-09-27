@@ -4,6 +4,8 @@
 mod commands;
 mod events;
 mod logging;
+#[cfg(debug_assertions)]
+mod measure;
 mod player_commands;
 mod state;
 #[cfg(target_os = "linux")]
@@ -101,6 +103,8 @@ pub fn run() {
             );
             auto_connect(&state);
             app.manage(state);
+            #[cfg(debug_assertions)]
+            measure::start_if_requested(app.handle());
             Ok(())
         })
         .run(tauri::generate_context!())

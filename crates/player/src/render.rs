@@ -4,7 +4,7 @@
 //! `wl_display` for hardware-decode interop; it calls `render` from its GL thread.
 //!
 //! **Drop order**: the render context must be destroyed before the `Mpv` handle. `Renderer`
-//! declares `ctx` before `_player`, so Rust drops the context first, and the `Arc` keeps mpv
+//! declares `ctx` before `player`, so Rust drops the context first, and the `Arc` keeps mpv
 //! alive until then.
 
 use std::ffi::c_void;
@@ -27,9 +27,9 @@ fn load(loader: &Loader, name: &str) -> *mut c_void {
 
 /// An mpv render context bound to a player. Not `Send`: use it on the GL thread only.
 pub struct Renderer {
-    // Field order matters: `ctx` is dropped before `_player` (see module docs).
+    // Field order matters: `ctx` is dropped before `player` (see module docs).
     ctx: RenderContext<'static>,
-    _player: Arc<Inner>,
+    player: Arc<Inner>,
 }
 
 impl Player {
@@ -62,7 +62,7 @@ impl Player {
         let ctx: RenderContext<'static> = unsafe { std::mem::transmute(ctx) };
         Ok(Renderer {
             ctx,
-            _player: Arc::clone(&self.inner),
+            player: Arc::clone(&self.inner),
         })
     }
 }
@@ -75,7 +75,9 @@ impl Renderer {
             .render::<Loader>(fbo, width, height, true)
             .map_err(|e| PlayerError::PlaybackFailed {
                 detail: format!("render failed: {e}"),
-            })
+            })?;
+        crate::session::lock(&self.player.timing).frame_rendered();
+        Ok(())
     }
 
     /// Tell mpv the frame was presented (improves frame pacing).

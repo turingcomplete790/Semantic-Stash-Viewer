@@ -68,9 +68,9 @@ impl Default for PlayerSnapshot {
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct PlayerStats {
-    /// From opening a scene to its first rendered frame (filled in by T031).
+    /// From opening a scene to its first rendered frame.
     pub open_to_first_frame_ms: Option<f64>,
-    /// From the last seek to the next rendered frame (filled in by T031).
+    /// From the last seek to the next rendered frame.
     pub last_seek_to_frame_ms: Option<f64>,
     /// mpv `frame-drop-count` + `decoder-frame-drop-count`; `i32` keeps it TypeScript-safe.
     pub dropped_frames: i32,

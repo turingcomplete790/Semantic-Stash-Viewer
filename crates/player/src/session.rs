@@ -17,6 +17,7 @@ use tokio::sync::watch;
 use crate::commands::{spawn_worker, FrameDirection, PlayerCommand};
 use crate::error::PlayerError;
 use crate::snapshot::{PlayerSnapshot, PlayerStateKind, PlayerStats};
+use crate::timing::Timing;
 use crate::tracks::read_tracks;
 
 /// Minimum spacing between position-only updates while playing.
@@ -88,6 +89,8 @@ pub(crate) struct Inner {
     pub(crate) seek_started: Mutex<Instant>,
     /// Target of the last seek sent to mpv, so a release on the same spot isn't re-decoded.
     pub(crate) last_seek_target: Mutex<Option<f64>>,
+    /// Open and seek latency for `stats()` (T031).
+    pub(crate) timing: Mutex<Timing>,
 }
 
 /// One mpv core. At most one scene plays at a time.
@@ -185,6 +188,7 @@ impl Player {
             pending_seek: Mutex::new(None),
             seek_started: Mutex::new(Instant::now()),
             last_seek_target: Mutex::new(None),
+            timing: Mutex::new(Timing::default()),
         });
 
         let for_thread = Arc::clone(&inner);
@@ -232,6 +236,7 @@ impl Player {
             };
         });
 
+        lock(&inner.timing).opened();
         let header = request
             .api_key
             .as_deref()
@@ -339,10 +344,12 @@ impl Player {
     pub fn stats(&self) -> PlayerStats {
         let count = |name: &str| self.inner.mpv.get_property::<i64>(name).unwrap_or(0);
         let dropped = count("frame-drop-count") + count("decoder-frame-drop-count");
+        let timing = lock(&self.inner.timing);
         PlayerStats {
+            open_to_first_frame_ms: timing.open_to_first_frame_ms(),
+            last_seek_to_frame_ms: timing.last_seek_to_frame_ms(),
             dropped_frames: i32::try_from(dropped).unwrap_or(i32::MAX),
             hwdec: self.snapshot().hwdec,
-            ..PlayerStats::default()
         }
     }
 
@@ -392,6 +399,7 @@ impl Inner {
         self.seeking.store(true, Ordering::SeqCst);
         *lock(&self.seek_started) = Instant::now();
         *lock(&self.last_seek_target) = Some(position);
+        lock(&self.timing).seek_sent();
         let _ = self.mpv.command("seek", &[&target, "absolute+exact"]);
     }
 
@@ -439,6 +447,7 @@ impl Inner {
                 Ok(Event::Seek) => self.seeking.store(true, Ordering::SeqCst),
                 Ok(Event::PlaybackRestart) => {
                     self.seeking.store(false, Ordering::SeqCst);
+                    lock(&self.timing).playback_restarted();
                     self.update(|s| {
                         if s.state == PlayerStateKind::Loading {
                             s.state = if s.paused {

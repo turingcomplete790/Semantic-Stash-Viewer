@@ -147,6 +147,40 @@ async fn a_whole_file_cache_is_accepted_and_seeks_still_land() {
 }
 
 #[tokio::test]
+async fn stats_time_opening_and_seeking() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let Some(clip) = seekable_file(dir.path()) else {
+        return;
+    };
+    let player = headless();
+    let mut rx = player.subscribe();
+    assert_eq!(player.stats().open_to_first_frame_ms, None);
+    open(&player, &clip);
+    until(&mut rx, "playing", |s| s.state == PlayerStateKind::Playing).await;
+    let opened = player.stats();
+    assert!(opened
+        .open_to_first_frame_ms
+        .is_some_and(|ms| ms > 0.0 && ms < 10_000.0));
+    assert_eq!(opened.last_seek_to_frame_ms, None);
+
+    player.set_paused(true);
+    player.seek(3.0, true);
+    until(&mut rx, "position ~3.0", |s| {
+        (s.position_seconds - 3.0).abs() < 0.1
+    })
+    .await;
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while player.stats().last_seek_to_frame_ms.is_none() && std::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(player.stats().last_seek_to_frame_ms.is_some());
+    assert_eq!(
+        player.stats().open_to_first_frame_ms,
+        opened.open_to_first_frame_ms
+    );
+}
+
+#[tokio::test]
 async fn speed_and_volume_are_clamped() {
     let player = headless();
     let mut rx = player.subscribe();
