@@ -1,0 +1,31 @@
+[package]
+name = "player"
+description = "Headless mpv playback session for Semantic Stash Viewer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# This crate MUST NOT depend on Tauri or GTK (constitution Principle III). Window-system glue
+# lives in src-tauri/src/video_surface/.
+
+[features]
+default = []
+specta = ["dep:specta"]
+
+[dependencies]
+libmpv2 = "6"
+libc = "0.2"
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+url = { workspace = true }
+specta = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "rt-multi-thread", "macros"] }
+tempfile = "3"
+
+[lints]
+workspace = true

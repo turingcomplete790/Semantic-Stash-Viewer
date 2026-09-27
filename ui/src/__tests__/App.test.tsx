@@ -15,10 +15,14 @@ const mocks = vi.hoisted(() => {
       getConnectionSnapshot: vi.fn(),
       listProfiles: vi.fn(),
       connect: vi.fn(),
+      playerSnapshot: vi.fn(() =>
+        Promise.resolve({ status: "error", error: { kind: "internal" } }),
+      ),
     },
     events: {
       connectionState: { listen: listen("connectionState") },
       profilesChanged: { listen: listen("profilesChanged") },
+      playerState: { listen: listen("playerState") },
     },
   };
 });

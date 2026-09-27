@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/stash-core", "src-tauri"]
+members = ["crates/stash-core", "crates/player", "src-tauri"]
 resolver = "2"
 
 [workspace.package]

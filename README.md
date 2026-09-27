@@ -5,9 +5,10 @@ A fast, native desktop client for [Stash](https://github.com/stashapp/stash), bu
 one, and browse and play your library the way Jellyfin desktop clients work with a Jellyfin
 server.
 
-> **Status:** pre-alpha. The first feature works: connecting to Stash servers, saved server
-> profiles, automatic reconnection, and a connection-security indicator. Browsing and playback
-> come next (see the [roadmap](ROADMAP.md)). The project is specified with
+> **Status:** pre-alpha. Connecting to Stash servers works: saved server profiles, automatic
+> reconnection, and a connection-security indicator. A playback spike plays scenes in mpv
+> inside the app window with full playback controls. Browsing comes next (see the
+> [roadmap](ROADMAP.md)). The project is specified with
 > [Spec Kit](https://github.com/github/spec-kit), and its governing rules live in the
 > [constitution](.specify/memory/constitution.md).
 
@@ -48,6 +49,8 @@ server.
 - Tauri CLI v2: `cargo install tauri-cli --version "^2"`
 - Linux: the WebKitGTK 4.1 development package (for example `libwebkit2gtk-4.1-dev` on
   Debian/Ubuntu, `webkit2gtk-4.1` on Arch/Manjaro)
+- libmpv with its development headers: the `mpv` package on Arch/Manjaro, `libmpv-dev` on
+  Debian/Ubuntu. VA-API drivers are optional but give hardware decoding.
 
 ### Run
 
@@ -55,6 +58,14 @@ server.
 npm --prefix ui install
 cargo tauri dev
 ```
+
+### Player (spike)
+
+Playback runs libmpv inside the app window: mpv draws each frame into a GPU surface under the
+webview, and the SolidJS controls sit on top. It plays Stash's direct stream only, so the
+server never transcodes. Why this approach, and how it measured, is in the
+[decision record](specs/002-mpv-playback-spike/decision.md). Debug builds can rerun the
+measurements with `SSV_MEASURE=<scene ids> cargo tauri dev`.
 
 Saved server profiles, including their API keys, live in
 `~/.config/semantic-stash-viewer/profiles.json`. Logs go to
@@ -65,7 +76,8 @@ Saved server profiles, including their API keys, live in
 | Path | What |
 |---|---|
 | `crates/stash-core/` | Headless Rust core: the only code that talks to Stash, plus connection and profile logic. Never depends on Tauri. |
-| `src-tauri/` | Thin Tauri shell: typed commands and events over `stash-core` |
+| `crates/player/` | Headless libmpv session: playback state, commands, and the render API wrapper. Never depends on Tauri. |
+| `src-tauri/` | Thin Tauri shell: typed commands and events over `stash-core` and `player`, and the Linux video surface |
 | `ui/` | SolidJS + TypeScript frontend. `ui/src/bindings.ts` is generated from Rust. |
 | `specs/` | Spec Kit feature specs, plans, and task lists |
 

@@ -7,5 +7,6 @@ pub mod adapter;
 pub mod connection;
 pub mod error;
 pub mod profiles;
+pub mod scenes;
 
 pub use error::AppError;

@@ -1,3 +1,4 @@
+import { Show } from "solid-js";
 import type { SecurityState, ServerInfo } from "../bindings";
 import ServerSummary from "./ServerSummary";
 import "./ConnectionForm.css";
@@ -9,6 +10,7 @@ export default function ConnectedSummary(props: {
   server: ServerInfo;
   security: SecurityState | null;
   onAddAnother: () => void;
+  onOpenPlayer?: () => void;
 }) {
   return (
     <section class="connect-card" aria-labelledby="connected-title">
@@ -16,6 +18,13 @@ export default function ConnectedSummary(props: {
       <p class="lede">The viewer reconnects to this server automatically when it starts.</p>
       <ServerSummary url={props.url} server={props.server} security={props.security} />
       <div class="actions" style={{ "margin-top": "18px" }}>
+        <Show when={props.onOpenPlayer}>
+          {(open) => (
+            <button type="button" class="primary" onClick={() => open()()}>
+              Open player
+            </button>
+          )}
+        </Show>
         <button type="button" onClick={() => props.onAddAnother()}>
           Connect to another server
         </button>

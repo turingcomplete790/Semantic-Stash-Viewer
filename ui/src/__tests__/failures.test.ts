@@ -48,6 +48,8 @@ describe("app error messages", () => {
     { kind: "connect", failure: samples.timeout },
     { kind: "invalidDisplayName", reason: "must be at most 64 characters" },
     { kind: "profileNotFound", id: "x" },
+    { kind: "sceneNotFound", id: "42" },
+    { kind: "noPlayableFile", id: "42" },
     { kind: "unsupportedProfilesVersion", found: 2 },
     { kind: "storage", message: "disk full" },
     { kind: "cancelled" },

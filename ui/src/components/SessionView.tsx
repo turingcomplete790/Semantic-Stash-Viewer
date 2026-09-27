@@ -15,6 +15,7 @@ export default function SessionView(props: {
   onAddAnother: () => void;
   onRetry: () => void;
   onUpdateKey: () => void;
+  onOpenPlayer?: () => void;
 }) {
   const snap = () => connection.snapshot();
   const name = () => props.profile?.displayName ?? "the server";
@@ -40,6 +41,7 @@ export default function SessionView(props: {
             server={server()}
             security={snap().security}
             onAddAnother={props.onAddAnother}
+            onOpenPlayer={props.onOpenPlayer}
           />
         )}
       </Match>

@@ -1,0 +1,50 @@
+{
+ "data": {
+  "findScenes": {
+   "scenes": [
+    {
+     "id": "2",
+     "title": "Scene A",
+     "files": [
+      {
+       "basename": "scene-a.mp4",
+       "duration": 15755.63,
+       "width": 1280,
+       "height": 720,
+       "video_codec": "h264",
+       "format": "mp4"
+      }
+     ]
+    },
+    {
+     "id": "1",
+     "title": "",
+     "files": [
+      {
+       "basename": "scene-b.mp4",
+       "duration": 4653.48,
+       "width": 960,
+       "height": 640,
+       "video_codec": "h264",
+       "format": "mp4"
+      }
+     ]
+    },
+    {
+     "id": "102",
+     "title": " Scene C ",
+     "files": [
+      {
+       "basename": "scene-c.mp4",
+       "duration": 15755.63,
+       "width": 1280,
+       "height": 720,
+       "video_codec": "h264",
+       "format": "mp4"
+      }
+     ]
+    }
+   ]
+  }
+ }
+}
