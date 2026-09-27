@@ -141,9 +141,9 @@ Workspace from feature 001, plus a new headless crate: `crates/stash-core/`, `cr
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T036 [P] Update `README.md` Development prerequisites with libmpv (`mpv` package on Arch/Manjaro, `libmpv-dev` on Debian/Ubuntu) and a short "Player (spike)" note linking `specs/002-mpv-playback-spike/decision.md`
-- [ ] T037 [P] In `ROADMAP.md` Phase 0, tick "mpv spike" if `decision.md` chose an in-window approach, and add a one-line summary of the decision under it
-- [ ] T038 Run the full gate: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, bindings drift check (`cargo run -p semantic-stash-viewer --bin export-bindings` then `git diff --exit-code ui/src/bindings.ts`), `npm --prefix ui run lint`, `npm --prefix ui run typecheck`, `npm --prefix ui test`
+- [X] T036 [P] Update `README.md` Development prerequisites with libmpv (`mpv` package on Arch/Manjaro, `libmpv-dev` on Debian/Ubuntu) and a short "Player (spike)" note linking `specs/002-mpv-playback-spike/decision.md`
+- [X] T037 [P] In `ROADMAP.md` Phase 0, tick "mpv spike" if `decision.md` chose an in-window approach, and add a one-line summary of the decision under it
+- [X] T038 Run the full gate: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, bindings drift check (`cargo run -p semantic-stash-viewer --bin export-bindings` then `git diff --exit-code ui/src/bindings.ts`), `npm --prefix ui run lint`, `npm --prefix ui run typecheck`, `npm --prefix ui test`
 
 ---
 

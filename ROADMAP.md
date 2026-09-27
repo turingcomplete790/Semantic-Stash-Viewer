@@ -41,8 +41,11 @@ Principles III, IV, V, and VII in place before any features are built on it.
       connection-security indicator (unencrypted / unverified / verified)
 - [ ] Cache layer: discardable local cache, mutation-driven invalidation, and a manual "clear
       cache" control
-- [ ] mpv spike: embed libmpv in the Tauri window (or a managed mpv process as fallback) playing
+- [x] mpv spike: embed libmpv in the Tauri window (or a managed mpv process as fallback) playing
       a Stash direct stream authenticated with the API key
+      - Decision: libmpv's OpenGL render API into a GTK GL area under the transparent webview;
+        every success criterion passed, no fallback needed
+        ([decision record](specs/002-mpv-playback-spike/decision.md))
 - [ ] Performance harness: a way to measure Principle VI's budgets (input latency, first paint,
       scroll fps, cold start)
 - [ ] CI: `cargo fmt`, `cargo clippy`, the frontend linter, and core unit tests
@@ -51,7 +54,7 @@ Principles III, IV, V, and VII in place before any features are built on it.
 mpv.
 
 **Suggested specs:** `connect-to-stash` (done: [specs/001-connect-to-stash](specs/001-connect-to-stash/)),
-`mpv-playback-spike`
+`mpv-playback-spike` (done: [specs/002-mpv-playback-spike](specs/002-mpv-playback-spike/))
 
 ---
 
