@@ -5,9 +5,16 @@
 //! ```text
 //! GtkWindow
 //! └── GtkOverlay                (replaces Tauri's default GtkBox as the window's direct child)
-//!     ├── GtkGLArea             (main child: mpv renders here)
+//!     ├── GtkBox                (main child: always the whole window)
+//!     │   └── GtkGLArea         (mpv renders here; margins confine it to the scene view)
 //!     └── WebKitWebView         (overlay child, transparent background: the SolidJS UI)
 //! ```
+//!
+//! **Why the box:** GTK 3's `GtkOverlay` sizes its overlay children from the *main child's*
+//! allocation. With margins on a GL area as the main child, the webview shrank along with the
+//! video, the page reported a smaller viewport, the margins grew, and the loop ended in negative
+//! heights and no picture (004 research R6). The box always fills the window, so the webview
+//! does too, and only the GL area inside it takes the margins.
 //!
 //! **Constraint (do not break):** on Linux, tauri-runtime-wry attaches a button-press handler
 //! to the main webview that does `webview.parent().parent().downcast::<gtk::Window>().unwrap()`
@@ -28,6 +35,21 @@ use std::sync::Arc;
 use gtk::prelude::*;
 use player::Player;
 use tauri::WebviewWindow;
+
+/// Where mpv draws, in window-relative logical pixels (CSS px).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rect {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
+/// Confine the video to `rect`, or fill the window with `None` (004 research R6). Safe to call
+/// from any thread: the change is applied on the GTK main context.
+pub fn set_viewport(rect: Option<Rect>) {
+    gtk::glib::MainContext::default().invoke(move || gl_area::apply_viewport(rect));
+}
 
 /// Rebuild the main window's widget tree around the webview. The work runs on the GTK main
 /// thread (inside `with_webview`); GTK widgets aren't `Send`, so the box and window are found
@@ -57,7 +79,9 @@ pub fn install(window: &WebviewWindow, player: Arc<Player>) -> Result<(), String
             gtk_window.remove(&vbox);
 
             let overlay = gtk::Overlay::new();
-            overlay.add(&gl_area::build(player));
+            let holder = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            holder.pack_start(&gl_area::build(player), true, true, 0);
+            overlay.add(&holder);
             overlay.add_overlay(&webview_widget);
             gtk_window.add(&overlay);
 

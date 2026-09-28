@@ -92,6 +92,13 @@ export function appErrorMessage(error: AppError): FailureMessage {
         detail: `The server has no scene with ID ${error.id}.`,
         hint: "Check the ID, or pick a scene from the list.",
       };
+    case "tabSetInvalid":
+      return {
+        title: "Couldn't save your tabs",
+        detail: `The tabs couldn't be saved (${error.reason}).`,
+      };
+    case "openFailed":
+      return { title: "Couldn't open the folder", detail: error.detail };
     case "noPlayableFile":
       return {
         title: "This scene has no video file",

@@ -1,0 +1,121 @@
+import { createResource, createSignal, For, Show } from "solid-js";
+import { commands } from "../bindings";
+import type { SceneListItem } from "../bindings";
+import { formatDuration } from "../player/format";
+import { navigate } from "../shell/tabs";
+import "../components/ConnectionForm.css";
+import "../components/ProfileManager.css";
+import "../player/player.css";
+
+/**
+ * Scenes: the spike's scene picker (recently added, open by ID, and the test set). Phase 1
+ * replaces it with the real scene grid. Choosing a scene opens it in the Scene view.
+ */
+export default function ScenesView() {
+  const [recent] = createResource(async () => {
+    const res = await commands.listRecentScenes();
+    if (res.status === "error") throw res.error;
+    return res.data;
+  });
+  // Spike test set: random 4K / WMV / VP9 / AV1 / MPEG-4 / FLV scenes (002 research R7).
+  const [testSets, { refetch: shuffleTestSets }] = createResource(async () => {
+    const res = await commands.listTestScenes();
+    if (res.status === "error") throw res.error;
+    return res.data;
+  });
+  const [sceneId, setSceneId] = createSignal("");
+
+  function open(id: string, title = "") {
+    const trimmed = id.trim();
+    if (trimmed) navigate({ kind: "scene", sceneId: trimmed, title });
+  }
+
+  return (
+    <div class="view-page">
+      <section class="connect-card player-picker" aria-labelledby="scenes-title">
+        <h1 id="scenes-title">Scenes</h1>
+
+        <form
+          class="player-id-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            open(sceneId());
+          }}
+        >
+          <div class="field">
+            <label for="player-scene-id">Scene ID</label>
+            <input
+              id="player-scene-id"
+              type="text"
+              inputmode="numeric"
+              value={sceneId()}
+              onInput={(e) => setSceneId(e.currentTarget.value)}
+            />
+          </div>
+          <button type="submit" class="primary" disabled={!sceneId().trim()}>
+            Play
+          </button>
+        </form>
+
+        <h2 class="player-subtitle">Recently added</h2>
+        <Show when={!recent.error} fallback={<p class="lede">Couldn't load recent scenes.</p>}>
+          <Show when={recent()} fallback={<p class="lede">Loading…</p>}>
+            {(items) => <SceneList scenes={items()} onPlay={open} />}
+          </Show>
+        </Show>
+
+        <div class="player-subtitle-row">
+          <h2 class="player-subtitle">Test scenes</h2>
+          <button type="button" onClick={() => void shuffleTestSets()}>
+            Shuffle
+          </button>
+        </div>
+        <p class="lede">
+          Random picks of hard-to-play formats: 4K, WMV, VP9, AV1, and older codecs.
+        </p>
+        <Show when={!testSets.error} fallback={<p class="lede">Couldn't load test scenes.</p>}>
+          <Show when={testSets()} fallback={<p class="lede">Loading…</p>}>
+            {(groups) => (
+              <For each={groups()}>
+                {(group) => (
+                  <section class="player-group" aria-label={group.label}>
+                    <h3 class="player-group-title">{group.label}</h3>
+                    <SceneList scenes={group.scenes} onPlay={open} />
+                  </section>
+                )}
+              </For>
+            )}
+          </Show>
+        </Show>
+      </section>
+    </div>
+  );
+}
+
+function SceneList(props: {
+  scenes: SceneListItem[];
+  onPlay: (id: string, title: string) => void;
+}) {
+  return (
+    <ul class="player-list">
+      <For each={props.scenes}>
+        {(scene) => (
+          <li>
+            <button
+              type="button"
+              class="player-row"
+              aria-label={`Play ${scene.title}`}
+              onClick={() => props.onPlay(scene.id, scene.title)}
+            >
+              <span class="player-row-title">{scene.title}</span>
+              <span class="player-row-meta">
+                {[scene.resolution, scene.videoCodec, scene.container].filter(Boolean).join(" · ")}
+              </span>
+              <span class="player-row-duration">{formatDuration(scene.durationSeconds ?? 0)}</span>
+            </button>
+          </li>
+        )}
+      </For>
+    </ul>
+  );
+}

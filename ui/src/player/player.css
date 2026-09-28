@@ -1,23 +1,8 @@
-/* While a scene is open, everything between the webview and mpv's GL area is transparent so
-   the GPU-rendered video shows through (FR-002). Controls keep solid backgrounds. */
-html.player-open,
-html.player-open body,
-html.player-open #root,
-html.player-open .app,
-html.player-open .main {
-  background: transparent;
-}
-
-html.player-open .topbar {
-  display: none;
-}
-
-html.player-open .main {
-  padding: 0;
-}
+/* The shell makes the scene view's area transparent while a scene plays (shell/shell.css), so
+   the GPU-rendered video shows through (002 FR-002). Controls keep solid backgrounds. */
 
 .player-stage {
-  position: fixed;
+  position: absolute;
   inset: 0;
   display: flex;
   flex-direction: column;

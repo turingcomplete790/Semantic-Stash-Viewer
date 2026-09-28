@@ -9,7 +9,7 @@ const TEXT_INPUT_TYPES = new Set(["text", "search", "number", "email", "url", "p
  * True when the event comes from a text field (or a select), where keys must edit, not control
  * playback. Sliders and buttons don't count: on the seek bar, ←/→ should still skip 10 s.
  */
-function isTyping(target: EventTarget | null): boolean {
+export function isTyping(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   if (target instanceof HTMLInputElement) return TEXT_INPUT_TYPES.has(target.type);
   return (

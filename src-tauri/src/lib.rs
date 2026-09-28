@@ -56,6 +56,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             player_commands::player_frame_step,
             player_commands::player_replay,
             player_commands::player_set_fullscreen,
+            player_commands::player_set_viewport,
+            player_commands::debug_open_scene,
             player_commands::player_stats,
         ])
         .events(collect_events![

@@ -277,6 +277,46 @@ pub fn player_set_fullscreen(
     Ok(())
 }
 
+/// Where the scene view's video area is, in window-relative CSS pixels (004 research R6).
+#[derive(Debug, Clone, Copy, serde::Deserialize, specta::Type)]
+pub struct Viewport {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
+/// Confine mpv's drawing to the scene view's area; `None` fills the window (fullscreen).
+#[tauri::command]
+#[specta::specta]
+pub fn player_set_viewport(viewport: Option<Viewport>) {
+    if cfg!(debug_assertions) && std::env::var_os("SSV_DEBUG_NO_VIEWPORT").is_some() {
+        return;
+    }
+    #[cfg(target_os = "linux")]
+    crate::video_surface::set_viewport(viewport.map(|v| crate::video_surface::Rect {
+        x: v.x,
+        y: v.y,
+        width: v.width.max(0),
+        height: v.height.max(0),
+    }));
+    #[cfg(not(target_os = "linux"))]
+    let _ = viewport;
+}
+
+/// Debug builds only: a scene to open once connected (`SSV_DEBUG_OPEN`), for checking the video
+/// surface without clicking through the UI.
+#[tauri::command]
+#[specta::specta]
+pub fn debug_open_scene() -> Option<String> {
+    if !cfg!(debug_assertions) {
+        return None;
+    }
+    std::env::var("SSV_DEBUG_OPEN")
+        .ok()
+        .filter(|s| !s.is_empty())
+}
+
 /// Measurements for the decision record. Debug builds only.
 #[tauri::command]
 #[specta::specta]

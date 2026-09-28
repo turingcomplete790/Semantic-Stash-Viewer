@@ -8,5 +8,6 @@ pub mod connection;
 pub mod error;
 pub mod profiles;
 pub mod scenes;
+pub mod shell;
 
 pub use error::AppError;

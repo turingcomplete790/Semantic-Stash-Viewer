@@ -75,6 +75,18 @@ export const commands = {
 	playerReplay: () => typedError<null, AppError>(__TAURI_INVOKE("player_replay")),
 	/**  Enter or leave fullscreen (the window), mirrored into the player snapshot. */
 	playerSetFullscreen: (fullscreen: boolean) => typedError<null, AppError>(__TAURI_INVOKE("player_set_fullscreen", { fullscreen })),
+	/**  Confine mpv's drawing to the scene view's area; `None` fills the window (fullscreen). */
+	playerSetViewport: (viewport: {
+	x: number,
+	y: number,
+	width: number,
+	height: number,
+} | null) => __TAURI_INVOKE<void>("player_set_viewport", { viewport }),
+	/**
+	 *  Debug builds only: a scene to open once connected (`SSV_DEBUG_OPEN`), for checking the video
+	 *  surface without clicking through the UI.
+	 */
+	debugOpenScene: () => __TAURI_INVOKE<string | null>("debug_open_scene"),
 	/**  Measurements for the decision record. Debug builds only. */
 	playerStats: () => typedError<PlayerStats, AppError>(__TAURI_INVOKE("player_stats")),
 };
@@ -105,6 +117,10 @@ export type AppError = { kind: "connect"; failure: ConnectFailure } |
 { kind: "unsupportedProfilesVersion"; found: number } | 
 /**  Reading or writing the local config failed. */
 { kind: "storage"; message: string } | 
+/**  A tab set failed validation (empty, missing selection, or over the size limits). */
+{ kind: "tabSetInvalid"; reason: string } | 
+/**  The system couldn't open a folder or file for the user (e.g. the log folder). */
+{ kind: "openFailed"; detail: string } | 
 /**  The request was cancelled by the user. */
 { kind: "cancelled" } | 
 /**  Anything else that shouldn't happen (for example the HTTP client failing to build). */
@@ -308,6 +324,14 @@ export type VersionStatus =
  *  warning.
  */
 "unknownButCompatible";
+
+/**  Where the scene view's video area is, in window-relative CSS pixels (004 research R6). */
+export type Viewport = {
+	x: number,
+	y: number,
+	width: number,
+	height: number,
+};
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {

@@ -1,0 +1,214 @@
+/* App shell layout (004 research R11). Opaque everywhere except the scene view's video area,
+   which the player makes transparent so mpv's GPU output shows through. */
+/* Named areas: hiding an empty slot (tabs, now playing) must not shift the content area into
+   an auto-sized row, or the scene view (absolutely positioned) collapses to zero height. */
+.shell {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "top"
+    "tabs"
+    "content"
+    "now-playing";
+  height: 100vh;
+  background: var(--bg);
+}
+
+.shell-top {
+  grid-area: top;
+}
+
+.shell-tabs {
+  grid-area: tabs;
+}
+
+.shell-content {
+  grid-area: content;
+}
+
+.shell-now-playing {
+  grid-area: now-playing;
+}
+
+.shell-top {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 48px;
+  padding: 0 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.shell-tabs:empty,
+.shell-now-playing:empty,
+.shell-toasts:empty {
+  display: none;
+}
+
+.shell-content {
+  position: relative;
+  overflow: auto;
+}
+
+.view-page {
+  display: flex;
+  justify-content: center;
+  padding: 32px 20px;
+}
+
+.shell-toasts {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+/* While a scene plays, let the video through the content area only. */
+html.player-open,
+html.player-open body,
+html.player-open #root,
+html.player-open .shell,
+html.player-open .shell-content {
+  background: transparent;
+}
+
+/* Fullscreen playback: no shell chrome (004 spec edge case). */
+html.player-fullscreen .shell-top,
+html.player-fullscreen .shell-tabs,
+html.player-fullscreen .shell-now-playing,
+html.player-fullscreen .shell-toasts {
+  display: none;
+}
+
+/* Navigation bar (004 US1). */
+.navbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+}
+
+.nav-brand {
+  font-weight: 600;
+  background: none;
+  border: none;
+  padding: 4px 6px;
+  white-space: nowrap;
+}
+
+.nav-sections {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.nav-section {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.nav-section.current,
+.nav-icon-button.current {
+  background: var(--bg);
+  border-color: var(--border);
+  font-weight: 600;
+}
+
+.nav-measure {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+  display: flex;
+  gap: 2px;
+  top: 0;
+  left: 0;
+}
+
+.nav-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.nav-icon-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+}
+
+.nav-server-name {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-more,
+.nav-server,
+.nav-notifications {
+  position: relative;
+}
+
+.nav-menu,
+.nav-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  z-index: 20;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+}
+
+.nav-menu {
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  padding: 4px;
+  right: 0;
+}
+
+.nav-more .nav-menu {
+  left: 0;
+  right: auto;
+}
+
+.nav-menu [role="menuitem"] {
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 8px 10px;
+  border-radius: 6px;
+}
+
+.nav-menu [role="menuitem"]:hover,
+.nav-menu [role="menuitem"]:focus-visible {
+  background: var(--bg);
+}
+
+.nav-panel {
+  right: 0;
+  width: 360px;
+  max-height: 70vh;
+  overflow: auto;
+  padding: 12px;
+}

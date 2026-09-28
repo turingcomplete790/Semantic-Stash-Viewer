@@ -26,6 +26,11 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls", "j
 graphql_client = "0.16"
 tokio-util = "0.7"
 semver = "1"
+# Jobs subscription over graphql-transport-ws (research R5). rustls + futures-util are already
+# in the tree via reqwest; they're named here for the lenient-TLS verifier and the socket stream.
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
+rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "std"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 
 [dev-dependencies]
 wiremock = "0.6"

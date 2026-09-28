@@ -21,7 +21,7 @@ export default function ConnectedSummary(props: {
         <Show when={props.onOpenPlayer}>
           {(open) => (
             <button type="button" class="primary" onClick={() => open()()}>
-              Open player
+              Browse scenes
             </button>
           )}
         </Show>
