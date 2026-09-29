@@ -109,6 +109,13 @@ export const commands = {
 	 *  background so the UI never waits on disk (Principle VI).
 	 */
 	shellSaveTabs: (profileId: string, tabs: TabSet) => typedError<null, AppError>(__TAURI_INVOKE("shell_save_tabs", { profileId, tabs })),
+	/**  All notifications, newest first (updates arrive as `notifications-changed`). */
+	notificationsList: () => __TAURI_INVOKE<Notification[]>("notifications_list"),
+	/**  Mark notifications read (when the centre is opened). */
+	notificationsMarkRead: (ids: string[]) => __TAURI_INVOKE<void>("notifications_mark_read", { ids }),
+	notificationDismiss: (id: string) => __TAURI_INVOKE<void>("notification_dismiss", { id }),
+	/**  Remove every notification except jobs that are still running. */
+	notificationsDismissAll: () => __TAURI_INVOKE<void>("notifications_dismiss_all"),
 	/**  Measurements for the decision record. Debug builds only. */
 	playerStats: () => typedError<PlayerStats, AppError>(__TAURI_INVOKE("player_stats")),
 };
@@ -116,6 +123,7 @@ export const commands = {
 /** Events */
 export const events = {
 	connectionState: makeEvent<ConnectionStateEvent>("connection-state"),
+	notificationsChanged: makeEvent<NotificationsChangedEvent>("notifications-changed"),
 	playerState: makeEvent<PlayerStateEvent>("player-state"),
 	profilesChanged: makeEvent<ProfilesChangedEvent>("profiles-changed"),
 };
@@ -198,6 +206,18 @@ export type HistoryEntry = {
 	viewState: unknown | null,
 };
 
+export type JobProgress = {
+	status: JobStatus,
+	/**  0–1, when Stash reports it. */
+	progress: number | null,
+	startedAt: string | null,
+	endedAt: string | null,
+};
+
+export type JobStatus = "queued" | "running" | "stopping" | "finished" | "failed" | "cancelled" | 
+/**  Can't be watched right now (disconnected, or just launched). */
+"unknown";
+
 /**  Library summary shown after connecting (FR-007). */
 export type LibraryCounts = {
 	scenes: number,
@@ -205,6 +225,30 @@ export type LibraryCounts = {
 	galleries: number,
 	performers: number,
 };
+
+export type Notification = {
+	id: string,
+	key: string | null,
+	profileId: string | null,
+	kind: NotificationKind,
+	severity: Severity,
+	/**  Plain language, e.g. "Server unreachable". */
+	title: string,
+	/**  Plain language, with any next step. */
+	detail: string | null,
+	/**  ISO 8601. */
+	createdAt: string,
+	updatedAt: string,
+	read: boolean,
+	/**  Show a toast for this post or update (live changes only; cleared on reload). */
+	toast: boolean,
+	job: JobProgress | null,
+};
+
+export type NotificationKind = "connection" | "playback" | "job" | "background";
+
+/**  The full notification list, on every change (004 contracts "Events"). */
+export type NotificationsChangedEvent = Notification[];
 
 export type PlayerError = { kind: "notConnected" } | { kind: "sceneNotFound" } | { kind: "noPlayableFile" } | 
 /**  The stream couldn't be opened (network error, 401/403, 404). */
@@ -317,6 +361,9 @@ export type SessionState = { kind: "idle" } | { kind: "connecting"; attemptUrl: 
 { kind: "offline"; attempt: number; nextRetryAt: string } | 
 /**  The key was missing, rejected, or wrong. Retries stop until the key is updated (FR-017). */
 { kind: "authFailed"; failure: ConnectFailure } | { kind: "failed"; failure: ConnectFailure };
+
+/**  Ordered: `Info < Warning < Error`. */
+export type Severity = "info" | "warning" | "error";
 
 export type Tab = {
 	id: string,

@@ -25,6 +25,8 @@ import {
   wasRestored,
 } from "./shell/tabs";
 import { connection, initConnection, refreshProfiles } from "./state/connection";
+import { initNotifications } from "./state/notifications";
+import Toasts from "./shell/Toasts";
 import SettingsView from "./settings/SettingsView";
 import RouteView from "./views/RouteView";
 import "./App.css";
@@ -48,6 +50,7 @@ export default function App() {
     void initConnection();
     void refreshProfiles();
     void initPlayer();
+    void initNotifications();
     onCleanup(installKeymap());
     onCleanup(registerTabShortcuts());
     onCleanup(installMouseNavigation());
@@ -124,6 +127,7 @@ export default function App() {
       nav={nav}
       tabs={noActive() || adding() ? undefined : <TabStrip />}
       nowPlaying={<NowPlayingBar />}
+      toasts={<Toasts />}
     >
       <Switch>
         <Match when={noActive() && settingsWhileDisconnected()}>

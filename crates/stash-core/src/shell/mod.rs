@@ -2,6 +2,7 @@
 //!
 //! Both are discardable UI state stored under the viewer's local data directory (research R3).
 
+pub mod notifications;
 pub mod store;
 pub mod tabs;
 

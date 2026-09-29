@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => {
       shellLoadTabs: vi.fn(() => Promise.resolve(null)),
       shellSaveTabs: vi.fn(() => Promise.resolve({ status: "ok", data: null })),
       playerSetVideoVisible: vi.fn(() => Promise.resolve(null)),
+      notificationsList: vi.fn(() => Promise.resolve([])),
       playerSnapshot: vi.fn(() =>
         Promise.resolve({ status: "error", error: { kind: "internal" } }),
       ),
@@ -26,6 +27,7 @@ const mocks = vi.hoisted(() => {
       connectionState: { listen: listen("connectionState") },
       profilesChanged: { listen: listen("profilesChanged") },
       playerState: { listen: listen("playerState") },
+      notificationsChanged: { listen: listen("notificationsChanged") },
     },
   };
 });

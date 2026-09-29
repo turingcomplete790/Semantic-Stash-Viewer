@@ -26,11 +26,13 @@ const mocks = vi.hoisted(() => {
       shellLoadTabs: vi.fn(() => Promise.resolve(null)),
       shellSaveTabs: vi.fn(() => ok(null)),
       playerSetVideoVisible: vi.fn(() => Promise.resolve(null)),
+      notificationsList: vi.fn(() => Promise.resolve([])),
     },
     events: {
       connectionState: { listen: listen("connectionState") },
       profilesChanged: { listen: listen("profilesChanged") },
       playerState: { listen: listen("playerState") },
+      notificationsChanged: { listen: listen("notificationsChanged") },
     },
   };
 });

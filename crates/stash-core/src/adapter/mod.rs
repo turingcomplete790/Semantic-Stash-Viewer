@@ -2,6 +2,7 @@
 //! (constitution Principle III). Everything else reaches Stash through `StashClient`.
 
 pub mod health;
+pub mod jobs;
 pub mod probe;
 pub mod scenes;
 
@@ -76,6 +77,10 @@ impl StashClient {
 
     pub fn strict_tls(&self) -> bool {
         self.strict_tls
+    }
+
+    pub(crate) fn api_key(&self) -> Option<&str> {
+        self.api_key.as_deref()
     }
 
     pub fn has_api_key(&self) -> bool {

@@ -268,7 +268,7 @@ read-only Stash jobs, plus the bell badge and rate-limited toasts in the UI.
 
 ### Tests for User Story 3 (write first, must fail)
 
-- [ ] T041 [P] [US3] Notification centre tests in `crates/stash-core/tests/notifications.rs`:
+- [X] T041 [P] [US3] Notification centre tests in `crates/stash-core/tests/notifications.rs`:
   - posting creates a notification, newest first;
   - posting with an existing `key` updates it in place (same `id`, new `updatedAt`), and sets it unread again only if severity rises;
   - `mark_read`, `dismiss`, and `dismiss_all` (keeps active jobs) work;
@@ -276,7 +276,7 @@ read-only Stash jobs, plus the bell badge and rate-limited toasts in the UI.
   - persists and reloads;
   - on load, active job entries become `unknown`;
   - every change is broadcast with the full list.
-- [ ] T042 [P] [US3] Connection mapping tests in `crates/stash-core/tests/connection_watch.rs`, feeding `ConnectionSnapshot` sequences:
+- [X] T042 [P] [US3] Connection mapping tests in `crates/stash-core/tests/connection_watch.rs`, feeding `ConnectionSnapshot` sequences:
   - Connected → Offline posts one warning "Server unreachable" (`toast: true`, key `connection:<profile>`);
   - repeated Offline attempts post nothing new;
   - Offline → Connected updates the same entry to info "Reconnected" (`toast: true`);
@@ -284,19 +284,19 @@ read-only Stash jobs, plus the bell badge and rate-limited toasts in the UI.
   - Failed → error with the failure's plain message;
   - the first connection at launch posts nothing;
   - Connecting/Idle post nothing.
-- [ ] T043 [P] [US3] Jobs tests in `crates/stash-core/tests/jobs.rs`:
+- [X] T043 [P] [US3] Jobs tests in `crates/stash-core/tests/jobs.rs`:
   - parse `job-queue.json`;
   - map each status to `JobStatus` (READY → queued, RUNNING → running, STOPPING → stopping, FINISHED → finished, FAILED → failed, CANCELLED → cancelled);
   - replay `jobs-subscribe-events.json` through the watcher to get a progress entry and then finished (info), failed (error, toast, Stash's error text), or cancelled;
   - offline marks active jobs `unknown`, and reconnect plus a `jobQueue` reconcile updates or ends them;
   - a local mock WebSocket server (tokio-tungstenite `accept_hdr_async`) asserts the handshake sends subprotocol `graphql-transport-ws` and the `ApiKey` header, then `connection_init`, then `subscribe` with the `JobsSubscribe` document, and answers `ping` with `pong`.
-- [ ] T044 [P] [US3] UI notification tests in `ui/src/__tests__/shell/NotificationCentre.test.tsx`:
+- [X] T044 [P] [US3] UI notification tests in `ui/src/__tests__/shell/NotificationCentre.test.tsx`:
   - the bell badge counts unread items, and an activity marker shows while any job is queued, running, or stopping;
   - opening the centre lists newest first with severity, title, detail, and relative time, and calls `notificationsMarkRead`;
   - dismiss one and dismiss all call the commands;
   - job entries show a progress bar or indeterminate state and their status;
   - a `notifications-changed` event updates the list.
-- [ ] T045 [P] [US3] Toast tests in `ui/src/__tests__/shell/Toasts.test.tsx`:
+- [X] T045 [P] [US3] Toast tests in `ui/src/__tests__/shell/Toasts.test.tsx`:
   - a notification with `toast: true` shows a toast in a `role="status"` `aria-live="polite"` region, and it never takes focus (`document.activeElement` is unchanged);
   - it hides after 5 s;
   - at most one toast per key per 10 s, and at most 3 on screen;
@@ -304,47 +304,47 @@ read-only Stash jobs, plus the bell badge and rate-limited toasts in the UI.
 
 ### Implementation for User Story 3
 
-- [ ] T046 [US3] Implement `crates/stash-core/src/shell/notifications.rs`:
+- [X] T046 [US3] Implement `crates/stash-core/src/shell/notifications.rs`:
   - the types from [data-model.md](data-model.md): `Notification { id, key, profile_id, kind, severity, title, detail, created_at, updated_at, read, toast, job: Option<JobProgress> }`, `JobProgress { status, progress, started_at, ended_at }`, and the enums (serde camelCase, specta);
   - a `NotificationCenter` with `post(NewNotification)` (keyed upsert), `mark_read(ids)`, `dismiss(id)`, `dismiss_all()`, `list()`, and `subscribe()` (a `tokio::sync::watch` or `broadcast` of the full list);
   - the cap "at most 200, newest first … Active job entries are never dropped";
   - persisted through `JsonStore<NotificationsFile>` at `shell/notifications.json`, with active jobs set to `unknown` on load.
 
   Makes T041 pass
-- [ ] T047 [US3] Implement `crates/stash-core/src/connection/watch.rs`: a task that subscribes to `ConnectionManager::subscribe()`, tracks the last known state per profile, and posts the notifications in the research R4 table through `NotificationCenter`, using the existing plain-language failure messages where the core has them. Makes T042 pass
-- [ ] T048 [US3] Implement `crates/stash-core/src/adapter/jobs.rs` (the typed `JobQueue` query with `graphql_client` and the `JobsSubscribe` document) and `crates/stash-core/src/jobs/mod.rs` (the `Job` domain type, `JobStatus` mapping, and the job → notification mapping, with keys `job:<profile>:<id>`)
-- [ ] T049 [US3] Implement `crates/stash-core/src/jobs/ws.rs`:
+- [X] T047 [US3] Implement `crates/stash-core/src/connection/watch.rs`: a task that subscribes to `ConnectionManager::subscribe()`, tracks the last known state per profile, and posts the notifications in the research R4 table through `NotificationCenter`, using the existing plain-language failure messages where the core has them. Makes T042 pass
+- [X] T048 [US3] Implement `crates/stash-core/src/adapter/jobs.rs` (the typed `JobQueue` query with `graphql_client` and the `JobsSubscribe` document) and `crates/stash-core/src/jobs/mod.rs` (the `Job` domain type, `JobStatus` mapping, and the job → notification mapping, with keys `job:<profile>:<id>`)
+- [X] T049 [US3] Implement `crates/stash-core/src/jobs/ws.rs`:
   - a minimal `graphql-transport-ws` client over `tokio-tungstenite`: connect to `ws(s)://<base>/graphql` with the `Sec-WebSocket-Protocol: graphql-transport-ws` and `ApiKey` headers;
   - rustls: platform roots when strict TLS is on, and a verifier that accepts any certificate when it's off, matching `reqwest`'s `tls_danger_accept_invalid_certs`;
   - send `connection_init` and wait for `connection_ack` (10 s timeout), then `subscribe` with id "1", yielding `next` payloads as a stream;
   - reply `pong` to `ping`, and end the stream on `complete` or `error`.
-- [ ] T050 [US3] Implement `crates/stash-core/src/jobs/watcher.rs`:
+- [X] T050 [US3] Implement `crates/stash-core/src/jobs/watcher.rs`:
   - per connected session: run `jobQueue` once to seed, then open the subscription and apply ADD/UPDATE/REMOVE to notifications;
   - on session offline or socket loss, mark active jobs `unknown` and stop;
   - on reconnect, reconcile with `jobQueue` (jobs no longer queued become "ended while disconnected");
   - reconnect the socket with the session's backoff, and start/stop with the `ConnectionManager` session lifecycle.
 
   Makes T043 pass
-- [ ] T051 [US3] Wire it all up in `src-tauri`:
+- [X] T051 [US3] Wire it all up in `src-tauri`:
   - in `src-tauri/src/lib.rs`, create the `NotificationCenter` (path `local_data_dir/.../shell/notifications.json`), start the connection watch and the jobs watcher, and add the centre to `AppState`;
   - add `NotificationsChangedEvent(Vec<Notification>)` (`notifications-changed`) to `src-tauri/src/events.rs`, forwarding every change;
   - add `notifications_list`, `notifications_mark_read`, `notification_dismiss`, and `notifications_dismiss_all` to `src-tauri/src/shell_commands.rs`;
   - in `src-tauri/src/player_commands.rs` `forward_player_state`, post `playback:<sceneId>` error notifications when the player enters `Error`, using the player error's plain message;
   - register everything and regenerate bindings.
-- [ ] T052 [US3] Implement `ui/src/state/notifications.ts`: subscribe to `notifications-changed`, hydrate with `notificationsList`, and expose `unreadCount()`, `active()`, and the list
-- [ ] T053 [US3] Implement `ui/src/shell/NotificationCentre.tsx`, a panel opened from the bell and `g n`:
+- [X] T052 [US3] Implement `ui/src/state/notifications.ts`: subscribe to `notifications-changed`, hydrate with `notificationsList`, and expose `unreadCount()`, `active()`, and the list
+- [X] T053 [US3] Implement `ui/src/shell/NotificationCentre.tsx`, a panel opened from the bell and `g n`:
   - newest first, with severity icon, title, detail, relative time, and a job progress bar (determinate or indeterminate) with status;
   - per-item dismiss and "Dismiss all";
   - mark visible items read on open.
 
   Connect the bell badge (unread count) and the activity marker in `NavBar.tsx`. Makes T044 pass
-- [ ] T054 [US3] Implement `ui/src/shell/Toasts.tsx` in `Shell.tsx`'s toast region:
+- [X] T054 [US3] Implement `ui/src/shell/Toasts.tsx` in `Shell.tsx`'s toast region:
   - bottom-right, above the now-playing bar;
   - `role="status"`, `aria-live="polite"`, never focused;
   - hides after 5 s, at most one per key per 10 s, at most 3 visible, hidden in fullscreen.
 
   Makes T045 pass
-- [ ] T055 [US3] Run the full gate. Then manual check quickstart V4 (library) and V5 (test instance) with the user
+- [X] T055 [US3] Run the full gate. Then manual check quickstart V4 (library) and V5 (test instance) with the user
 
 **Checkpoint**: alerts and jobs appear in one place. Feature 003's "server unreachable" can now
 use the connection notification.

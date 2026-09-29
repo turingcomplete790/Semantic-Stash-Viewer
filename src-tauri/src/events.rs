@@ -81,3 +81,24 @@ pub fn emit_profiles_changed(app: &AppHandle, state: &AppState) {
         tracing::warn!(error = %e, "failed to emit profiles-changed");
     }
 }
+
+/// The full notification list, on every change (004 contracts "Events").
+#[derive(Debug, Clone, serde::Serialize, specta::Type, tauri_specta::Event)]
+#[tauri_specta(event_name = "notifications-changed")]
+pub struct NotificationsChangedEvent(pub Vec<stash_core::shell::notifications::Notification>);
+
+/// Forward notification changes to the UI.
+pub fn forward_notifications(
+    app: AppHandle,
+    center: &std::sync::Arc<stash_core::shell::notifications::NotificationCenter>,
+) {
+    let mut rx = center.subscribe();
+    tauri::async_runtime::spawn(async move {
+        while rx.changed().await.is_ok() {
+            let list = rx.borrow_and_update().clone();
+            if let Err(e) = NotificationsChangedEvent(list).emit(&app) {
+                tracing::warn!(error = %e, "failed to emit notifications-changed");
+            }
+        }
+    });
+}

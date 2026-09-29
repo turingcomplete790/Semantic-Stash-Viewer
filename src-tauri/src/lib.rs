@@ -63,12 +63,17 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             player_commands::debug_open_scene,
             shell_commands::shell_load_tabs,
             shell_commands::shell_save_tabs,
+            shell_commands::notifications_list,
+            shell_commands::notifications_mark_read,
+            shell_commands::notification_dismiss,
+            shell_commands::notifications_dismiss_all,
             player_commands::player_stats,
         ])
         .events(collect_events![
             events::ConnectionStateEvent,
             events::ProfilesChangedEvent,
-            player_commands::PlayerStateEvent
+            player_commands::PlayerStateEvent,
+            events::NotificationsChangedEvent
         ])
 }
 
@@ -105,6 +110,7 @@ pub fn run() {
             let state = AppState::open(
                 &config_dir.join("profiles.json"),
                 &data_dir.join("shell").join("tabs.json"),
+                &data_dir.join("shell").join("notifications.json"),
                 runtime,
                 player,
             )?;
@@ -113,6 +119,7 @@ pub fn run() {
                 &state.manager,
                 std::sync::Arc::clone(&state.profiles),
             );
+            events::forward_notifications(app.handle().clone(), &state.notifications);
             auto_connect(&state);
             app.manage(state);
             #[cfg(debug_assertions)]

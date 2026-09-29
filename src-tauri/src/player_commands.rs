@@ -33,8 +33,14 @@ pub fn forward_player_state(app: AppHandle, player: &Arc<Player>) {
     let player = Arc::clone(player);
     tauri::async_runtime::spawn(async move {
         let mut was_idle = true;
+        let mut was_error = false;
         while rx.changed().await.is_ok() {
             let snapshot = rx.borrow_and_update().clone();
+            let is_error = snapshot.state == PlayerStateKind::Error;
+            if is_error && !was_error {
+                notify_playback_error(&app, &snapshot);
+            }
+            was_error = is_error;
             let idle = snapshot.state == PlayerStateKind::Idle;
             if idle && !was_idle {
                 leave_fullscreen(&app, &player);
@@ -170,6 +176,39 @@ pub(crate) async fn open_scene(
         cache,
     });
     Ok(scene)
+}
+
+/// "Couldn't play …" in the notification centre when playback fails (004 FR-018).
+fn notify_playback_error(app: &AppHandle, snapshot: &PlayerSnapshot) {
+    use stash_core::shell::notifications::{NewNotification, NotificationKind, Severity};
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let detail = snapshot.error.as_ref().map(|e| {
+        let text = e.to_string();
+        let mut chars = text.chars();
+        let first = chars
+            .next()
+            .map(|c| c.to_uppercase().collect::<String>())
+            .unwrap_or_default();
+        format!("{first}{}.", chars.as_str())
+    });
+    state.notifications.post(NewNotification {
+        key: snapshot
+            .scene_id
+            .as_ref()
+            .map(|id| format!("playback:{id}")),
+        profile_id: state.manager.active_profile_id(),
+        kind: NotificationKind::Playback,
+        severity: Severity::Error,
+        title: format!(
+            "Couldn't play {}",
+            snapshot.title.as_deref().unwrap_or("the scene")
+        ),
+        detail,
+        toast: true,
+        job: None,
+    });
 }
 
 /// Stop playback and release audio/video (FR-007).

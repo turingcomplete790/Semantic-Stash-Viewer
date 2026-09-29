@@ -368,3 +368,178 @@ kbd {
   font: inherit;
   font-size: 0.85em;
 }
+
+/* Notification centre (004 US3). Progress uses transform only (research R11). */
+.nav-icon-button {
+  position: relative;
+}
+
+.nav-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 0.7rem;
+  line-height: 16px;
+  text-align: center;
+}
+
+.nav-activity {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.notification-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.notification-header h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.notification-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.notification {
+  display: flex;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--muted);
+  border-radius: 6px;
+}
+
+.notification.unread {
+  background: var(--bg);
+}
+
+.notification.sev-warning {
+  border-left-color: var(--warn);
+}
+
+.notification.sev-error {
+  border-left-color: var(--danger);
+}
+
+.notification-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.notification-severity,
+.notification-time,
+.job-status {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.notification-detail {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.notification-job {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.job-progress {
+  flex: 1;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--border);
+}
+
+.job-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transform-origin: left;
+}
+
+.job-progress.indeterminate .job-progress-fill {
+  width: 40%;
+  transform: none;
+  animation: job-indeterminate 1.4s ease-in-out infinite;
+}
+
+@keyframes job-indeterminate {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
+.notification-dismiss {
+  align-self: flex-start;
+  display: inline-flex;
+  padding: 3px;
+  background: none;
+  border: none;
+  opacity: 0.6;
+}
+
+.notification-dismiss:hover,
+.notification-dismiss:focus-visible {
+  opacity: 1;
+}
+
+/* Toasts (FR-020): never focused, above the now-playing bar. */
+.shell:has(.now-playing) .shell-toasts {
+  bottom: 80px;
+}
+
+.toasts ul {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.toast {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 320px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--muted);
+  border-radius: 8px;
+  /* No box-shadow: toasts can sit over the video (research R11). */
+}
+
+.toast.sev-warning {
+  border-left-color: var(--warn);
+}
+
+.toast.sev-error {
+  border-left-color: var(--danger);
+}

@@ -1,8 +1,9 @@
-//! App shell commands (004 contracts/shell-commands.md): tabs for now; notifications, the log
-//! folder, and app info arrive with US3/US4. File I/O stays in `stash-core` (Principle III).
+//! App shell commands (004 contracts/shell-commands.md): tabs and notifications; the log folder
+//! and app info arrive with US4. File I/O stays in `stash-core` (Principle III).
 
 use std::sync::Arc;
 
+use stash_core::shell::notifications::Notification;
 use stash_core::shell::tabs::TabSet;
 use stash_core::AppError;
 use tauri::State;
@@ -34,4 +35,31 @@ pub fn shell_save_tabs(
         }
     });
     Ok(())
+}
+
+/// All notifications, newest first (updates arrive as `notifications-changed`).
+#[tauri::command]
+#[specta::specta]
+pub fn notifications_list(state: State<'_, AppState>) -> Vec<Notification> {
+    state.notifications.list()
+}
+
+/// Mark notifications read (when the centre is opened).
+#[tauri::command]
+#[specta::specta]
+pub fn notifications_mark_read(state: State<'_, AppState>, ids: Vec<String>) {
+    state.notifications.mark_read(&ids);
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn notification_dismiss(state: State<'_, AppState>, id: String) {
+    state.notifications.dismiss(&id);
+}
+
+/// Remove every notification except jobs that are still running.
+#[tauri::command]
+#[specta::specta]
+pub fn notifications_dismiss_all(state: State<'_, AppState>) {
+    state.notifications.dismiss_all();
 }

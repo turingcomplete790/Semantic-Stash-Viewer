@@ -1,7 +1,8 @@
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import ConnectionIndicator from "../components/ConnectionIndicator";
 import { connection } from "../state/connection";
-import { BellIcon, MoreIcon, SettingsIcon } from "./icons";
+import { MoreIcon, SettingsIcon } from "./icons";
+import NotificationBell, { toggleNotifications } from "./NotificationCentre";
 import { register } from "./keymap";
 import type { Route } from "./routes";
 import { SECTIONS, sectionFor } from "./sections";
@@ -31,8 +32,6 @@ export default function NavBar(props: {
     [...SECTIONS].filter((s) => !s.needsServer || connected()).sort((a, b) => a.order - b.order);
   const currentSection = () => (props.current ? sectionFor(props.current)?.id : undefined);
   const settingsCurrent = () => props.current?.kind === "settings";
-
-  const [notificationsOpen, setNotificationsOpen] = createSignal(false);
 
   // Overflow (FR-007): how many sections fit; the rest go under "More".
   const [fit, setFit] = createSignal(Number.POSITIVE_INFINITY);
@@ -101,7 +100,7 @@ export default function NavBar(props: {
         keys: ["g n"],
         scope: "shell",
         description: "Open notifications",
-        run: () => setNotificationsOpen((o) => !o),
+        run: toggleNotifications,
       }),
     ];
     onCleanup(() => removers.forEach((remove) => remove()));
@@ -171,23 +170,7 @@ export default function NavBar(props: {
       </div>
 
       <div class="nav-right">
-        <div class="nav-notifications">
-          <button
-            type="button"
-            class="nav-icon-button"
-            aria-label="Notifications"
-            title="Notifications (g n)"
-            aria-expanded={notificationsOpen()}
-            onClick={() => setNotificationsOpen((o) => !o)}
-          >
-            <BellIcon />
-          </button>
-          <Show when={notificationsOpen()}>
-            <div class="nav-panel" role="dialog" aria-label="Notifications">
-              <p class="placeholder">No notifications</p>
-            </div>
-          </Show>
-        </div>
+        <NotificationBell />
         <button
           type="button"
           class="nav-icon-button"
