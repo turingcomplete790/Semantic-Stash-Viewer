@@ -296,6 +296,10 @@ exists and opens the log folder, and About shows both versions.
   - failures from background work, such as a scene that failed to open or a background refresh
     that keeps failing;
   - other viewer features' events, as they add them.
+
+  This feature provides the connection and playback producers and the "background" notification
+  kind. The "background refresh keeps failing" producer arrives with feature 003's cache, which
+  has the background refreshes.
 - **FR-019**: An ongoing condition MUST be one notification that updates as the condition
   changes (e.g. "Server unreachable" becomes "Reconnected"). It MUST NOT be a new notification
   for every retry.

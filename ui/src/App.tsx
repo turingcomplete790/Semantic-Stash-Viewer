@@ -6,10 +6,24 @@ import ProfileManager from "./components/ProfileManager";
 import ProfilePicker from "./components/ProfilePicker";
 import { initPlayer } from "./player/state";
 import { newRequestId } from "./lib/requestId";
-import { installKeymap } from "./shell/keymap";
+import KeyboardHelp from "./shell/KeyboardHelp";
+import { installKeymap, register } from "./shell/keymap";
 import NavBar from "./shell/NavBar";
+import NowPlayingBar from "./shell/NowPlayingBar";
 import Shell from "./shell/Shell";
-import { currentRoute, navigate, resetTabs } from "./shell/tabs";
+import TabPanes from "./shell/TabPanes";
+import TabStrip from "./shell/TabStrip";
+import {
+  close,
+  currentRoute,
+  installMouseNavigation,
+  loadTabsFor,
+  navigate,
+  navigateIn,
+  registerTabShortcuts,
+  resetTabs,
+  wasRestored,
+} from "./shell/tabs";
 import { connection, initConnection, refreshProfiles } from "./state/connection";
 import SettingsView from "./settings/SettingsView";
 import RouteView from "./views/RouteView";
@@ -35,6 +49,9 @@ export default function App() {
     void refreshProfiles();
     void initPlayer();
     onCleanup(installKeymap());
+    onCleanup(registerTabShortcuts());
+    onCleanup(installMouseNavigation());
+    onCleanup(registerPlayerKeyListing());
   });
 
   // Debug builds: open a scene straight away (`SSV_DEBUG_OPEN`), to check the video surface.
@@ -47,10 +64,18 @@ export default function App() {
     });
   });
 
-  // Leaving the server resets navigation (the core stops playback itself, 002 FR-007).
+  // Each server has its own tabs (004 FR-014): switching saves the old set and loads the new one;
+  // leaving the server resets to one Home tab. The core stops playback itself (002 FR-007).
+  let tabsProfile: string | null = null;
   createEffect(() => {
-    if (connection.snapshot().profileId === null) resetTabs();
-    else setSettingsWhileDisconnected(false);
+    const id = connection.snapshot().profileId;
+    if (id === tabsProfile) return;
+    tabsProfile = id;
+    if (id === null) resetTabs();
+    else {
+      setSettingsWhileDisconnected(false);
+      void loadTabsFor(id);
+    }
   });
 
   const hasProfiles = () => connection.profiles().length > 0;
@@ -80,9 +105,9 @@ export default function App() {
         if (noActive()) setSettingsWhileDisconnected(false);
         else navigate({ kind: "home" });
       }}
-      onNavigate={(route) => {
+      onNavigate={(route, options) => {
         setAdding(false);
-        navigate(route);
+        navigate(route, options);
       }}
       onOpenSettings={() => {
         setAdding(false);
@@ -95,7 +120,11 @@ export default function App() {
   );
 
   return (
-    <Shell nav={nav}>
+    <Shell
+      nav={nav}
+      tabs={noActive() || adding() ? undefined : <TabStrip />}
+      nowPlaying={<NowPlayingBar />}
+    >
       <Switch>
         <Match when={noActive() && settingsWhileDisconnected()}>
           <SettingsView onManageServers={() => setManagerOpen(true)} />
@@ -125,22 +154,29 @@ export default function App() {
           </div>
         </Match>
         <Match when={!noActive()}>
-          <RouteView
-            route={currentRoute()}
-            actions={{
-              onAddAnother: startAdding,
-              onRetry: () => {
-                const id = connection.snapshot().profileId;
-                if (id) connectTo(id);
-              },
-              onUpdateKey: () => setKeyPromptOpen(true),
-              onManageServers: () => setManagerOpen(true),
-              onLeave: navigate,
-            }}
+          <TabPanes
+            render={(route, tabId) => (
+              <RouteView
+                route={route}
+                restored={wasRestored(tabId)}
+                actions={{
+                  onAddAnother: startAdding,
+                  onRetry: () => {
+                    const id = connection.snapshot().profileId;
+                    if (id) connectTo(id);
+                  },
+                  onUpdateKey: () => setKeyPromptOpen(true),
+                  onManageServers: () => setManagerOpen(true),
+                  onLeave: (fallback) => navigateIn(tabId, fallback),
+                  onClose: () => close(tabId),
+                }}
+              />
+            )}
           />
         </Match>
       </Switch>
 
+      <KeyboardHelp />
       <Show when={managerOpen()}>
         <ProfileManager onClose={() => setManagerOpen(false)} onAdd={startAdding} />
       </Show>
@@ -155,4 +191,23 @@ export default function App() {
       </Show>
     </Shell>
   );
+}
+
+/** List the player's keys in the `?` overlay and Settings → Keyboard (handled by the player). */
+function registerPlayerKeyListing(): () => void {
+  const keys: [string, string[], string][] = [
+    ["player:pause", ["Space"], "Play or pause"],
+    ["player:seek", ["ArrowLeft", "ArrowRight"], "Back or forward 10 seconds"],
+    ["player:volume", ["ArrowUp", "ArrowDown"], "Volume up or down"],
+    ["player:speed", ["[", "]"], "Slower or faster"],
+    ["player:speed-reset", ["\\"], "Normal speed"],
+    ["player:frame", [",", "."], "Previous or next frame (paused)"],
+    ["player:fullscreen", ["F"], "Fullscreen"],
+    ["player:mute", ["M"], "Mute"],
+    ["player:escape", ["Escape"], "Leave fullscreen, then close the player"],
+  ];
+  const removers = keys.map(([id, k, description]) =>
+    register({ id, keys: k, scope: "scene", description }),
+  );
+  return () => removers.forEach((remove) => remove());
 }

@@ -10,7 +10,7 @@ use player::{
     PlayerStateKind, PlayerStats,
 };
 use serde::Serialize;
-use stash_core::adapter::scenes::{playable_scene, recent_scenes, test_scenes};
+use stash_core::adapter::scenes::{playable_scene, recent_scenes, scene_screenshot, test_scenes};
 use stash_core::adapter::StashClient;
 use stash_core::scenes::{is_direct_stream, PlayableScene, SceneGroup, SceneListItem};
 use stash_core::AppError;
@@ -302,6 +302,29 @@ pub fn player_set_viewport(viewport: Option<Viewport>) {
     }));
     #[cfg(not(target_os = "linux"))]
     let _ = viewport;
+}
+
+/// A scene's screenshot as a `data:` URL (e.g. under Play on a restored scene tab), or `None`.
+/// Fetched by the core with the API key; read-only.
+#[tauri::command]
+#[specta::specta]
+pub async fn scene_screenshot_url(
+    state: State<'_, AppState>,
+    scene_id: String,
+) -> Result<Option<String>, AppError> {
+    let (client, _, _) = active_client(&state)?;
+    scene_screenshot(&client, scene_id.trim()).await
+}
+
+/// Hide the video while another tab is shown, and show it again on return. Playback and audio
+/// continue (004 FR-015).
+#[tauri::command]
+#[specta::specta]
+pub fn player_set_video_visible(visible: bool) {
+    #[cfg(target_os = "linux")]
+    crate::video_surface::set_visible(visible);
+    #[cfg(not(target_os = "linux"))]
+    let _ = visible;
 }
 
 /// Debug builds only: a scene to open once connected (`SSV_DEBUG_OPEN`), for checking the video

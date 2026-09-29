@@ -23,6 +23,9 @@ const mocks = vi.hoisted(() => {
       listTestScenes: vi.fn(() => ok([])),
       playerSetViewport: vi.fn(() => ok(null)),
       debugOpenScene: vi.fn(() => Promise.resolve(null)),
+      shellLoadTabs: vi.fn(() => Promise.resolve(null)),
+      shellSaveTabs: vi.fn(() => ok(null)),
+      playerSetVideoVisible: vi.fn(() => Promise.resolve(null)),
     },
     events: {
       connectionState: { listen: listen("connectionState") },

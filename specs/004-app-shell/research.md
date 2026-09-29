@@ -257,9 +257,13 @@ web UI).
   | `KeyPrompt` | stays a dialog |
 
   - Opening a scene from Scenes follows FR-009: current tab, or a new tab with a modifier.
-  - A restored scene tab shows the scene title and a **Play** button. It opens the scene paused
-    at the start the first time it's shown, unless another scene is playing, in which case it
-    waits for Play. This way a relaunch never auto-plays, and never interrupts current playback.
+  - A restored scene tab shows the scene title and a **Play** button, and waits for Play. So
+    does a scene tab whose scene was replaced by another one. A relaunch never auto-plays, and
+    never interrupts current playback. (Changed during implementation from "opens paused when
+    first shown": waiting for Play is simpler, and it's what users see either way.)
+  - Navigating away from a playing scene within its tab (back, or another view) stops playback,
+    as a web page would. Switching tabs doesn't: the "now playing" bar takes over. The playing
+    scene's tab is never unmounted by the 8-tab limit.
 - **Rationale**: capabilities stay the same (FR-029, SC-006). The existing component tests move
   with their components.
 
@@ -274,8 +278,18 @@ web UI).
   - Sections that don't fit a narrow window move into a "More" menu, measured with a resize
     observer (FR-007).
   - Tabs shrink to a minimum width, then the strip scrolls horizontally.
+  - **Rendering rules** (GPU-friendly, found in the `/speckit-analyze` review):
+    - animate only `opacity` and `transform`, with `will-change` on layers that fade often (the
+      player controls and top bar);
+    - no `backdrop-filter` or `filter`, and no `box-shadow` over the video; semi-transparent
+      plain backgrounds are fine (002 R1);
+    - position moving elements with `transform`, not `left`/`top`, e.g. the seek-bar hover time;
+    - avoid wide `:has(...) *` selectors, which re-match every element (the idle cursor goes on
+      the stage and is inherited);
+    - hidden tabs are `hidden` plus `inert`, so they cost nothing to paint.
 - **Rationale**: matches desktop conventions, and keeps FR-015's "doesn't cover content" and
-  FR-020's "never takes focus" testable.
+  FR-020's "never takes focus" testable. The rendering rules keep the webview's work on the GPU
+  compositor and out of layout and paint, while mpv draws video underneath every frame.
 
 ## R12. App version for About
 

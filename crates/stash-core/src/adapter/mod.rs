@@ -99,6 +99,15 @@ impl StashClient {
         req
     }
 
+    /// Start a GET to `{base}/{path}` with the API key, when one is configured.
+    pub(crate) fn get_with_key(&self, url: Url) -> reqwest::RequestBuilder {
+        let mut req = self.http.get(url);
+        if let Some(key) = &self.api_key {
+            req = req.header("ApiKey", key);
+        }
+        req
+    }
+
     /// Start a GET to `{base}/{path}` without authentication.
     pub(crate) fn get(&self, path: &str) -> reqwest::RequestBuilder {
         self.http.get(self.endpoint(path))

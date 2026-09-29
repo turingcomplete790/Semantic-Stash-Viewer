@@ -83,10 +83,32 @@ export const commands = {
 	height: number,
 } | null) => __TAURI_INVOKE<void>("player_set_viewport", { viewport }),
 	/**
+	 *  Hide the video while another tab is shown, and show it again on return. Playback and audio
+	 *  continue (004 FR-015).
+	 */
+	playerSetVideoVisible: (visible: boolean) => __TAURI_INVOKE<void>("player_set_video_visible", { visible }),
+	/**
+	 *  A scene's screenshot as a `data:` URL (e.g. under Play on a restored scene tab), or `None`.
+	 *  Fetched by the core with the API key; read-only.
+	 */
+	sceneScreenshotUrl: (sceneId: string) => typedError<string | null, AppError>(__TAURI_INVOKE("scene_screenshot_url", { sceneId })),
+	/**
 	 *  Debug builds only: a scene to open once connected (`SSV_DEBUG_OPEN`), for checking the video
 	 *  surface without clicking through the UI.
 	 */
 	debugOpenScene: () => __TAURI_INVOKE<string | null>("debug_open_scene"),
+	/**  The saved tabs for a server profile, or `None` (the UI then starts with one Home tab). */
+	shellLoadTabs: (profileId: string) => __TAURI_INVOKE<{
+	/**  1–100 tabs, in strip order. */
+	tabs: Tab[],
+	/**  Must match a tab. */
+	selectedTabId: string,
+} | null>("shell_load_tabs", { profileId }),
+	/**
+	 *  Validate and save a profile's tabs. Returns once validated; the file is written in the
+	 *  background so the UI never waits on disk (Principle VI).
+	 */
+	shellSaveTabs: (profileId: string, tabs: TabSet) => typedError<null, AppError>(__TAURI_INVOKE("shell_save_tabs", { profileId, tabs })),
 	/**  Measurements for the decision record. Debug builds only. */
 	playerStats: () => typedError<PlayerStats, AppError>(__TAURI_INVOKE("player_stats")),
 };
@@ -168,6 +190,13 @@ export type ConnectionSnapshot = {
 export type ConnectionStateEvent = ConnectionSnapshot;
 
 export type FrameDirection = "forward" | "back";
+
+export type HistoryEntry = {
+	/**  A UI route, opaque to the core. */
+	route: unknown,
+	/**  Scroll offsets, filters, selection, typed text. Opaque; at most 16 KB serialised. */
+	viewState: unknown | null,
+};
 
 /**  Library summary shown after connecting (FR-007). */
 export type LibraryCounts = {
@@ -288,6 +317,21 @@ export type SessionState = { kind: "idle" } | { kind: "connecting"; attemptUrl: 
 { kind: "offline"; attempt: number; nextRetryAt: string } | 
 /**  The key was missing, rejected, or wrong. Retries stop until the key is updated (FR-017). */
 { kind: "authFailed"; failure: ConnectFailure } | { kind: "failed"; failure: ConnectFailure };
+
+export type Tab = {
+	id: string,
+	/**  1–50 entries, oldest first. */
+	history: HistoryEntry[],
+	/**  The entry shown: `0 ≤ index < history.len()`. */
+	index: number,
+};
+
+export type TabSet = {
+	/**  1–100 tabs, in strip order. */
+	tabs: Tab[],
+	/**  Must match a tab. */
+	selectedTabId: string,
+};
 
 /**  What `test_connection` returns to the UI (contracts/tauri-commands.md `TestResult`). */
 export type TestResult = {

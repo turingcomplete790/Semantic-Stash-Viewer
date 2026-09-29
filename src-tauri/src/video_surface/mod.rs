@@ -51,6 +51,11 @@ pub fn set_viewport(rect: Option<Rect>) {
     gtk::glib::MainContext::default().invoke(move || gl_area::apply_viewport(rect));
 }
 
+/// Show or hide the video while playback continues (004 FR-015). Any thread.
+pub fn set_visible(visible: bool) {
+    gtk::glib::MainContext::default().invoke(move || gl_area::apply_visible(visible));
+}
+
 /// Rebuild the main window's widget tree around the webview. The work runs on the GTK main
 /// thread (inside `with_webview`); GTK widgets aren't `Send`, so the box and window are found
 /// from the webview there rather than captured here.

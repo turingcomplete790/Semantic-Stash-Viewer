@@ -64,6 +64,19 @@ pub(super) fn apply_viewport(rect: Option<super::Rect>) {
     });
 }
 
+/// Show or hide the video surface. Hidden, mpv keeps decoding and playing audio; frames just
+/// aren't drawn (004 FR-015, research R6). Must run on the GTK main thread.
+pub(super) fn apply_visible(visible: bool) {
+    VIDEO_AREA.with(|slot| {
+        if let Some(area) = slot.borrow().as_ref() {
+            area.set_visible(visible);
+            if visible {
+                area.queue_render();
+            }
+        }
+    });
+}
+
 /// Build the GL area and wire it to `player`.
 pub fn build(player: Arc<Player>) -> gtk::GLArea {
     let area = gtk::GLArea::new();

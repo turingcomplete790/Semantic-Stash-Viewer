@@ -25,9 +25,9 @@ export default function ScenesView() {
   });
   const [sceneId, setSceneId] = createSignal("");
 
-  function open(id: string, title = "") {
+  function open(id: string, title = "", newTab = false) {
     const trimmed = id.trim();
-    if (trimmed) navigate({ kind: "scene", sceneId: trimmed, title });
+    if (trimmed) navigate({ kind: "scene", sceneId: trimmed, title }, { newTab });
   }
 
   return (
@@ -94,7 +94,7 @@ export default function ScenesView() {
 
 function SceneList(props: {
   scenes: SceneListItem[];
-  onPlay: (id: string, title: string) => void;
+  onPlay: (id: string, title: string, newTab: boolean) => void;
 }) {
   return (
     <ul class="player-list">
@@ -105,7 +105,10 @@ function SceneList(props: {
               type="button"
               class="player-row"
               aria-label={`Play ${scene.title}`}
-              onClick={() => props.onPlay(scene.id, scene.title)}
+              onClick={(e) => props.onPlay(scene.id, scene.title, e.ctrlKey || e.metaKey)}
+              onAuxClick={(e) => {
+                if (e.button === 1) props.onPlay(scene.id, scene.title, true);
+              }}
             >
               <span class="player-row-title">{scene.title}</span>
               <span class="player-row-meta">

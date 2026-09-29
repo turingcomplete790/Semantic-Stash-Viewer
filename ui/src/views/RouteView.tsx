@@ -11,16 +11,23 @@ export type RouteViewActions = {
   onRetry: () => void;
   onUpdateKey: () => void;
   onManageServers: () => void;
-  /** Leave the current view (unknown view, or a scene that stopped playing). */
+  /** Leave the view in its tab (a scene that stopped playing). */
   onLeave: (fallback: Route) => void;
+  /** Close the view's tab (an unavailable view). */
+  onClose: () => void;
 };
 
-/** Renders the view for one route (004 research R1). */
-export default function RouteView(props: { route: Route; actions: RouteViewActions }) {
+/** Renders the view for one route in one tab (004 research R1). */
+export default function RouteView(props: {
+  route: Route;
+  actions: RouteViewActions;
+  /** Restored from disk this session (scene tabs wait for Play). */
+  restored?: boolean;
+}) {
   return (
     <Show
       when={isRoute(props.route)}
-      fallback={<Unavailable onClose={() => props.actions.onLeave({ kind: "home" })} />}
+      fallback={<Unavailable onClose={() => props.actions.onClose()} />}
     >
       <Switch>
         <Match when={props.route.kind === "home"}>
@@ -40,6 +47,7 @@ export default function RouteView(props: { route: Route; actions: RouteViewActio
               <SceneView
                 sceneId={scene.sceneId}
                 title={scene.title}
+                restored={props.restored}
                 onDone={() => props.actions.onLeave({ kind: "scenes" })}
               />
             );

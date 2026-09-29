@@ -3,6 +3,7 @@
 //! Both are discardable UI state stored under the viewer's local data directory (research R3).
 
 pub mod store;
+pub mod tabs;
 
 /// Most history entries kept per tab (data-model "Tab"). Older entries are dropped.
 pub const MAX_HISTORY: usize = 50;

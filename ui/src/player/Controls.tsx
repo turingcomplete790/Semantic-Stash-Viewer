@@ -93,11 +93,15 @@ export default function Controls() {
             />
             <Show when={hoverTime()}>
               {(t) => (
+                // The anchor spans the track, so translateX(%) moves by track width: GPU-only,
+                // no layout per mouse move (004 research R11).
                 <span
-                  class="player-hover-time"
-                  style={{ left: `${(t() / Math.max(duration(), 0.001)) * 100}%` }}
+                  class="player-hover-anchor"
+                  style={{
+                    transform: `translateX(${(t() / Math.max(duration(), 0.001)) * 100}%)`,
+                  }}
                 >
-                  {formatDuration(t())}
+                  <span class="player-hover-time">{formatDuration(t())}</span>
                 </span>
               )}
             </Show>

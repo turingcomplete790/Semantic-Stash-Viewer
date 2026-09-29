@@ -72,6 +72,8 @@ mpv.
 - [ ] Scene detail page: metadata, performers, studio, tags, groups, galleries, files
 - [ ] mpv playback: direct stream, hardware decode, resume position, markers as chapters
 - [ ] Play count, play duration, and resume position sync back to Stash (Principle V)
+- [ ] Resume where you left off: a Settings → Playback option (as in the Stash web UI) to start
+      scenes from their saved resume point instead of the beginning
 - [ ] Scene previews and sprite/scrubber thumbnails
 - [ ] Transcoding fallback: explicit, user-visible, and logged, only when mpv can't play a file
 

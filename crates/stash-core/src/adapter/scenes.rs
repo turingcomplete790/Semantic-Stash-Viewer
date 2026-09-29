@@ -2,7 +2,7 @@
 
 use graphql_client::GraphQLQuery;
 
-use super::StashClient;
+use super::{endpoint, StashClient};
 use crate::error::AppError;
 use crate::scenes::{
     self, direct_stream_url, display_title, resolution, SceneFile, SceneGroup, SceneListItem,
@@ -163,4 +163,49 @@ pub async fn playable_scene(
         },
         id: scene.id,
     })
+}
+
+/// Largest screenshot passed to the UI; bigger ones are skipped (they cross the IPC bridge as
+/// base64).
+const MAX_SCREENSHOT_BYTES: usize = 2 * 1024 * 1024;
+
+/// The scene's screenshot as a `data:` URL, or `None` if Stash has none (or it's too big).
+///
+/// Fetched by the core with the API key, because the UI never talks to Stash itself
+/// (constitution Principle III) and an `<img>` can't send the `ApiKey` header. Read-only.
+pub async fn scene_screenshot(client: &StashClient, id: &str) -> Result<Option<String>, AppError> {
+    use base64::Engine as _;
+    let mut url = endpoint(&endpoint(client.base_url(), "scene"), id);
+    if let Ok(mut segments) = url.path_segments_mut() {
+        segments.push("screenshot");
+    }
+    let response = client
+        .get_with_key(url)
+        .send()
+        .await
+        .map_err(|e| AppError::from(client.classify_transport_error(&e)))?;
+    if !response.status().is_success() {
+        return Ok(None);
+    }
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .filter(|t| t.starts_with("image/"))
+        .unwrap_or("image/jpeg")
+        .to_owned();
+    if response
+        .content_length()
+        .is_some_and(|len| len > MAX_SCREENSHOT_BYTES as u64)
+    {
+        return Ok(None);
+    }
+    let bytes = response.bytes().await.map_err(|e| AppError::Internal {
+        message: format!("couldn't read the screenshot: {e}"),
+    })?;
+    if bytes.len() > MAX_SCREENSHOT_BYTES {
+        return Ok(None);
+    }
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(Some(format!("data:{content_type};base64,{encoded}")))
 }

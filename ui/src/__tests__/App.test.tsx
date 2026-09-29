@@ -15,6 +15,9 @@ const mocks = vi.hoisted(() => {
       getConnectionSnapshot: vi.fn(),
       listProfiles: vi.fn(),
       connect: vi.fn(),
+      shellLoadTabs: vi.fn(() => Promise.resolve(null)),
+      shellSaveTabs: vi.fn(() => Promise.resolve({ status: "ok", data: null })),
+      playerSetVideoVisible: vi.fn(() => Promise.resolve(null)),
       playerSnapshot: vi.fn(() =>
         Promise.resolve({ status: "error", error: { kind: "internal" } }),
       ),

@@ -174,13 +174,13 @@ disconnected, overflow works, and the server menu works as today.
 
 ### Tests for User Story 2 (write first, must fail)
 
-- [ ] T024 [P] [US2] Core tab store tests in `crates/stash-core/tests/shell_tabs.rs`:
+- [X] T024 [P] [US2] Core tab store tests in `crates/stash-core/tests/shell_tabs.rs`:
   - save/load per profile round-trips;
   - rejects with `TabSetInvalid` when there are 0 tabs, `selectedTabId` is missing, there are more than 100 tabs, a tab has more than 50 history entries, `index` is out of range, or a `viewState` exceeds 16 KB;
   - `delete_profile_tabs` removes only that profile;
   - entries for profile IDs not in the profile store are dropped on load;
   - a damaged `tabs.json` → `.bak` and `None`.
-- [ ] T025 [P] [US2] UI tab store tests in `ui/src/__tests__/shell/tabs.test.ts`:
+- [X] T025 [P] [US2] UI tab store tests in `ui/src/__tests__/shell/tabs.test.ts`:
   - navigating the current tab pushes history (capped at 50, dropping the oldest);
   - back/forward move the index;
   - open-in-new-tab inserts after the current tab and selects it;
@@ -191,17 +191,17 @@ disconnected, overflow works, and the server menu works as today.
   - saves are debounced 500 ms for view state and immediate for structure (mocked `commands.shellSaveTabs`);
   - loading `null` starts with one Home tab;
   - restored routes that fail `isRoute` become "unavailable" tabs.
-- [ ] T026 [P] [US2] UI tab strip and keyboard tests in `ui/src/__tests__/shell/TabStrip.test.tsx`:
+- [X] T026 [P] [US2] UI tab strip and keyboard tests in `ui/src/__tests__/shell/TabStrip.test.tsx`:
   - renders titles and marks the selected tab;
   - click selects, middle-click closes, and the close button closes;
   - Ctrl+T, Ctrl+W, Ctrl+Tab / Ctrl+Shift+Tab, Ctrl+PgDn / PgUp, Ctrl+1–8, Ctrl+9, Ctrl+Shift+T, Alt+Left / Right, and mouse buttons 3 / 4 act as in [contracts/shell-commands.md](contracts/shell-commands.md#keyboard-map-ui-research-r7);
   - Ctrl+click and middle-click on a navigation bar section open a new tab;
   - `?` opens the keyboard overlay listing every registered binding.
-- [ ] T027 [P] [US2] View state and keep-alive tests in `ui/src/__tests__/shell/viewState.test.tsx`:
+- [X] T027 [P] [US2] View state and keep-alive tests in `ui/src/__tests__/shell/viewState.test.tsx`:
   - a view using `useViewState` gets its saved state back after its tab is hidden and shown, and after it's unmounted (more than 8 tabs) and remounted;
   - `ScenesView` restores its scroll offset;
   - at most 8 tabs are mounted, least recently used unmounted first.
-- [ ] T028 [P] [US2] Now-playing tests in `ui/src/__tests__/shell/NowPlayingBar.test.tsx`:
+- [X] T028 [P] [US2] Now-playing tests in `ui/src/__tests__/shell/NowPlayingBar.test.tsx`:
   - appears when a scene is loaded and its tab isn't selected, showing the title, play/pause (calls `playerTogglePause`), and "back to scene" (selects its tab);
   - hidden when the scene's tab is selected, in fullscreen, or when idle;
   - leaving the scene tab calls `playerSetVideoVisible(false)` and returning calls `true`;
@@ -210,32 +210,34 @@ disconnected, overflow works, and the server menu works as today.
 
 ### Implementation for User Story 2
 
-- [ ] T029 [US2] Implement the core tab types and store in `crates/stash-core/src/shell/tabs.rs`:
+- [X] T029 [US2] Implement the core tab types and store in `crates/stash-core/src/shell/tabs.rs`:
   - `HistoryEntry { route: serde_json::Value, view_state: Option<serde_json::Value> }`, `Tab { id: String, history: Vec<HistoryEntry>, index: u32 }`, and `TabSet { tabs: Vec<Tab>, selected_tab_id: String }` (serde camelCase, specta; the route and view state are opaque JSON);
   - validation against the limits verbatim: "1–100 tabs", "1–50 entries", "`0 ≤ index < history.length`", "view state ≤ 16 KB serialised", "`selectedTabId` must match a tab";
   - a `TabsStore` on `JsonStore<TabsFile { version, profiles: HashMap<Uuid, TabSet> }>` with `load(profile)`, `save(profile, set)` (validated, then written on a background task), `delete(profile)`, and `prune(known_profiles)`.
 
   Makes T024 pass
-- [ ] T030 [US2] Add `shell_load_tabs(profile_id)` and `shell_save_tabs(profile_id, tabs)` in a new `src-tauri/src/shell_commands.rs`:
+- [X] T030 [US2] Add `shell_load_tabs(profile_id)` and `shell_save_tabs(profile_id, tabs)` in a new `src-tauri/src/shell_commands.rs`:
   - create the `TabsStore` at `local_data_dir/semantic-stash-viewer/shell/tabs.json` in `lib.rs` setup and add it to `AppState`;
   - make `delete_profile` in `src-tauri/src/commands.rs` also delete the profile's tab set;
   - register the commands in `specta_builder` and regenerate bindings.
-- [ ] T031 [US2] Implement the UI tab store `ui/src/shell/tabs.ts`:
+- [X] T031 [US2] Implement the UI tab store `ui/src/shell/tabs.ts`:
   - operations: `navigate(route, { newTab })`, `back()`, `forward()`, `select(id | index)`, `close(id)`, `reopenClosed()`, `move(from, to)`;
   - `currentRoute()`, and `tabs()`/`selectedId()` signals;
   - per-profile load on connect / profile switch (save the old set first) through `shellLoadTabs`/`shellSaveTabs`, with debouncing as in T025;
   - FR-013 last-tab rule and the FR-009 new-tab rule.
 
   Replace the single-route state from T014. Makes T025 pass
-- [ ] T032 [US2] Implement `ui/src/shell/viewState.ts`:
+- [X] T032 [US2] Implement `ui/src/shell/viewState.ts`:
   - `useViewState<T>(key, initial)` returns `[state, setState]`, backed by the current history entry's `viewState`, and a `bindScroll(el)` helper that saves `scrollTop`/`scrollLeft` on hide and debounced scroll, and restores them on mount;
   - adopt it in `ScenesView` (scroll offset) and `SettingsView` (current page).
-- [ ] T033 [US2] Render tabs with keep-alive in `Shell.tsx`: keep up to 8 most recently used tabs mounted (hidden ones get `hidden` plus `inert`), unmount older ones, and render only the selected tab visibly. Makes T027 pass (depends on T031, T032)
-- [ ] T034 [US2] Implement `ui/src/shell/TabStrip.tsx`: the tab list with titles and icons (from `routeTitle`/`routeIcon`), a close button, middle-click to close, and a new-tab button; minimum tab width, then horizontal scroll; `role="tablist"`/`tab` semantics. Add back/forward buttons at its left
-- [ ] T035 [US2] Register the tab and history shortcuts in `keymap.ts`, and handle mouse buttons 3/4 on the window. Make NavBar entries honour Ctrl+click and middle-click as new tab (FR-009, FR-011, FR-012)
-- [ ] T036 [US2] Implement `ui/src/shell/KeyboardHelp.tsx`: a `?` overlay listing `bindings()` grouped by scope, closed with Escape. Makes T026 pass
-- [ ] T037 [US2] Add `player_set_video_visible(visible)` in `src-tauri/src/player_commands.rs` and `set_visible(bool)` in `src-tauri/src/video_surface/mod.rs`: show or hide the GL area on the GTK main context, while playback continues (research R6). Register it and regenerate bindings
-- [ ] T038 [US2] Implement `ui/src/shell/NowPlayingBar.tsx` and wire it into `Shell.tsx`:
+
+  *Implemented as:* each tab's pane is its own scroll container and saves and restores `scroll` per history entry for every view (`TabPanes.tsx`). `useViewState` is available for other state. The Settings page lives in its route (`settings {page}`), so it needs no view state.
+- [X] T033 [US2] Render tabs with keep-alive in `Shell.tsx`: keep up to 8 most recently used tabs mounted (hidden ones get `hidden` plus `inert`), unmount older ones, and render only the selected tab visibly. Makes T027 pass (depends on T031, T032)
+- [X] T034 [US2] Implement `ui/src/shell/TabStrip.tsx`: the tab list with titles and icons (from `routeTitle`/`routeIcon`), a close button, middle-click to close, and a new-tab button; minimum tab width, then horizontal scroll; `role="tablist"`/`tab` semantics. Add back/forward buttons at its left
+- [X] T035 [US2] Register the tab and history shortcuts in `keymap.ts`, and handle mouse buttons 3/4 on the window. Make NavBar entries honour Ctrl+click and middle-click as new tab (FR-009, FR-011, FR-012)
+- [X] T036 [US2] Implement `ui/src/shell/KeyboardHelp.tsx`: a `?` overlay listing `bindings()` grouped by scope, closed with Escape. Makes T026 pass
+- [X] T037 [US2] Add `player_set_video_visible(visible)` in `src-tauri/src/player_commands.rs` and `set_visible(bool)` in `src-tauri/src/video_surface/mod.rs`: show or hide the GL area on the GTK main context, while playback continues (research R6). Register it and regenerate bindings
+- [X] T038 [US2] Implement `ui/src/shell/NowPlayingBar.tsx` and wire it into `Shell.tsx`:
   - a 56 px bottom bar that shrinks the content area, showing the title, play/pause, and back-to-scene;
   - visibility derived from the player snapshot and the tab set (data model "Now playing");
   - call `playerSetVideoVisible` on scene-tab selection changes;
@@ -244,8 +246,14 @@ disconnected, overflow works, and the server menu works as today.
   - restored scene tabs show the title and Play, per research R10.
 
   Makes T028 pass (depends on T031, T037)
-- [ ] T039 [US2] Handle server switching in the tab store and shell: save the old profile's set, stop playback (existing core behaviour), then load the new profile's set or a Home tab (spec edge case, quickstart V7)
-- [ ] T040 [US2] Run the full gate. Then manual check quickstart V2, V3, and V7 with the user
+- [X] T068 [US2] Apply the rendering rules from research R11 to the player (out of ID order; added by the `/speckit-analyze` review):
+  - in `ui/src/player/player.css`, add `will-change: opacity` to `.player-controls` and `.player-topbar`;
+  - replace `.player-stage:has(.player-controls-root.idle) *` with `cursor: none` on `.player-stage:has(.player-controls-root.idle)` only (children inherit it);
+  - in `ui/src/player/Controls.tsx`, position the seek-bar hover time with `transform: translateX(calc(<fraction> * <track width>px - 50%))` (or a CSS variable driving a `transform`) instead of the inline `left: %`.
+
+  Keep the existing Controls tests passing, and add one asserting the hover bubble uses `transform` and not `left`
+- [X] T039 [US2] Handle server switching in the tab store and shell: save the old profile's set, stop playback (existing core behaviour), then load the new profile's set or a Home tab (spec edge case, quickstart V7)
+- [X] T040 [US2] Run the full gate. Then manual check quickstart V2, V3, and V7 with the user
 
 **Checkpoint**: tabs work end-to-end, including playback across tabs and restore on relaunch.
 
@@ -383,10 +391,15 @@ there (SC-006).
 ## Phase 7: Polish & Cross-Cutting Concerns
 
 - [ ] T062 [P] Quickstart V8 (damaged storage), done by hand: garbage `tabs.json` and `notifications.json` give a single Home tab, an empty centre, `.bak` copies, and no dialog
-- [ ] T063 [P] Check SC-007 and SC-008 with 20 tabs open. Time tab switches and the now-playing bar (a DevTools performance trace or `performance.now()` logging in a debug build), and record the numbers in `specs/004-app-shell/quickstart.md` under the relevant checks
+- [ ] T063 [P] Measure the shell's performance and record the numbers in `specs/004-app-shell/quickstart.md` under the relevant checks:
+  - **SC-007 / SC-008**: with 20 tabs open, time tab switches and the now-playing bar appearing (a DevTools performance trace, or `performance.now()` logging in a debug build);
+  - **SC-003**: time a control press (a navigation entry and the bell) from input to visible change. The target is under 50 ms;
+  - **Playback regression against 002**: rerun `SSV_MEASURE_LONG` for 1080p (scene 10861, 5 min) and 4K HEVC (scene 2328, 2 min), with the window visible and the scene shown inside the shell (navigation bar over the video, viewport margins). Compare dropped frames and main-thread CPU with 002's decision record (0 drops, 6–7%), and note any difference in `specs/002-mpv-playback-spike/decision.md` under a "Re-measured in the app shell" line
 - [ ] T064 [P] Update `README.md`: the status line mentions the app shell, the Layout table mentions `ui/src/shell/`, and the keyboard basics (`g` shortcuts, tab keys, `?`)
 - [ ] T065 [P] Update `ROADMAP.md` Phase 1 "App shell": tick the navigation bar, tabs, notification centre, and Settings page items, and link `specs/004-app-shell/`
-- [ ] T066 [P] Update `specs/003-complete-foundation/spec.md` Assumptions: the notification centre and Settings → Troubleshooting now exist (built in 004), so 003's "server unreachable" and "Clear cache" plug into them
+- [ ] T066 [P] Update `specs/003-complete-foundation/spec.md`:
+  - Assumptions: the notification centre and Settings → Troubleshooting now exist (built in 004), so 003's "server unreachable" and "Clear cache" plug into them;
+  - Requirements: add that repeated background-refresh failures post a `background` notification (keyed per screen, updated in place), which completes 004 FR-018's producer list.
 - [ ] T067 Run the full gate: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, bindings drift (`cargo run -p semantic-stash-viewer --bin export-bindings` then `git diff --exit-code ui/src/bindings.ts`), `npm --prefix ui run lint`, `npm --prefix ui run typecheck`, and `npm --prefix ui test`
 
 ---
@@ -433,6 +446,7 @@ bindings → UI → checkpoint check.
   before T050.
 - US4: T056 and T057 in parallel.
 - Polish: T062–T066 in parallel.
+- T068 (CSS) can run in parallel with any US2 task except T038 (both touch the player's look).
 
 ---
 

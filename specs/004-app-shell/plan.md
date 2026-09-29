@@ -36,8 +36,10 @@ Approach, from [research.md](research.md):
 **Language/Version**: Rust 1.94 (workspace minimum 1.80); TypeScript 5.9
 
 **Primary Dependencies**:
-- New: `tokio-tungstenite` (with `rustls`), in `stash-core`, for the jobs subscription (R5).
-  `rustls`, `tokio`, and `futures-util` are already in the dependency tree.
+- New: `tokio-tungstenite` 0.30 (with `rustls-tls-native-roots`), in `stash-core`, for the jobs
+  subscription (R5). `rustls` 0.23 (`aws-lc-rs`) and `futures-util` become direct dependencies
+  of `stash-core`, for the accept-any-certificate verifier and the socket stream. Both were
+  already in the lockfile, so nothing new is downloaded.
 - Existing: tauri 2.11, tauri-specta, reqwest, graphql_client, SolidJS, libmpv2, gtk 0.18.
 - No new UI packages: no router (R1) and no icon package (R9).
 
@@ -76,7 +78,13 @@ existing GTK video surface. Other platforms stay untested, as recorded in 002.
 - storage is discardable;
 - the webview's grandparent must stay the `GtkWindow` (002 R2), so the viewport changes only
   set the GL area's margins, never the widget tree;
-- toasts never take focus.
+- toasts never take focus;
+- **GPU-friendly CSS** (research R11, Principle VI). Over the video and in the shell:
+  - animate only `opacity` and `transform`, and hint layers that fade often with `will-change`;
+  - no `backdrop-filter` or `filter`, and no `box-shadow` over the video (plain semi-transparent
+    backgrounds instead);
+  - move things with `transform`, not with `left`/`top` layout changes;
+  - hidden tabs are `hidden` plus `inert`, so they aren't painted.
 
 **Scale/Scope**:
 - 4 views (Home, Scenes, Scene, Settings), 4 Settings pages, and 2 navigation sections;
@@ -156,7 +164,8 @@ src-tauri/src/
 ├── shell_commands.rs                  # new: tabs, notifications, open_log_folder, app_info
 ├── events.rs                          # + NotificationsChangedEvent
 ├── player_commands.rs                 # + player_set_viewport/player_set_video_visible; playback errors → notifications
-├── video_surface/mod.rs               # + set_viewport (GL area margins), set_visible
+├── video_surface/mod.rs               # + full-window GtkBox holding the GL area; set_viewport (margins), set_visible
+├── player_commands.rs (debug)         # debug-only SSV_DEBUG_OPEN / SSV_DEBUG_NO_VIEWPORT switches (research R6)
 ├── commands.rs                        # delete_profile also deletes the tab set
 └── lib.rs                             # wire NotificationCenter, watchers, new commands
 

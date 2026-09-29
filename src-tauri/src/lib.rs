@@ -7,6 +7,7 @@ mod logging;
 #[cfg(debug_assertions)]
 mod measure;
 mod player_commands;
+mod shell_commands;
 mod state;
 #[cfg(target_os = "linux")]
 mod video_surface;
@@ -57,7 +58,11 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             player_commands::player_replay,
             player_commands::player_set_fullscreen,
             player_commands::player_set_viewport,
+            player_commands::player_set_video_visible,
+            player_commands::scene_screenshot_url,
             player_commands::debug_open_scene,
+            shell_commands::shell_load_tabs,
+            shell_commands::shell_save_tabs,
             player_commands::player_stats,
         ])
         .events(collect_events![
@@ -97,7 +102,12 @@ pub fn run() {
             let config_dir: PathBuf = app.path().config_dir()?.join(APP_DIR);
             let runtime = tauri::async_runtime::handle().inner().clone();
             let player = start_player(app);
-            let state = AppState::open(&config_dir.join("profiles.json"), runtime, player)?;
+            let state = AppState::open(
+                &config_dir.join("profiles.json"),
+                &data_dir.join("shell").join("tabs.json"),
+                runtime,
+                player,
+            )?;
             events::forward_connection_state(
                 app.handle().clone(),
                 &state.manager,
