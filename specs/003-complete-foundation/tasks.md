@@ -208,8 +208,8 @@ its status in the README.
 
 **Independent Test**: quickstart V7.
 
-- [ ] T022 [P] [US3] Harden `.github/workflows/ci.yml`: add `timeout-minutes: 30` to the `check` job, and top-level `concurrency: { group: ci-${{ github.ref }}, cancel-in-progress: true }`. Keep every existing named step (FR-019, FR-020; research R10)
-- [ ] T023 [P] [US3] Add the CI badge to the top of `README.md`: `![CI](https://github.com/turingcomplete790/Semantic-Stash-Viewer/actions/workflows/ci.yml/badge.svg?branch=main)`, linked to the workflow page (FR-022)
+- [X] T022 [P] [US3] Harden `.github/workflows/ci.yml`: add `timeout-minutes: 30` to the `check` job, and top-level `concurrency: { group: ci-${{ github.ref }}, cancel-in-progress: true }`. Keep every existing named step (FR-019, FR-020; research R10)
+- [X] T023 [P] [US3] Add the CI badge to the top of `README.md`: `![CI](https://github.com/turingcomplete790/Semantic-Stash-Viewer/actions/workflows/ci.yml/badge.svg?branch=main)`, linked to the workflow page (FR-022)
 - [ ] T024 [US3] Verify SC-008 **with the user's go-ahead** (it pushes):
   - push this branch and confirm the run passes in under 15 minutes;
   - push a throwaway branch with one deliberate formatting error, confirm the run fails at "Rust format", then delete the throwaway branch (locally and on the remote).

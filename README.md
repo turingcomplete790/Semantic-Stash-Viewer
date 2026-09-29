@@ -1,5 +1,7 @@
 # Semantic Stash Viewer
 
+[![CI](https://github.com/turingcomplete790/Semantic-Stash-Viewer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/turingcomplete790/Semantic-Stash-Viewer/actions/workflows/ci.yml)
+
 A fast, native desktop client for [Stash](https://github.com/stashapp/stash), built in Rust with
 [Tauri](https://tauri.app/). Point it at your Stash server, add an API key if your server uses
 one, and browse and play your library the way Jellyfin desktop clients work with a Jellyfin
