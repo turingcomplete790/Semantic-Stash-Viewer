@@ -26,7 +26,7 @@ type Cached<T> = { data: T; fromCache: boolean; fetchedAt: string };
 |---|---|---|---|
 | `list_recent_scenes` | none | `Cached<SceneListItem[]>` | **Changed** return type. Hit → returns at once, and refreshes in the background if older than 5 s |
 | `list_test_scenes` | `shuffle: boolean` | `Cached<SceneGroup[]>` | **Changed.** Cached copy unless `shuffle` is true (no automatic refresh; the set is random) |
-| `cached_server_info` | none | `Cached<ServerInfo> \| null` | **New.** Last probe result for the active (or last-used) profile, for Home while connecting or offline |
+| `cached_server_info` | none | `{ server: ServerInfo; fetchedAt: string } \| null` | **New.** (A named shape: the bindings generator mangles `Option<Cached<T>>`.) Last probe result for the active (or last-used) profile, for Home while connecting or offline |
 | `player_open` | `sceneId` | `PlayerSnapshot` | **Unchanged signature.** Uses cached scene details when present, and refreshes them in the background |
 | `cache_size` | none | `number` (bytes) | **New.** For Settings → Troubleshooting |
 | `clear_cache` | none | `number` (bytes freed) | **New.** Emits `view-data-changed` for every key so open views reload |
@@ -51,6 +51,9 @@ that succeeds invalidates or replaces exactly the keys it affects. A failed writ
 | `SSV_HARNESS_CLEAR_CACHE=1` | Clear that profile's cache before connecting (cold start, cleared) |
 | `SSV_HARNESS_EXIT=1` | Exit once the run's measurements finish |
 | `SSV_DEBUG_BENCH=1` | The UI bench (004), extended with section navigation, scrolling, and cold start |
-| `SSV_MEASURE=…`, `SSV_MEASURE_LONG=…` | Playback measurements (002) |
+| `SSV_MEASURE=…`, `SSV_MEASURE_LONG=…` | Playback measurements (002). `auto` picks from the recently added list: the first three scenes, and the first 1080p one for the long run (stable between runs, unlike the random test set) |
+
+The app also exposes `debug_mark_interactive(visible: boolean)` (debug builds; a no-op in release),
+which the UI calls at the first frame with server info. It prints `MEASURE {"coldStartMs": …}`.
 
 The harness itself is `cargo run --bin perf-harness -- --profile "<name>" [--quick]`.

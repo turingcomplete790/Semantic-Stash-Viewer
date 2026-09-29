@@ -194,7 +194,7 @@ Findings marked **(observed)** were checked on the development machine, in the S
   | Cold start (cleared cache) | reported, no budget | same |
   | View navigation first paint (section switch, warm cache) | < 150 ms | UI bench |
   | Input acknowledgement (control press) | < 50 ms | UI bench |
-  | Scroll frame rate, 10,000-item list | 60 fps (frame time ≤ 16.7 ms at p95) | UI bench, synthetic list |
+  | Scroll frame rate, 10,000-item list | 60 fps: under 1% missed frames (see below) | UI bench, synthetic list |
   | Playback open → first frame | ≤ 1.5 s (002 SC-001) | `SSV_MEASURE` |
   | Seek → new frame | ≤ 1 s (002 SC-002) | `SSV_MEASURE` |
   | Dropped frames, 1080p | ≤ 1/min (002 SC-003) | `SSV_MEASURE_LONG` |

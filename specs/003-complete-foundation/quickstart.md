@@ -71,6 +71,27 @@ Run it again. **Expect**:
 
 Cover the window during a run. **Expect**: the frame measurements are marked invalid, not failed.
 
+**Recorded 2026-09-29** (Production profile; Xeon W-2135, Radeon RX 9060 XT, Manjaro):
+
+| Measurement | Budget | Run 2 | Run 3 | Change |
+|---|---|---|---|---|
+| Cold start, warm cache | < 2 s | 1098 ms | 1092 ms | −0.5% |
+| Cold start, cleared cache | – | 1073 ms | 1095 ms | +2.1% |
+| Section navigation first paint | < 150 ms | 32 ms | 32 ms | 0% |
+| Input acknowledgement | < 50 ms | 32 ms | 34 ms | +6.3% |
+| Scroll, missed frames (10,000 rows) | < 1% | 0% | 0% | – |
+| Playback open → first frame | ≤ 1.5 s | 179 ms | 176 ms | −1.7% |
+| Seek → new frame | ≤ 1 s | 115 ms | 117 ms | +1.7% |
+| Dropped frames per minute, 1080p | ≤ 1 | 0 | 0 | – |
+
+- Every budget passes, and each run took about 2 minutes (121–132 s; SC-006).
+- All medians agree within 10% (largest change +6.3%; SC-007).
+- Navigation and input timings sit at 32 ms because they wait for two painted frames at 60 Hz;
+  that is the measurement's floor, not app time.
+- Run 1 is not comparable: measure mode played scenes with the video hidden (no scene tab), which
+  the harness correctly reported as `invalid (window not drawn)`, and it used the original scroll
+  rule. Both were fixed before runs 2 and 3 (research R8).
+
 ### V7: CI (US3, SC-008)
 1. The README shows the CI badge for `main`, and it's green.
 2. On a throwaway branch, push a commit with a formatting error. **Expect**: the run fails on

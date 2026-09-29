@@ -159,7 +159,7 @@ Principle VI budget with pass/fail/invalid, and the change since the last run.
 
 ### Tests for User Story 2 (write first, must fail)
 
-- [ ] T016 [P] [US2] Report tests in `src-tauri/src/bin/perf_harness/report.rs` (`#[cfg(test)]`):
+- [X] T016 [P] [US2] Report tests in `src-tauri/src/bin/perf_harness/report.rs` (`#[cfg(test)]`):
   - `summarise(samples)` gives the median, p95, and max;
   - a measurement with budget 150 ms and median 120 passes, and one with median 180 fails;
   - one with `invalid_reason` is `invalid` whatever its numbers;
@@ -169,22 +169,22 @@ Principle VI budget with pass/fail/invalid, and the change since the last run.
 
 ### Implementation for User Story 2
 
-- [ ] T017 [US2] Add `src-tauri/src/harness.rs` (debug builds):
+- [X] T017 [US2] Add `src-tauri/src/harness.rs` (debug builds):
   - record the process start `Instant` in a `OnceLock`, set first thing in `run()`;
   - `SSV_HARNESS_PROFILE=<display name>` connects to that profile instead of the last-used one (in place of `auto_connect`);
   - `SSV_HARNESS_CLEAR_CACHE=1` clears that profile's cache before connecting;
   - `SSV_HARNESS_EXIT=1` exits the app after a `MEASURE {"done":true}` or `{"bench":"done"}` line has been printed;
   - a `debug_mark_interactive()` command prints `MEASURE {"coldStartMs": <since process start>}` the first time it's called.
-- [ ] T018 [US2] Extend `ui/src/debug/bench.ts` and `ui/src/App.tsx`:
+- [X] T018 [US2] Extend `ui/src/debug/bench.ts` and `ui/src/App.tsx`:
   - call `debugMarkInteractive()` once when Home first paints with server info (live or cached; after a frame);
   - add section-navigation timing (Home ↔ Scenes via `navigate`, 20 switches, each to the next painted frame);
   - add a scroll test: a debug-only overlay (`ui/src/debug/ScrollBench.tsx`) with a windowed 10,000-row list, scrolled programmatically for 5 s, recording every animation-frame interval and reporting the p95 frame time and the share over 16.7 ms;
   - mark any measurement taken while `document.visibilityState !== "visible"` as `{"invalid": "window hidden"}` (FR-016).
-- [ ] T019 [US2] Update `src-tauri/src/measure.rs`:
+- [X] T019 [US2] Update `src-tauri/src/measure.rs`:
   - a long run whose main-thread CPU samples include 0% (frames not drawn) reports `"invalid": "window not drawn"`;
   - runs that can't connect within 30 s report `"invalid": "not connected"`;
   - respect `SSV_HARNESS_EXIT` (research R8, FR-016).
-- [ ] T020 [US2] Implement the harness binary `src-tauri/src/bin/perf_harness.rs` (with `report.rs` alongside). With `--profile <name>` and `--quick` (fewer repetitions), it:
+- [X] T020 [US2] Implement the harness binary `src-tauri/src/bin/perf_harness.rs` (with `report.rs` alongside). With `--profile <name>` and `--quick` (fewer repetitions), it:
   - builds the debug app (`cargo build -p semantic-stash-viewer`);
   - starts `npm --prefix ui run dev` and waits for port 5173;
   - runs a discarded warm-up launch, then cold start ×3 with `SSV_HARNESS_CLEAR_CACHE=1` and ×3 warm;
@@ -195,7 +195,7 @@ Principle VI budget with pass/fail/invalid, and the change since the last run.
   - writes `<timestamp>.json` and `.md`, prints the Markdown table, and exits non-zero if any measurement failed.
 
   Makes T016 pass
-- [ ] T021 [US2] Run the full gate. Then run the harness twice with the user watching (quickstart V6): check it finishes in under 10 minutes (SC-006) and that the medians agree within 10% (SC-007). Record the numbers in `specs/003-complete-foundation/quickstart.md`
+- [X] T021 [US2] Run the full gate. Then run the harness twice with the user watching (quickstart V6): check it finishes in under 10 minutes (SC-006) and that the medians agree within 10% (SC-007). Record the numbers in `specs/003-complete-foundation/quickstart.md`
 
 **Checkpoint**: one command measures every Phase 0 budget and flags regressions.
 

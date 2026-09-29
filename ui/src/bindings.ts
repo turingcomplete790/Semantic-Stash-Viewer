@@ -99,8 +99,18 @@ export const commands = {
 	debugOpenScene: () => __TAURI_INVOKE<string | null>("debug_open_scene"),
 	/**  Debug builds only: run the UI bench (`SSV_DEBUG_BENCH=1`, 004 T063). */
 	debugBenchEnabled: () => __TAURI_INVOKE<boolean>("debug_bench_enabled"),
+	/**
+	 *  Debug builds only: a playback measurement run is on (`SSV_MEASURE`). The UI then shows each
+	 *  scene it plays in a scene tab, so the video is drawn as it is for users (003 research R8).
+	 */
+	debugMeasureEnabled: () => __TAURI_INVOKE<boolean>("debug_measure_enabled"),
 	/**  Debug builds only: print one bench result line (`MEASURE {json}`) to the terminal. */
 	debugReport: (line: string) => __TAURI_INVOKE<void>("debug_report", { line }),
+	/**
+	 *  Debug builds only: the UI calls this once Home first paints with server info (live or
+	 *  cached). Prints `MEASURE {"coldStartMs": …}` the first time (research R8).
+	 */
+	debugMarkInteractive: (visible: boolean) => __TAURI_INVOKE<void>("debug_mark_interactive", { visible }),
 	/**  The saved tabs for a server profile, or `None` (the UI then starts with one Home tab). */
 	shellLoadTabs: (profileId: string) => __TAURI_INVOKE<{
 	/**  1–100 tabs, in strip order. */

@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => {
       getConnectionSnapshot: vi.fn(),
       listProfiles: vi.fn(),
       cachedServerInfo: vi.fn(),
+      debugMarkInteractive: vi.fn(() => Promise.resolve(null)),
     },
     events: {
       connectionState: { listen: listen("connectionState") },

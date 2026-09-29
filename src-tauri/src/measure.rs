@@ -9,6 +9,14 @@
 //! `SSV_MEASURE_LONG=<id>` (optional) then plays that scene for `SSV_MEASURE_LONG_SECS`
 //! (default 300) and records dropped frames and main-thread CPU (SC-003, research R5).
 //!
+//! `auto` in either picks scenes from the library's recently added list (the performance
+//! harness, 003 research R8): the first three for open/seek, and the first 1080p one for the
+//! long run. That list only changes when the library does, so runs are comparable (SC-007).
+//!
+//! Invalid runs say so instead of reporting numbers (003 FR-016): `"invalid": "not connected"`
+//! when there's no connection within 30 s, and `"invalid": "window not drawn"` when the main
+//! thread stops drawing during the long run.
+//!
 //! Results are printed as `MEASURE {json}` lines. Nothing is written to Stash.
 
 use std::sync::Arc;
@@ -18,6 +26,13 @@ use player::{Player, PlayerStateKind};
 use serde_json::json;
 use tauri::{AppHandle, Manager};
 
+use stash_core::adapter::scenes::recent_scenes;
+use stash_core::cache::refresh::RefreshPolicy;
+use stash_core::connection::snapshot::SessionState;
+use stash_core::scenes::SceneListItem;
+
+use crate::cache_commands::read_cached;
+use crate::harness::{self, Finish};
 use crate::player_commands::{open_scene, player};
 use crate::state::AppState;
 
@@ -51,31 +66,79 @@ fn emit(value: &serde_json::Value) {
 }
 
 async fn run(app: &AppHandle, ids: &[String], long: Option<&str>, long_secs: u64) {
+    measure_all(app, ids, long, long_secs).await;
+    emit(&json!({"done": true}));
+    harness::finished(Finish::Measure);
+}
+
+async fn measure_all(app: &AppHandle, ids: &[String], long: Option<&str>, long_secs: u64) {
     let state = app.state::<AppState>();
-    let deadline = Instant::now() + Duration::from_secs(30);
-    while state.manager.active_profile_id().is_none() {
-        if Instant::now() > deadline {
-            emit(&json!({"error": "not connected after 30 s"}));
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(250)).await;
+    let connected = wait_for(Duration::from_secs(30), || {
+        matches!(state.manager.snapshot().state, SessionState::Connected)
+    })
+    .await;
+    if !connected {
+        emit(&json!({"invalid": "not connected"}));
+        return;
     }
     // Let the UI settle after connecting.
     tokio::time::sleep(Duration::from_secs(3)).await;
     let Ok(player) = player(&state).map(Arc::clone) else {
-        emit(&json!({"error": "player unavailable"}));
+        emit(&json!({"invalid": "player unavailable"}));
         return;
     };
     player.set_muted(true);
 
-    for id in ids {
+    let wants_auto = ids.iter().any(|id| id == "auto") || long == Some("auto");
+    let recent = if wants_auto {
+        match read_cached(
+            &state,
+            "scenes:recent",
+            RefreshPolicy::Auto,
+            false,
+            |c| async move { recent_scenes(&c).await },
+        )
+        .await
+        {
+            Ok(r) => r.data,
+            Err(e) => {
+                emit(&json!({"invalid": format!("couldn't list scenes: {e}")}));
+                return;
+            }
+        }
+    } else {
+        Vec::new()
+    };
+    let ids: Vec<String> = if ids.iter().any(|id| id == "auto") {
+        recent.iter().take(3).map(|s| s.id.clone()).collect()
+    } else {
+        ids.to_vec()
+    };
+    let long = match long {
+        Some("auto") => pick_1080p(&recent),
+        other => other.map(str::to_owned),
+    };
+
+    for id in &ids {
         measure_scene(&state, &player, id).await;
     }
     if let Some(id) = long {
-        measure_long(&state, &player, id, long_secs).await;
+        measure_long(&state, &player, &id, long_secs).await;
     }
     player.close();
-    emit(&json!({"done": true}));
+}
+
+/// The first 1080p scene, else the first scene at all.
+fn pick_1080p(scenes: &[SceneListItem]) -> Option<String> {
+    scenes
+        .iter()
+        .find(|s| {
+            s.resolution
+                .as_deref()
+                .is_some_and(|r| r.ends_with("×1080"))
+        })
+        .or_else(|| scenes.first())
+        .map(|s| s.id.clone())
 }
 
 /// Poll `pred` every 20 ms until it holds or `timeout` passes.
@@ -199,8 +262,12 @@ async fn measure_long(state: &AppState, player: &Player, id: &str, secs: u64) {
         _ => None,
     };
     let stats = player.stats();
+    // No main-thread CPU at all means nothing was drawn (a hidden window, found in 002), so the
+    // frame counts mean nothing.
+    let not_drawn = samples.contains(&0.0);
     emit(&json!({
         "long": id,
+        "invalid": not_drawn.then_some("window not drawn"),
         "seconds": elapsed.round(),
         "state": player.snapshot().state,
         "hwdec": stats.hwdec,

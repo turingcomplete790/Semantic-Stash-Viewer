@@ -4,6 +4,7 @@
 mod cache_commands;
 mod commands;
 mod events;
+mod harness;
 mod logging;
 #[cfg(debug_assertions)]
 mod measure;
@@ -73,7 +74,9 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             player_commands::scene_screenshot_url,
             player_commands::debug_open_scene,
             player_commands::debug_bench_enabled,
+            player_commands::debug_measure_enabled,
             player_commands::debug_report,
+            harness::debug_mark_interactive,
             shell_commands::shell_load_tabs,
             shell_commands::shell_save_tabs,
             shell_commands::notifications_list,
@@ -107,6 +110,7 @@ pub fn export_bindings(builder: &Builder<tauri::Wry>) -> Result<(), String> {
 }
 
 pub fn run() {
+    harness::record_start();
     let builder = specta_builder();
 
     #[cfg(debug_assertions)]
@@ -150,6 +154,7 @@ pub fn run() {
                 std::sync::Arc::clone(&state.profiles),
             );
             events::forward_notifications(app.handle().clone(), &state.notifications);
+            harness::install(app.handle());
             auto_connect(&state);
             app.manage(state);
             #[cfg(debug_assertions)]
@@ -161,7 +166,35 @@ pub fn run() {
 }
 
 /// Reconnect to the last-used profile at launch without blocking window creation (FR-014).
+/// A harness run connects to the profile it names instead (003 research R8).
 fn auto_connect(state: &AppState) {
+    if let Some(name) = harness::profile() {
+        let profile = state.profiles.lock().ok().and_then(|store| {
+            store
+                .list()
+                .iter()
+                .find(|p| p.display_name == name)
+                .cloned()
+        });
+        let Some(profile) = profile else {
+            harness::emit(&serde_json::json!({"invalid": "profile not found"}));
+            return;
+        };
+        if harness::clear_cache() {
+            if let Some(r) = state.caches.for_profile(profile.id) {
+                let cleared = r
+                    .cache()
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clear();
+                if let Err(e) = cleared {
+                    tracing::warn!(error = %e, "couldn't clear the cache for the harness run");
+                }
+            }
+        }
+        commands::start_session(state, &profile, true);
+        return;
+    }
     let last = state.profiles.lock().ok().and_then(|store| {
         let id = store.last_used_profile_id()?;
         store.get(id).cloned()

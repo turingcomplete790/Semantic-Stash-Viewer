@@ -423,12 +423,25 @@ pub fn debug_bench_enabled() -> bool {
     cfg!(debug_assertions) && std::env::var_os("SSV_DEBUG_BENCH").is_some()
 }
 
+/// Debug builds only: a playback measurement run is on (`SSV_MEASURE`). The UI then shows each
+/// scene it plays in a scene tab, so the video is drawn as it is for users (003 research R8).
+#[tauri::command]
+#[specta::specta]
+pub fn debug_measure_enabled() -> bool {
+    cfg!(debug_assertions) && std::env::var_os("SSV_MEASURE").is_some()
+}
+
 /// Debug builds only: print one bench result line (`MEASURE {json}`) to the terminal.
 #[tauri::command]
 #[specta::specta]
 pub fn debug_report(line: String) {
     if cfg!(debug_assertions) {
         println!("MEASURE {line}");
+        let done = serde_json::from_str::<serde_json::Value>(&line)
+            .is_ok_and(|v| v.get("bench").and_then(|b| b.as_str()) == Some("done"));
+        if done {
+            crate::harness::finished(crate::harness::Finish::Bench);
+        }
     }
 }
 

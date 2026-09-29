@@ -20,6 +20,8 @@ const mocks = vi.hoisted(() => {
       playerSetVideoVisible: vi.fn(() => Promise.resolve(null)),
       notificationsList: vi.fn(() => Promise.resolve([])),
       debugBenchEnabled: vi.fn(() => Promise.resolve(false)),
+      debugMeasureEnabled: vi.fn(() => Promise.resolve(false)),
+      debugMarkInteractive: vi.fn(() => Promise.resolve(null)),
       cachedServerInfo: vi.fn(() => Promise.resolve(null)),
       debugOpenScene: vi.fn(() => Promise.resolve(null)),
       playerSnapshot: vi.fn(() =>

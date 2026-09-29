@@ -1,7 +1,8 @@
-import { createResource, Match, Show, Switch } from "solid-js";
+import { createEffect, createResource, Match, Show, Switch } from "solid-js";
 import { commands } from "../bindings";
 import type { ConnectFailure, ProfileSummary, ServerInfo } from "../bindings";
 import { connectFailureMessage } from "../messages/failures";
+import { markInteractive } from "../debug/interactive";
 import { connection } from "../state/connection";
 import ConnectedSummary from "./ConnectedSummary";
 import ServerSummary from "./ServerSummary";
@@ -27,6 +28,9 @@ export default function SessionView(props: {
     async () => (await commands.cachedServerInfo())?.server ?? null,
   );
   const summary = (): ServerInfo | null | undefined => snap().server ?? lastServer.latest;
+  createEffect(() => {
+    if (summary()) markInteractive();
+  });
   const failure = (): ConnectFailure | undefined => {
     const s = snap().state;
     return s.kind === "failed" || s.kind === "authFailed" ? s.failure : undefined;
