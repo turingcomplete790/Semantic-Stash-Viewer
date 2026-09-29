@@ -360,28 +360,28 @@ replaces the server-management dialog.
 
 ### Tests for User Story 4 (write first, must fail)
 
-- [ ] T056 [P] [US4] Settings tests in `ui/src/__tests__/settings/SettingsView.test.tsx`:
+- [X] T056 [P] [US4] Settings tests in `ui/src/__tests__/settings/SettingsView.test.tsx`:
   - the page list shows Servers, Keyboard, Troubleshooting, and About, and selecting a page updates the route's `page`;
   - Servers keeps the existing `ProfileManager` behaviour (add, edit, reorder, remove with confirmation; port the assertions from the existing ProfileManager tests);
   - Keyboard lists every `bindings()` entry;
   - Troubleshooting's "Open log folder" calls `commands.openLogFolder` and shows a plain error on `openFailed`;
   - About shows `appInfo().version` and the connected server's address and Stash version.
-- [ ] T057 [P] [US4] Core test in `crates/stash-core/tests/shell_open.rs` (or a unit test in `src-tauri/src/shell_commands.rs`): the opener command resolves to `xdg-open <log dir>` on Linux, and the path is the app's fixed log directory, never taken from input (research R8)
+- [X] T057 [P] [US4] Core test in `crates/stash-core/tests/shell_open.rs` (or a unit test in `src-tauri/src/shell_commands.rs`): the opener command resolves to `xdg-open <log dir>` on Linux, and the path is the app's fixed log directory, never taken from input (research R8)
 
 ### Implementation for User Story 4
 
-- [ ] T058 [US4] Add `open_log_folder` and `app_info` to `src-tauri/src/shell_commands.rs`:
+- [X] T058 [US4] Add `open_log_folder` and `app_info` to `src-tauri/src/shell_commands.rs`:
   - `open_log_folder` spawns `xdg-open` (Linux), `open` (macOS), or `explorer` (Windows) with `std::process::Command` on the known log directory, and maps a spawn failure to `AppError::OpenFailed`;
   - `app_info` returns `{ version: app.package_info().version }`.
 
   Register both and regenerate bindings. Makes T057 pass
-- [ ] T059 [US4] Implement `ui/src/settings/SettingsView.tsx`: a two-column page list plus the page body, with the page taken from the route. Add pages:
+- [X] T059 [US4] Implement `ui/src/settings/SettingsView.tsx`: a two-column page list plus the page body, with the page taken from the route. Add pages:
   - `ServersPage.tsx`: the body of `ProfileManager` without the dialog frame;
   - `KeyboardPage.tsx`: from `keymap.bindings()`, the same source as the `?` overlay;
   - `TroubleshootingPage.tsx`: "Open log folder", plus a documented slot for feature 003's "Clear cache";
   - `AboutPage.tsx`: viewer version and server info.
-- [ ] T060 [US4] Remove the `ProfileManager` dialog path: "Manage servers" (server menu) now navigates to `{ kind: "settings", page: "servers" }`, and the `managerOpen` state is dropped from `ui/src/App.tsx`/`Shell.tsx`. Makes T056 pass
-- [ ] T061 [US4] Run the full gate. Then manual check quickstart V6 with the user
+- [X] T060 [US4] Remove the `ProfileManager` dialog path: "Manage servers" (server menu) now navigates to `{ kind: "settings", page: "servers" }`, and the `managerOpen` state is dropped from `ui/src/App.tsx`/`Shell.tsx`. Makes T056 pass
+- [X] T061 [US4] Run the full gate. Then manual check quickstart V6 with the user
 
 **Checkpoint**: all four stories work, and every capability from before the shell is still
 there (SC-006).

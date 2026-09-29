@@ -32,7 +32,7 @@ vi.mock("../bindings", () => ({ commands: mocks.commands, events: mocks.events }
 import ConnectionForm from "../components/ConnectionForm";
 import ConnectionIndicator from "../components/ConnectionIndicator";
 import KeyPrompt from "../components/KeyPrompt";
-import ProfileManager from "../components/ProfileManager";
+import ServersPage from "../settings/ServersPage";
 import { initConnection } from "../state/connection";
 
 const home: ProfileSummary = {
@@ -79,24 +79,20 @@ describe("keyboard", () => {
     expect(cancel).toHaveFocus();
   });
 
-  it("Escape in the delete confirmation cancels it without closing the manager", () => {
-    const onClose = vi.fn();
-    render(() => <ProfileManager onClose={onClose} onAdd={() => {}} />);
+  it("Escape in the delete confirmation cancels it without deleting", () => {
+    render(() => <ServersPage onAdd={() => {}} />);
     const row = screen.getByRole("listitem", { name: "Home" });
     fireEvent.click(within(row).getByRole("button", { name: "Delete" }));
     const confirm = screen.getByRole("alertdialog");
 
     fireEvent.keyDown(confirm, { key: "Escape" });
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
-    expect(onClose).not.toHaveBeenCalled();
     expect(mocks.commands.deleteProfile).not.toHaveBeenCalled();
-
-    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
-    expect(onClose).toHaveBeenCalled();
+    expect(screen.getByRole("heading", { name: "Servers" })).toBeInTheDocument();
   });
 
   it("focuses Cancel (the safe choice) in the delete confirmation", async () => {
-    render(() => <ProfileManager onClose={() => {}} onAdd={() => {}} />);
+    render(() => <ServersPage onAdd={() => {}} />);
     const row = screen.getByRole("listitem", { name: "Home" });
     fireEvent.click(within(row).getByRole("button", { name: "Delete" }));
     const confirm = screen.getByRole("alertdialog");

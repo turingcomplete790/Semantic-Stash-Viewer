@@ -116,6 +116,9 @@ export const commands = {
 	notificationDismiss: (id: string) => __TAURI_INVOKE<void>("notification_dismiss", { id }),
 	/**  Remove every notification except jobs that are still running. */
 	notificationsDismissAll: () => __TAURI_INVOKE<void>("notifications_dismiss_all"),
+	/**  Open the viewer's log folder (Settings → Troubleshooting, FR-027). */
+	openLogFolder: () => typedError<null, AppError>(__TAURI_INVOKE("open_log_folder")),
+	appInfo: () => __TAURI_INVOKE<AppInfo>("app_info"),
 	/**  Measurements for the decision record. Debug builds only. */
 	playerStats: () => typedError<PlayerStats, AppError>(__TAURI_INVOKE("player_stats")),
 };
@@ -155,6 +158,11 @@ export type AppError = { kind: "connect"; failure: ConnectFailure } |
 { kind: "cancelled" } | 
 /**  Anything else that shouldn't happen (for example the HTTP client failing to build). */
 { kind: "internal"; message: string };
+
+/**  The viewer's version, for Settings → About (FR-028). */
+export type AppInfo = {
+	version: string,
+};
 
 /**  A classified connection failure. No variant carries a raw response body. */
 export type ConnectFailure = 

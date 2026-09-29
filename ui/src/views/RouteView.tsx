@@ -1,7 +1,7 @@
 import { Match, Show, Switch } from "solid-js";
 import SettingsView from "../settings/SettingsView";
 import { isRoute } from "../shell/routes";
-import type { Route } from "../shell/routes";
+import type { Route, SettingsPage } from "../shell/routes";
 import HomeView from "./HomeView";
 import SceneView from "./SceneView";
 import ScenesView from "./ScenesView";
@@ -10,7 +10,8 @@ export type RouteViewActions = {
   onAddAnother: () => void;
   onRetry: () => void;
   onUpdateKey: () => void;
-  onManageServers: () => void;
+  onAddServer: () => void;
+  onSettingsPage: (page: SettingsPage) => void;
   /** Leave the view in its tab (a scene that stopped playing). */
   onLeave: (fallback: Route) => void;
   /** Close the view's tab (an unavailable view). */
@@ -53,8 +54,14 @@ export default function RouteView(props: {
             );
           }}
         </Match>
-        <Match when={props.route.kind === "settings"}>
-          <SettingsView onManageServers={props.actions.onManageServers} />
+        <Match when={props.route.kind === "settings" && props.route}>
+          {(r) => (
+            <SettingsView
+              page={(r() as Extract<Route, { kind: "settings" }>).page}
+              onPage={props.actions.onSettingsPage}
+              onAddServer={props.actions.onAddServer}
+            />
+          )}
         </Match>
       </Switch>
     </Show>

@@ -25,6 +25,16 @@ use state::AppState;
 /// Directory name under the platform config/data dirs (research R11).
 const APP_DIR: &str = "semantic-stash-viewer";
 
+/// The viewer's log directory (`~/.local/share/semantic-stash-viewer/logs/` on Linux).
+pub(crate) fn log_dir(app: &tauri::AppHandle) -> Result<PathBuf, stash_core::AppError> {
+    app.path()
+        .local_data_dir()
+        .map(|dir| dir.join(APP_DIR).join("logs"))
+        .map_err(|e| stash_core::AppError::Internal {
+            message: format!("no data directory: {e}"),
+        })
+}
+
 /// Where the generated TypeScript bindings live.
 pub const BINDINGS_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../ui/src/bindings.ts");
 
@@ -67,6 +77,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             shell_commands::notifications_mark_read,
             shell_commands::notification_dismiss,
             shell_commands::notifications_dismiss_all,
+            shell_commands::open_log_folder,
+            shell_commands::app_info,
             player_commands::player_stats,
         ])
         .events(collect_events![

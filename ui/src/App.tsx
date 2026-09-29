@@ -2,7 +2,6 @@ import { createEffect, createSignal, Match, onCleanup, onMount, Show, Switch } f
 import { commands } from "./bindings";
 import ConnectionForm from "./components/ConnectionForm";
 import KeyPrompt from "./components/KeyPrompt";
-import ProfileManager from "./components/ProfileManager";
 import ProfilePicker from "./components/ProfilePicker";
 import { initPlayer } from "./player/state";
 import { newRequestId } from "./lib/requestId";
@@ -26,6 +25,7 @@ import {
 } from "./shell/tabs";
 import { connection, initConnection, refreshProfiles } from "./state/connection";
 import { initNotifications } from "./state/notifications";
+import type { SettingsPage } from "./shell/routes";
 import Toasts from "./shell/Toasts";
 import SettingsView from "./settings/SettingsView";
 import RouteView from "./views/RouteView";
@@ -41,10 +41,20 @@ import "./App.css";
  */
 export default function App() {
   const [adding, setAdding] = createSignal(false);
-  const [managerOpen, setManagerOpen] = createSignal(false);
   const [keyPromptOpen, setKeyPromptOpen] = createSignal(false);
-  // Settings works without a server (004 FR-006); while disconnected it replaces the picker.
+  // Settings works without a server (004 FR-006); while disconnected it replaces the picker and
+  // keeps its page here (connected, the page lives in the tab's route).
   const [settingsWhileDisconnected, setSettingsWhileDisconnected] = createSignal(false);
+  const [disconnectedPage, setDisconnectedPage] = createSignal<SettingsPage>("servers");
+
+  /** Open Settings on a page: in the current tab when connected, in place of the picker if not. */
+  function openSettings(page: SettingsPage = "servers") {
+    setAdding(false);
+    if (noActive()) {
+      setDisconnectedPage(page);
+      setSettingsWhileDisconnected(true);
+    } else navigate({ kind: "settings", page });
+  }
 
   onMount(() => {
     void initConnection();
@@ -90,7 +100,7 @@ export default function App() {
   }
 
   function startAdding() {
-    setManagerOpen(false);
+    setSettingsWhileDisconnected(false);
     setAdding(true);
   }
 
@@ -99,7 +109,7 @@ export default function App() {
       current={
         noActive()
           ? settingsWhileDisconnected()
-            ? { kind: "settings", page: "servers" }
+            ? { kind: "settings", page: disconnectedPage() }
             : null
           : currentRoute()
       }
@@ -112,13 +122,9 @@ export default function App() {
         setAdding(false);
         navigate(route, options);
       }}
-      onOpenSettings={() => {
-        setAdding(false);
-        if (noActive()) setSettingsWhileDisconnected(true);
-        else navigate({ kind: "settings", page: "servers" });
-      }}
+      onOpenSettings={() => openSettings()}
       onUpdateKey={() => setKeyPromptOpen(true)}
-      onManageServers={() => setManagerOpen(true)}
+      onManageServers={() => openSettings("servers")}
     />
   );
 
@@ -131,7 +137,11 @@ export default function App() {
     >
       <Switch>
         <Match when={noActive() && settingsWhileDisconnected()}>
-          <SettingsView onManageServers={() => setManagerOpen(true)} />
+          <SettingsView
+            page={disconnectedPage()}
+            onPage={setDisconnectedPage}
+            onAddServer={startAdding}
+          />
         </Match>
         <Match when={adding() || (noActive() && !hasProfiles())}>
           <div class="view-page">
@@ -153,7 +163,7 @@ export default function App() {
             <ProfilePicker
               onConnect={connectTo}
               onAdd={startAdding}
-              onManage={() => setManagerOpen(true)}
+              onManage={() => openSettings("servers")}
             />
           </div>
         </Match>
@@ -170,7 +180,8 @@ export default function App() {
                     if (id) connectTo(id);
                   },
                   onUpdateKey: () => setKeyPromptOpen(true),
-                  onManageServers: () => setManagerOpen(true),
+                  onAddServer: startAdding,
+                  onSettingsPage: (page) => navigateIn(tabId, { kind: "settings", page }),
                   onLeave: (fallback) => navigateIn(tabId, fallback),
                   onClose: () => close(tabId),
                 }}
@@ -181,9 +192,6 @@ export default function App() {
       </Switch>
 
       <KeyboardHelp />
-      <Show when={managerOpen()}>
-        <ProfileManager onClose={() => setManagerOpen(false)} onAdd={startAdding} />
-      </Show>
       <Show when={keyPromptOpen() && connection.activeProfile()}>
         {(profile) => (
           <KeyPrompt
