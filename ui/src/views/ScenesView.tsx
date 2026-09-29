@@ -1,8 +1,9 @@
 import { createResource, createSignal, For, Show } from "solid-js";
 import { commands } from "../bindings";
-import type { SceneListItem } from "../bindings";
+import type { SceneGroup, SceneListItem } from "../bindings";
 import { formatDuration } from "../player/format";
 import { navigate } from "../shell/tabs";
+import { onViewDataChanged } from "../state/viewData";
 import "../components/ConnectionForm.css";
 import "../components/ProfileManager.css";
 import "../player/player.css";
@@ -12,17 +13,23 @@ import "../player/player.css";
  * replaces it with the real scene grid. Choosing a scene opens it in the Scene view.
  */
 export default function ScenesView() {
-  const [recent] = createResource(async () => {
+  // Shown from the cache when there is one; a refresh that changes it updates in place (003).
+  const [recent, { refetch: reloadRecent }] = createResource(async () => {
     const res = await commands.listRecentScenes();
     if (res.status === "error") throw res.error;
-    return res.data;
+    return res.data.data;
   });
-  // Spike test set: random 4K / WMV / VP9 / AV1 / MPEG-4 / FLV scenes (002 research R7).
-  const [testSets, { refetch: shuffleTestSets }] = createResource(async () => {
-    const res = await commands.listTestScenes();
-    if (res.status === "error") throw res.error;
-    return res.data;
-  });
+  onViewDataChanged("scenes:recent", () => void reloadRecent());
+  // Spike test set: random 4K / WMV / VP9 / AV1 / MPEG-4 / FLV scenes (002 research R7). It
+  // stays the same until Shuffle.
+  const [testSets, { refetch: reloadTestSets }] = createResource<SceneGroup[], string>(
+    async (_, info) => {
+      const res = await commands.listTestScenes(info.refetching === "shuffle");
+      if (res.status === "error") throw res.error;
+      return res.data.data;
+    },
+  );
+  onViewDataChanged("scenes:test-set", () => void reloadTestSets());
   const [sceneId, setSceneId] = createSignal("");
 
   function open(id: string, title = "", newTab = false) {
@@ -59,14 +66,14 @@ export default function ScenesView() {
 
         <h2 class="player-subtitle">Recently added</h2>
         <Show when={!recent.error} fallback={<p class="lede">Couldn't load recent scenes.</p>}>
-          <Show when={recent()} fallback={<p class="lede">Loading…</p>}>
+          <Show when={recent.latest} fallback={<p class="lede">Loading…</p>}>
             {(items) => <SceneList scenes={items()} onPlay={open} />}
           </Show>
         </Show>
 
         <div class="player-subtitle-row">
           <h2 class="player-subtitle">Test scenes</h2>
-          <button type="button" onClick={() => void shuffleTestSets()}>
+          <button type="button" onClick={() => void reloadTestSets("shuffle")}>
             Shuffle
           </button>
         </div>
@@ -74,7 +81,7 @@ export default function ScenesView() {
           Random picks of hard-to-play formats: 4K, WMV, VP9, AV1, and older codecs.
         </p>
         <Show when={!testSets.error} fallback={<p class="lede">Couldn't load test scenes.</p>}>
-          <Show when={testSets()} fallback={<p class="lede">Loading…</p>}>
+          <Show when={testSets.latest} fallback={<p class="lede">Loading…</p>}>
             {(groups) => (
               <For each={groups()}>
                 {(group) => (

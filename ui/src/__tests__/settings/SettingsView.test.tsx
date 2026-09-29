@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => {
       getConnectionSnapshot: vi.fn(),
       listProfiles: vi.fn(),
       openLogFolder: vi.fn(),
+      cacheSize: vi.fn(() => Promise.resolve(3 * 1024 * 1024)),
+      clearCache: vi.fn(),
       appInfo: vi.fn(() => Promise.resolve({ version: "0.1.0" })),
     },
     events: {
@@ -47,6 +49,7 @@ const connected: ConnectionSnapshot = {
     version: "v0.31.1",
     versionStatus: "supported",
     appSchema: 85,
+    identity: "0000000000000000",
     counts: { scenes: 1, images: 1, galleries: 1, performers: 1 },
   },
   lastContactAt: null,
@@ -112,6 +115,17 @@ describe("Settings", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open log folder" }));
     expect(await screen.findByText("Couldn't open the folder")).toBeInTheDocument();
     expect(screen.getByText("xdg-open not found")).toBeInTheDocument();
+  });
+
+  it("Troubleshooting shows the cache size and clears it without asking", async () => {
+    mocks.commands.clearCache.mockResolvedValueOnce({ status: "ok", data: 13_002_342 });
+    view("troubleshooting");
+    expect(await screen.findByText(/\(3\.0 MB\)/)).toBeInTheDocument();
+    mocks.commands.cacheSize.mockResolvedValueOnce(0);
+    fireEvent.click(screen.getByRole("button", { name: "Clear cache" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("Freed 12.4 MB");
+    expect(mocks.commands.clearCache).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.getByText(/\(0 bytes\)/)).toBeInTheDocument());
   });
 
   it("About shows the viewer version and the connected server", async () => {

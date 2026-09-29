@@ -4,8 +4,10 @@ import type { PlayerSnapshot, SceneListItem } from "../../bindings";
 
 const mocks = vi.hoisted(() => {
   let handler: ((e: { payload: unknown }) => void) | undefined;
+  const viewData = new Set<(e: { payload: unknown }) => void>();
   return {
     emit: (payload: unknown) => handler?.({ payload }),
+    changed: (key: string) => viewData.forEach((h) => h({ payload: { profileId: "p1", key } })),
     commands: {
       playerSnapshot: vi.fn(),
       listRecentScenes: vi.fn(),
@@ -18,6 +20,12 @@ const mocks = vi.hoisted(() => {
         listen: vi.fn((h: (e: { payload: unknown }) => void) => {
           handler = h;
           return Promise.resolve(() => {});
+        }),
+      },
+      viewDataChanged: {
+        listen: vi.fn((h: (e: { payload: unknown }) => void) => {
+          viewData.add(h);
+          return Promise.resolve(() => viewData.delete(h));
         }),
       },
     },
@@ -45,6 +53,11 @@ const idle: PlayerSnapshot = {
   error: null,
 };
 
+/** A command result as the cache serves it. */
+function cached<T>(data: T, fromCache = false) {
+  return { status: "ok", data: { data, fromCache, fetchedAt: "2026-09-29T12:00:00Z" } };
+}
+
 function scenes(n: number): SceneListItem[] {
   return Array.from({ length: n }, (_, i) => ({
     id: String(i + 1),
@@ -60,10 +73,9 @@ beforeEach(async () => {
   vi.clearAllMocks();
   resetTabs();
   mocks.commands.playerSnapshot.mockResolvedValue({ status: "ok", data: idle });
-  mocks.commands.listRecentScenes.mockResolvedValue({ status: "ok", data: scenes(20) });
-  mocks.commands.listTestScenes.mockResolvedValue({
-    status: "ok",
-    data: [
+  mocks.commands.listRecentScenes.mockResolvedValue(cached(scenes(20), true));
+  mocks.commands.listTestScenes.mockResolvedValue(
+    cached([
       {
         label: "4K HEVC",
         scenes: [
@@ -90,8 +102,8 @@ beforeEach(async () => {
           },
         ],
       },
-    ],
-  });
+    ]),
+  );
   mocks.commands.playerOpen.mockResolvedValue({
     status: "ok",
     data: { ...idle, state: "loading" },
@@ -123,12 +135,37 @@ describe("ScenesView", () => {
     expect(currentRoute()).toEqual({ kind: "scene", sceneId: "501", title: "Old file" });
   });
 
-  it("Shuffle reloads the test set", async () => {
+  it("Shuffle asks for a new test set; opening the view keeps the current one", async () => {
     render(() => <ScenesView />);
     await screen.findByRole("region", { name: "4K HEVC" });
     expect(mocks.commands.listTestScenes).toHaveBeenCalledTimes(1);
+    expect(mocks.commands.listTestScenes).toHaveBeenLastCalledWith(false);
     fireEvent.click(screen.getByRole("button", { name: "Shuffle" }));
     await waitFor(() => expect(mocks.commands.listTestScenes).toHaveBeenCalledTimes(2));
+    expect(mocks.commands.listTestScenes).toHaveBeenLastCalledWith(true);
+  });
+
+  it("updates the list in place when a refresh brings new data", async () => {
+    render(() => <ScenesView />);
+    expect(await screen.findByText("Scene 20")).toBeInTheDocument();
+    let resolve: (v: unknown) => void = () => {};
+    mocks.commands.listRecentScenes.mockReturnValueOnce(new Promise((r) => (resolve = r)));
+    mocks.changed("scenes:recent");
+    await waitFor(() => expect(mocks.commands.listRecentScenes).toHaveBeenCalledTimes(2));
+    // While re-reading, the current list stays up.
+    expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
+    expect(screen.getByText("Scene 20")).toBeInTheDocument();
+    resolve(cached(scenes(21)));
+    expect(await screen.findByText("Scene 21")).toBeInTheDocument();
+    expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
+  });
+
+  it("ignores changes to other data", async () => {
+    render(() => <ScenesView />);
+    await screen.findByText("Scene 1");
+    mocks.changed("scene:7");
+    await Promise.resolve();
+    expect(mocks.commands.listRecentScenes).toHaveBeenCalledTimes(1);
   });
 
   it("opens a scene from the list", async () => {

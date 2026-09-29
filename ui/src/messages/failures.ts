@@ -117,6 +117,11 @@ export function appErrorMessage(error: AppError): FailureMessage {
       };
     case "storage":
       return { title: "Couldn't save settings", detail: error.message };
+    case "notConnected":
+      return {
+        title: "Can't reach the server",
+        detail: "This needs the server. The viewer reconnects on its own as soon as it's back.",
+      };
     case "cancelled":
       return { title: "Cancelled", detail: "The connection attempt was cancelled." };
     case "internal":

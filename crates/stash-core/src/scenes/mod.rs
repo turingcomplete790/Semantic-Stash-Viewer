@@ -6,13 +6,13 @@
 //! profile's base URL, never taken from Stash's `paths.stream` (which embeds the API key when
 //! authentication is on).
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::adapter::endpoint;
 
 /// One row of the "recently added" picker.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct SceneListItem {
@@ -27,7 +27,7 @@ pub struct SceneListItem {
 }
 
 /// A labelled group of scenes (the spike's test set: 4K, WMV, …).
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct SceneGroup {
@@ -36,7 +36,7 @@ pub struct SceneGroup {
 }
 
 /// The primary file's technical details.
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct SceneFile {
@@ -51,7 +51,8 @@ pub struct SceneFile {
 }
 
 /// What the player needs to open one scene.
-#[derive(Debug, Clone, PartialEq)]
+/// Cached per scene (`scene:<id>`, 003 research R3).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlayableScene {
     pub id: String,
     pub title: String,

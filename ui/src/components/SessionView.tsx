@@ -1,5 +1,6 @@
-import { Match, Show, Switch } from "solid-js";
-import type { ConnectFailure, ProfileSummary } from "../bindings";
+import { createResource, Match, Show, Switch } from "solid-js";
+import { commands } from "../bindings";
+import type { ConnectFailure, ProfileSummary, ServerInfo } from "../bindings";
 import { connectFailureMessage } from "../messages/failures";
 import { connection } from "../state/connection";
 import ConnectedSummary from "./ConnectedSummary";
@@ -20,6 +21,12 @@ export default function SessionView(props: {
   const snap = () => connection.snapshot();
   const name = () => props.profile?.displayName ?? "the server";
   const url = () => snap().finalUrl ?? props.profile?.baseUrl ?? "";
+  // The last known summary, so Home isn't empty while connecting or offline (003 research R6).
+  const [lastServer] = createResource(
+    () => snap().profileId ?? "last-used",
+    async () => (await commands.cachedServerInfo())?.server ?? null,
+  );
+  const summary = (): ServerInfo | null | undefined => snap().server ?? lastServer.latest;
   const failure = (): ConnectFailure | undefined => {
     const s = snap().state;
     return s.kind === "failed" || s.kind === "authFailed" ? s.failure : undefined;
@@ -49,7 +56,12 @@ export default function SessionView(props: {
         <section class="connect-card">
           <h1>Connecting to {name()}…</h1>
           <p class="lede">{url()}</p>
-          <div class="actions">{otherServer}</div>
+          <Show when={summary()}>
+            {(server) => <ServerSummary url={url()} server={server()} />}
+          </Show>
+          <div class="actions" style={{ "margin-top": "18px" }}>
+            {otherServer}
+          </div>
         </section>
       </Match>
       <Match when={snap().state.kind === "offline"}>
@@ -58,7 +70,7 @@ export default function SessionView(props: {
           <p class="lede">
             The viewer keeps retrying on its own and reconnects as soon as the server is back.
           </p>
-          <Show when={snap().server}>
+          <Show when={summary()}>
             {(server) => <ServerSummary url={url()} server={server()} />}
           </Show>
           <div class="actions" style={{ "margin-top": "18px" }}>

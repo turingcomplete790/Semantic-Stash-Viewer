@@ -162,6 +162,7 @@ pub fn delete_profile(
     profile_id: Uuid,
 ) -> Result<(), AppError> {
     service::delete_profile(&state.profiles, profile_id)?;
+    state.caches.delete(profile_id);
     if let Err(e) = state.tabs.delete(profile_id) {
         tracing::warn!(error = %e, "could not delete the profile's saved tabs");
     }

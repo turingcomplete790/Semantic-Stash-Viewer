@@ -4,6 +4,7 @@
 //! This crate must never depend on Tauri (constitution Principle III).
 
 pub mod adapter;
+pub mod cache;
 pub mod connection;
 pub mod error;
 pub mod jobs;

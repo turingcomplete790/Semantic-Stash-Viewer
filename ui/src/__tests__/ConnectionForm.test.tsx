@@ -20,6 +20,7 @@ const okResult: TestResult = {
     version: "v0.31.1",
     versionStatus: "supported",
     appSchema: 85,
+    identity: "0000000000000000",
     counts: { scenes: 27552, images: 25632, galleries: 739, performers: 575 },
   },
 };

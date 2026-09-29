@@ -1,6 +1,7 @@
 //! Tauri shell for Semantic Stash Viewer: a thin command/event layer over `stash-core`.
 //! No domain logic lives here (constitution Principle III).
 
+mod cache_commands;
 mod commands;
 mod events;
 mod logging;
@@ -18,7 +19,7 @@ use std::sync::Arc;
 use player::{Player, PlayerConfig};
 
 use tauri::Manager;
-use tauri_specta::{collect_commands, collect_events, Builder};
+use tauri_specta::{collect_commands, collect_events, Builder, Event};
 
 use state::AppState;
 
@@ -80,6 +81,9 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             shell_commands::notification_dismiss,
             shell_commands::notifications_dismiss_all,
             shell_commands::open_log_folder,
+            cache_commands::cached_server_info,
+            cache_commands::cache_size,
+            cache_commands::clear_cache,
             shell_commands::app_info,
             player_commands::player_stats,
         ])
@@ -87,7 +91,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             events::ConnectionStateEvent,
             events::ProfilesChangedEvent,
             player_commands::PlayerStateEvent,
-            events::NotificationsChangedEvent
+            events::NotificationsChangedEvent,
+            cache_commands::ViewDataChangedEvent
         ])
 }
 
@@ -125,6 +130,17 @@ pub fn run() {
                 &config_dir.join("profiles.json"),
                 &data_dir.join("shell").join("tabs.json"),
                 &data_dir.join("shell").join("notifications.json"),
+                &app.path().cache_dir()?.join(APP_DIR),
+                {
+                    let handle = app.handle().clone();
+                    std::sync::Arc::new(move |profile_id, key: &str| {
+                        let _ = cache_commands::ViewDataChangedEvent {
+                            profile_id,
+                            key: key.to_owned(),
+                        }
+                        .emit(&handle);
+                    })
+                },
                 runtime,
                 player,
             )?;

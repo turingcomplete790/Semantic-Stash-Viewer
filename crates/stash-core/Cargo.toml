@@ -31,6 +31,10 @@ tokio-util = "0.7"
 semver = "1"
 # Scene screenshots cross the UI bridge as data URLs (004 restored scene tabs).
 base64 = "0.22"
+# View cache (003 research R1): SQLite compiled in, no system library.
+rusqlite = { version = "0.40", features = ["bundled"] }
+# Free disk space for the cache's size limit (003 research R1b); already in the tree.
+rustix = { version = "1", features = ["fs"] }
 # Jobs subscription over graphql-transport-ws (research R5). rustls + futures-util are already
 # in the tree via reqwest; they're named here for the lenient-TLS verifier and the socket stream.
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-native-roots"] }

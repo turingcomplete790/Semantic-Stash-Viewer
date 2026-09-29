@@ -1,1 +1,1 @@
-{"data":{"version":{"version":"v0.30.1","hash":"0a1b2c3d"},"systemStatus":{"appSchema":80,"status":"OK"},"stats":{"scene_count":10,"image_count":20,"gallery_count":3,"performer_count":4}}}
+{"data":{"version":{"version":"v0.30.1","hash":"0a1b2c3d"},"systemStatus":{"databasePath":"/data/stash-go.sqlite","configPath":"/data/config.yml","appSchema":80,"status":"OK"},"stats":{"scene_count":10,"image_count":20,"gallery_count":3,"performer_count":4}}}

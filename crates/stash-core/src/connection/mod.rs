@@ -16,7 +16,7 @@ pub use security::SecurityState;
 pub use version::VersionStatus;
 
 /// Library summary shown after connecting (FR-007).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct LibraryCounts {
@@ -27,7 +27,7 @@ pub struct LibraryCounts {
 }
 
 /// Facts read from the server on connect (data-model.md "ServerInfo").
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct ServerInfo {
@@ -36,4 +36,6 @@ pub struct ServerInfo {
     pub version_status: VersionStatus,
     pub app_schema: i32,
     pub counts: LibraryCounts,
+    /// Which Stash instance this is (003 research R2): a hash, never the paths themselves.
+    pub identity: String,
 }

@@ -13,6 +13,8 @@ use stash_core::profiles::{service, ProfileStore};
 use stash_core::shell::notifications::NotificationCenter;
 use stash_core::shell::tabs::TabsStore;
 use stash_core::AppError;
+
+use crate::cache_commands::{CacheRegistry, ProfileChangeFn};
 use tokio_util::sync::CancellationToken;
 
 pub type Manager = ConnectionManager<StashProber>;
@@ -28,6 +30,8 @@ pub struct AppState {
     pub tabs: Arc<TabsStore>,
     /// The notification centre (004 US3), discardable.
     pub notifications: Arc<NotificationCenter>,
+    /// Per-profile view caches (003 US1), discardable.
+    pub caches: Arc<CacheRegistry>,
 }
 
 impl AppState {
@@ -35,6 +39,8 @@ impl AppState {
         profiles_path: &Path,
         tabs_path: &Path,
         notifications_path: &Path,
+        cache_root: &Path,
+        on_cache_change: ProfileChangeFn,
         runtime: tokio::runtime::Handle,
         player: Option<Arc<Player>>,
     ) -> Result<Self, AppError> {
@@ -69,6 +75,14 @@ impl AppState {
             runtime.clone(),
         ));
         watch_jobs(&manager, Arc::clone(&profiles), jobs, &runtime);
+
+        // View caches, following the connection (003 US1).
+        let caches = Arc::new(CacheRegistry::new(
+            cache_root.to_path_buf(),
+            Arc::clone(&notifications),
+            on_cache_change,
+        ));
+        caches.follow(&manager, &runtime);
         let for_hook = Arc::clone(&profiles);
         manager.on_connected(move |id| {
             if let Err(e) = service::mark_used(&for_hook, id) {
@@ -83,6 +97,7 @@ impl AppState {
             player,
             tabs,
             notifications,
+            caches,
         })
     }
 }
