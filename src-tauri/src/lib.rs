@@ -71,6 +71,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             player_commands::player_set_video_visible,
             player_commands::scene_screenshot_url,
             player_commands::debug_open_scene,
+            player_commands::debug_bench_enabled,
+            player_commands::debug_report,
             shell_commands::shell_load_tabs,
             shell_commands::shell_save_tabs,
             shell_commands::notifications_list,

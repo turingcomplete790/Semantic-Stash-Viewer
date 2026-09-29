@@ -390,17 +390,17 @@ there (SC-006).
 
 ## Phase 7: Polish & Cross-Cutting Concerns
 
-- [ ] T062 [P] Quickstart V8 (damaged storage), done by hand: garbage `tabs.json` and `notifications.json` give a single Home tab, an empty centre, `.bak` copies, and no dialog
-- [ ] T063 [P] Measure the shell's performance and record the numbers in `specs/004-app-shell/quickstart.md` under the relevant checks:
+- [X] T062 [P] Quickstart V8 (damaged storage), done by hand: garbage `tabs.json` and `notifications.json` give a single Home tab, an empty centre, `.bak` copies, and no dialog
+- [X] T063 [P] Measure the shell's performance and record the numbers in `specs/004-app-shell/quickstart.md` under the relevant checks:
   - **SC-007 / SC-008**: with 20 tabs open, time tab switches and the now-playing bar appearing (a DevTools performance trace, or `performance.now()` logging in a debug build);
   - **SC-003**: time a control press (a navigation entry and the bell) from input to visible change. The target is under 50 ms;
   - **Playback regression against 002**: rerun `SSV_MEASURE_LONG` for 1080p (scene 10861, 5 min) and 4K HEVC (scene 2328, 2 min), with the window visible and the scene shown inside the shell (navigation bar over the video, viewport margins). Compare dropped frames and main-thread CPU with 002's decision record (0 drops, 6–7%), and note any difference in `specs/002-mpv-playback-spike/decision.md` under a "Re-measured in the app shell" line
-- [ ] T064 [P] Update `README.md`: the status line mentions the app shell, the Layout table mentions `ui/src/shell/`, and the keyboard basics (`g` shortcuts, tab keys, `?`)
-- [ ] T065 [P] Update `ROADMAP.md` Phase 1 "App shell": tick the navigation bar, tabs, notification centre, and Settings page items, and link `specs/004-app-shell/`
-- [ ] T066 [P] Update `specs/003-complete-foundation/spec.md`:
+- [X] T064 [P] Update `README.md`: the status line mentions the app shell, the Layout table mentions `ui/src/shell/`, and the keyboard basics (`g` shortcuts, tab keys, `?`)
+- [X] T065 [P] Update `ROADMAP.md` Phase 1 "App shell": tick the navigation bar, tabs, notification centre, and Settings page items, and link `specs/004-app-shell/`
+- [X] T066 [P] Update `specs/003-complete-foundation/spec.md`:
   - Assumptions: the notification centre and Settings → Troubleshooting now exist (built in 004), so 003's "server unreachable" and "Clear cache" plug into them;
   - Requirements: add that repeated background-refresh failures post a `background` notification (keyed per screen, updated in place), which completes 004 FR-018's producer list.
-- [ ] T067 Run the full gate: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, bindings drift (`cargo run -p semantic-stash-viewer --bin export-bindings` then `git diff --exit-code ui/src/bindings.ts`), `npm --prefix ui run lint`, `npm --prefix ui run typecheck`, and `npm --prefix ui test`
+- [X] T067 Run the full gate: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, bindings drift (`cargo run -p semantic-stash-viewer --bin export-bindings` then `git diff --exit-code ui/src/bindings.ts`), `npm --prefix ui run lint`, `npm --prefix ui run typecheck`, and `npm --prefix ui test`
 
 ---
 

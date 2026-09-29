@@ -97,6 +97,10 @@ export const commands = {
 	 *  surface without clicking through the UI.
 	 */
 	debugOpenScene: () => __TAURI_INVOKE<string | null>("debug_open_scene"),
+	/**  Debug builds only: run the UI bench (`SSV_DEBUG_BENCH=1`, 004 T063). */
+	debugBenchEnabled: () => __TAURI_INVOKE<boolean>("debug_bench_enabled"),
+	/**  Debug builds only: print one bench result line (`MEASURE {json}`) to the terminal. */
+	debugReport: (line: string) => __TAURI_INVOKE<void>("debug_report", { line }),
 	/**  The saved tabs for a server profile, or `None` (the UI then starts with one Home tab). */
 	shellLoadTabs: (profileId: string) => __TAURI_INVOKE<{
 	/**  1–100 tabs, in strip order. */

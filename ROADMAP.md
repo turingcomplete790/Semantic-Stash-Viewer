@@ -95,15 +95,17 @@ mpv.
 - [ ] Markers: marker wall/list, filtered by tag, playing from the marker position
 
 ### App shell (Principle IX)
-- [ ] Navigation bar modelled on the Stash web UI's sections (Scenes, Images, Galleries, Groups,
+- [x] Navigation bar modelled on the Stash web UI's sections (Scenes, Images, Galleries, Groups,
       Markers, Performers, Studios, Tags), plus Settings and notifications. Sections are added
       as their features land.
-- [ ] Tabs: several views open at once in the main window, each keeping its scroll position,
+- [x] Tabs: several views open at once in the main window, each keeping its scroll position,
       filters, and selection; keyboard shortcuts to open, close, and switch tabs
-- [ ] Notification centre: connection alerts (server unreachable, reconnected, authentication
+- [x] Notification centre: connection alerts (server unreachable, reconnected, authentication
       failures) and background failures, with a badge for unread items, and toasts for important
-      events. Stash jobs arrive in Phase 3.
-- [ ] Settings page: viewer preferences and troubleshooting controls (e.g. clear cache)
+      events. Running Stash jobs are shown read-only with live progress; starting and cancelling
+      them arrive in Phase 3.
+- [x] Settings page: viewer preferences and troubleshooting controls (e.g. clear cache)
+      (done: [specs/004-app-shell](specs/004-app-shell/) for the four items above)
 - [ ] Home page with configurable rows (recently added, recently played, saved filters)
 - [ ] Global search across entity types
 - [ ] Keyboard navigation throughout; groundwork for a 10-foot (remote/controller) mode
@@ -111,8 +113,7 @@ mpv.
 **Exit criteria:** every entity type can be browsed, filtered, and opened. Scenes play in mpv
 and resume state syncs back. Principle VI's budgets are met on a large library.
 
-**Suggested specs:** `app-shell` (navigation bar, tabs, notification centre, Settings; first,
-because every other screen lives inside it), `browse-scenes-and-play`, `browse-images-and-galleries`,
+**Suggested specs:** `app-shell` (done: [specs/004-app-shell](specs/004-app-shell/)), `browse-scenes-and-play`, `browse-images-and-galleries`,
 `browse-performers-studios-tags-groups`, `markers-wall`, `home-and-global-search`
 
 ---

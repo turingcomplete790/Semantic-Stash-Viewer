@@ -87,10 +87,17 @@ function toTabSet(): TabSet {
   };
 }
 
+let savingSuspended = false;
+
+/** Debug bench only: don't persist tab changes (so a bench run leaves saved tabs alone). */
+export function suspendSaving(suspended: boolean): void {
+  savingSuspended = suspended;
+}
+
 function saveNow(): void {
   clearTimeout(saveTimer);
   saveTimer = undefined;
-  if (profileId) void commands.shellSaveTabs(profileId, toTabSet());
+  if (profileId && !savingSuspended) void commands.shellSaveTabs(profileId, toTabSet());
 }
 
 function saveSoon(): void {

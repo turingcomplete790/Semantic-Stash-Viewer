@@ -19,6 +19,8 @@ const mocks = vi.hoisted(() => {
       shellSaveTabs: vi.fn(() => Promise.resolve({ status: "ok", data: null })),
       playerSetVideoVisible: vi.fn(() => Promise.resolve(null)),
       notificationsList: vi.fn(() => Promise.resolve([])),
+      debugBenchEnabled: vi.fn(() => Promise.resolve(false)),
+      debugOpenScene: vi.fn(() => Promise.resolve(null)),
       playerSnapshot: vi.fn(() =>
         Promise.resolve({ status: "error", error: { kind: "internal" } }),
       ),

@@ -214,6 +214,11 @@ the formatting step. Push the fix: it passes. The README's status badge reflects
   reads. Background refreshes MUST follow Principle IV: the same narrowly scoped requests, and no
   more requests per screen than without the cache.
 
+- **FR-011a**: Repeated background-refresh failures for a screen MUST post one `background`
+  notification in the notification centre (keyed per screen, updated in place, not a toast
+  unless it keeps failing for over a minute). This completes feature 004 FR-018's list of
+  producers.
+
 **Performance harness (US2)**
 
 - **FR-012**: The developer MUST be able to run the performance harness with a single command
@@ -299,10 +304,10 @@ the formatting step. Push the fix: it passes. The README's status badge reflects
 - **Cache content**: this feature caches the data responses the viewer reads today (server
   summary, scene lists, scene details). Image and thumbnail caching arrives with Phase 1's grids,
   which will reuse this cache's rules (per server, discardable, size-limited).
-- **Notification centre and Settings**: this feature depends on the app shell's notification
-  centre and Settings page (Principle IX). If the app shell lands later, the connection
-  indicator carries the "server unreachable" state until then, and Settings gets its first page
-  here.
+- **Notification centre and Settings**: both exist now (built in feature 004). The connection
+  watcher already posts "Server unreachable" / "Reconnected" (key `connection:<profile>`), so
+  FR-003's notification is done. "Clear cache" goes on Settings → Troubleshooting, where a slot
+  is marked (`ui/src/settings/TroubleshootingPage.tsx`).
 - **Freshness**: cached data is always shown first and always refreshed in the background
   ("show cached, then refresh"). There is no time-based expiry that hides cached data, because
   showing something instantly and correcting it within one refresh matches Principle VI better

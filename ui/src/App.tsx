@@ -67,6 +67,16 @@ export default function App() {
     onCleanup(registerPlayerKeyListing());
   });
 
+  // Debug builds: the UI bench (`SSV_DEBUG_BENCH=1`, 004 T063).
+  let benchStarted = false;
+  createEffect(() => {
+    if (benchStarted || connection.snapshot().state.kind !== "connected") return;
+    benchStarted = true;
+    void commands.debugBenchEnabled().then((on) => {
+      if (on) setTimeout(() => void import("./debug/bench").then((m) => m.runBench()), 3000);
+    });
+  });
+
   // Debug builds: open a scene straight away (`SSV_DEBUG_OPEN`), to check the video surface.
   let debugOpened = false;
   createEffect(() => {

@@ -106,3 +106,25 @@ and `notifications.json`. Relaunch. **Expect**:
 - no error dialog;
 - a single Home tab and an empty centre;
 - `.bak` copies of the damaged files.
+
+## Measured (T063, 2026-09-29)
+
+Debug-only bench (`SSV_DEBUG_BENCH=1 cargo tauri dev`) in the real app on the dev machine (KDE
+Wayland, RX 9060 XT), connected to the user's library. "Frame" means the next painted frame
+after the action (two animation frames). Tab changes during the bench aren't saved.
+
+| Check | Budget | Median | p95 | Max | Result |
+|---|---|---|---|---|---|
+| Tab switch with 20 tabs open, including tabs beyond the 8 kept mounted (SC-002, SC-007) | < 150 ms | 34 ms | 64 ms | 86 ms | Pass |
+| Control press: the bell opens its panel (SC-003) | < 50 ms | 32 ms | 37 ms | 37 ms | Pass |
+| Now-playing bar appears after leaving a playing scene (SC-008) | < 150 ms | 61 ms | 76 ms | 76 ms | Pass |
+| Back to the playing scene, UI frame (SC-008) | < 150 ms | 59 ms | 70 ms | 70 ms | Pass |
+
+Playback inside the shell (navigation bar and tab strip over the page, viewport margins on the
+video), against 002's 0 drops and 6–7% main-thread CPU (details in
+[../002-mpv-playback-spike/decision.md](../002-mpv-playback-spike/decision.md)):
+
+| Run | Dropped frames | Main-thread CPU |
+|---|---|---|
+| 1080p H.264, 5 min | 0 | 9% |
+| 4K HEVC, 2 min | 0 | 9% |

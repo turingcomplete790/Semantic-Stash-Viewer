@@ -379,6 +379,22 @@ pub fn debug_open_scene() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// Debug builds only: run the UI bench (`SSV_DEBUG_BENCH=1`, 004 T063).
+#[tauri::command]
+#[specta::specta]
+pub fn debug_bench_enabled() -> bool {
+    cfg!(debug_assertions) && std::env::var_os("SSV_DEBUG_BENCH").is_some()
+}
+
+/// Debug builds only: print one bench result line (`MEASURE {json}`) to the terminal.
+#[tauri::command]
+#[specta::specta]
+pub fn debug_report(line: String) {
+    if cfg!(debug_assertions) {
+        println!("MEASURE {line}");
+    }
+}
+
 /// Measurements for the decision record. Debug builds only.
 #[tauri::command]
 #[specta::specta]
