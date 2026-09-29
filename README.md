@@ -6,9 +6,10 @@ one, and browse and play your library the way Jellyfin desktop clients work with
 server.
 
 > **Status:** pre-alpha. Connecting to Stash servers works: saved server profiles, automatic
-> reconnection, and a connection-security indicator. A playback spike plays scenes in mpv
-> inside the app window with full playback controls. Browsing comes next (see the
-> [roadmap](ROADMAP.md)). The project is specified with
+> reconnection, and a connection-security indicator. Scenes play in mpv inside the app window,
+> with full playback controls. The app shell is in place: a Stash-style navigation bar, tabs,
+> a notification centre (connection alerts and live Stash jobs), and Settings. Browsing the
+> library comes next (see the [roadmap](ROADMAP.md)). The project is specified with
 > [Spec Kit](https://github.com/github/spec-kit), and its governing rules live in the
 > [constitution](.specify/memory/constitution.md).
 
@@ -71,6 +72,13 @@ Saved server profiles, including their API keys, live in
 `~/.config/semantic-stash-viewer/profiles.json`. Logs go to
 `~/.local/share/semantic-stash-viewer/logs/`.
 
+### Keyboard
+
+- `g h` Home, `g s` Scenes, `g z` Settings, `g n` notifications (the Stash web UI's `g` keys)
+- Ctrl+T / Ctrl+W new / close tab, Ctrl+Tab and Ctrl+1–9 to switch, Ctrl+Shift+T to reopen,
+  Alt+←/→ back and forward
+- `?` lists every shortcut, including the player's
+
 ### Layout
 
 | Path | What |
@@ -78,7 +86,7 @@ Saved server profiles, including their API keys, live in
 | `crates/stash-core/` | Headless Rust core: the only code that talks to Stash, plus connection and profile logic. Never depends on Tauri. |
 | `crates/player/` | Headless libmpv session: playback state, commands, and the render API wrapper. Never depends on Tauri. |
 | `src-tauri/` | Thin Tauri shell: typed commands and events over `stash-core` and `player`, and the Linux video surface |
-| `ui/` | SolidJS + TypeScript frontend. `ui/src/bindings.ts` is generated from Rust. |
+| `ui/` | SolidJS + TypeScript frontend. `ui/src/bindings.ts` is generated from Rust. `ui/src/shell/` is the app shell (navigation bar, tabs, notifications); `ui/src/views/` and `ui/src/settings/` are the views inside it. |
 | `specs/` | Spec Kit feature specs, plans, and task lists |
 
 ### Checks

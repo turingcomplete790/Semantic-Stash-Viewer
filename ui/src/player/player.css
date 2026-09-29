@@ -1,23 +1,8 @@
-/* While a scene is open, everything between the webview and mpv's GL area is transparent so
-   the GPU-rendered video shows through (FR-002). Controls keep solid backgrounds. */
-html.player-open,
-html.player-open body,
-html.player-open #root,
-html.player-open .app,
-html.player-open .main {
-  background: transparent;
-}
-
-html.player-open .topbar {
-  display: none;
-}
-
-html.player-open .main {
-  padding: 0;
-}
+/* The shell makes the scene view's area transparent while a scene plays (shell/shell.css), so
+   the GPU-rendered video shows through (002 FR-002). Controls keep solid backgrounds. */
 
 .player-stage {
-  position: fixed;
+  position: absolute;
   inset: 0;
   display: flex;
   flex-direction: column;
@@ -51,6 +36,21 @@ html.player-open .main {
   align-items: center;
   justify-content: center;
   color: #fff;
+}
+
+/* A still of the scene under Play on a restored or replaced scene tab. */
+.player-poster {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+.player-center:has(.player-play) {
+  position: relative;
+  z-index: 1;
 }
 
 .player-error {
@@ -158,6 +158,8 @@ html.player-open .main {
   background: rgb(0 0 0 / 65%);
   color: #fff;
   transition: opacity 0.2s;
+  /* Fades often (auto-hide): keep it on its own compositor layer (004 research R11). */
+  will-change: opacity;
 }
 
 /* Auto-hide (FR-010): controls, top bar, and cursor. */
@@ -165,8 +167,10 @@ html.player-open .main {
   opacity: 0;
 }
 
+/* On the stage, which children inherit, plus the controls that set their own cursor. A
+   `:has(...) *` rule would re-match every element on each toggle (004 research R11). */
 .player-stage:has(.player-controls-root.idle),
-.player-stage:has(.player-controls-root.idle) * {
+.player-stage:has(.player-controls-root.idle) :is(button, input, select) {
   cursor: none;
 }
 
@@ -178,6 +182,7 @@ html.player-open .main {
   position: relative;
   z-index: 1;
   transition: opacity 0.2s;
+  will-change: opacity;
 }
 
 .player-seek {
@@ -195,9 +200,19 @@ html.player-open .main {
   width: 100%;
 }
 
+.player-hover-anchor {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 22px;
+  pointer-events: none;
+  will-change: transform;
+}
+
 .player-hover-time {
   position: absolute;
-  bottom: 22px;
+  left: 0;
+  bottom: 0;
   transform: translateX(-50%);
   padding: 2px 6px;
   border-radius: 4px;

@@ -7,6 +7,7 @@ mod logging;
 #[cfg(debug_assertions)]
 mod measure;
 mod player_commands;
+mod shell_commands;
 mod state;
 #[cfg(target_os = "linux")]
 mod video_surface;
@@ -23,6 +24,16 @@ use state::AppState;
 
 /// Directory name under the platform config/data dirs (research R11).
 const APP_DIR: &str = "semantic-stash-viewer";
+
+/// The viewer's log directory (`~/.local/share/semantic-stash-viewer/logs/` on Linux).
+pub(crate) fn log_dir(app: &tauri::AppHandle) -> Result<PathBuf, stash_core::AppError> {
+    app.path()
+        .local_data_dir()
+        .map(|dir| dir.join(APP_DIR).join("logs"))
+        .map_err(|e| stash_core::AppError::Internal {
+            message: format!("no data directory: {e}"),
+        })
+}
 
 /// Where the generated TypeScript bindings live.
 pub const BINDINGS_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../ui/src/bindings.ts");
@@ -56,12 +67,27 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             player_commands::player_frame_step,
             player_commands::player_replay,
             player_commands::player_set_fullscreen,
+            player_commands::player_set_viewport,
+            player_commands::player_set_video_visible,
+            player_commands::scene_screenshot_url,
+            player_commands::debug_open_scene,
+            player_commands::debug_bench_enabled,
+            player_commands::debug_report,
+            shell_commands::shell_load_tabs,
+            shell_commands::shell_save_tabs,
+            shell_commands::notifications_list,
+            shell_commands::notifications_mark_read,
+            shell_commands::notification_dismiss,
+            shell_commands::notifications_dismiss_all,
+            shell_commands::open_log_folder,
+            shell_commands::app_info,
             player_commands::player_stats,
         ])
         .events(collect_events![
             events::ConnectionStateEvent,
             events::ProfilesChangedEvent,
-            player_commands::PlayerStateEvent
+            player_commands::PlayerStateEvent,
+            events::NotificationsChangedEvent
         ])
 }
 
@@ -95,12 +121,19 @@ pub fn run() {
             let config_dir: PathBuf = app.path().config_dir()?.join(APP_DIR);
             let runtime = tauri::async_runtime::handle().inner().clone();
             let player = start_player(app);
-            let state = AppState::open(&config_dir.join("profiles.json"), runtime, player)?;
+            let state = AppState::open(
+                &config_dir.join("profiles.json"),
+                &data_dir.join("shell").join("tabs.json"),
+                &data_dir.join("shell").join("notifications.json"),
+                runtime,
+                player,
+            )?;
             events::forward_connection_state(
                 app.handle().clone(),
                 &state.manager,
                 std::sync::Arc::clone(&state.profiles),
             );
+            events::forward_notifications(app.handle().clone(), &state.notifications);
             auto_connect(&state);
             app.manage(state);
             #[cfg(debug_assertions)]

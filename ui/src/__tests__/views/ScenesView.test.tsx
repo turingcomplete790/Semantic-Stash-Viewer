@@ -25,8 +25,9 @@ const mocks = vi.hoisted(() => {
 });
 vi.mock("../../bindings", () => ({ commands: mocks.commands, events: mocks.events }));
 
-import PlayerScreen from "../../player/PlayerScreen";
 import { initPlayer } from "../../player/state";
+import { currentRoute, resetTabs } from "../../shell/tabs";
+import ScenesView from "../../views/ScenesView";
 
 const idle: PlayerSnapshot = {
   sceneId: null,
@@ -57,6 +58,7 @@ function scenes(n: number): SceneListItem[] {
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  resetTabs();
   mocks.commands.playerSnapshot.mockResolvedValue({ status: "ok", data: idle });
   mocks.commands.listRecentScenes.mockResolvedValue({ status: "ok", data: scenes(20) });
   mocks.commands.listTestScenes.mockResolvedValue({
@@ -103,82 +105,43 @@ afterEach(() => {
   document.documentElement.classList.remove("player-open");
 });
 
-describe("PlayerScreen", () => {
+describe("ScenesView", () => {
   it("lists up to 20 recent scenes with title and duration", async () => {
-    render(() => <PlayerScreen onExit={() => {}} />);
+    render(() => <ScenesView />);
     expect(await screen.findByText("Scene 1")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /^Play Scene/ })).toHaveLength(20);
     // 3725 s → 1:02:05
     expect(screen.getByText("1:02:05")).toBeInTheDocument();
   });
 
-  it("shows the test set grouped by format and plays from it", async () => {
-    render(() => <PlayerScreen onExit={() => {}} />);
+  it("shows the test set grouped by format and opens a scene from it", async () => {
+    render(() => <ScenesView />);
     const wmv = await screen.findByRole("region", { name: "WMV above 720p" });
     expect(wmv).toHaveTextContent("1920×1080 · wmv3 · wmv");
     expect(screen.getByRole("region", { name: "4K HEVC" })).toHaveTextContent("3840×2160");
     fireEvent.click(screen.getByRole("button", { name: "Play Old file" }));
-    expect(mocks.commands.playerOpen).toHaveBeenCalledWith("501");
+    expect(currentRoute()).toEqual({ kind: "scene", sceneId: "501", title: "Old file" });
   });
 
   it("Shuffle reloads the test set", async () => {
-    render(() => <PlayerScreen onExit={() => {}} />);
+    render(() => <ScenesView />);
     await screen.findByRole("region", { name: "4K HEVC" });
     expect(mocks.commands.listTestScenes).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("button", { name: "Shuffle" }));
     await waitFor(() => expect(mocks.commands.listTestScenes).toHaveBeenCalledTimes(2));
   });
 
-  it("plays a scene from the list", async () => {
-    render(() => <PlayerScreen onExit={() => {}} />);
+  it("opens a scene from the list", async () => {
+    render(() => <ScenesView />);
     fireEvent.click(await screen.findByRole("button", { name: "Play Scene 3" }));
-    expect(mocks.commands.playerOpen).toHaveBeenCalledWith("3");
+    expect(currentRoute()).toEqual({ kind: "scene", sceneId: "3", title: "Scene 3" });
   });
 
-  it("plays a scene by ID with Enter or the Play button", async () => {
-    render(() => <PlayerScreen onExit={() => {}} />);
+  it("opens a scene by ID with Enter or the Play button", async () => {
+    render(() => <ScenesView />);
     const field = screen.getByLabelText("Scene ID");
     fireEvent.input(field, { target: { value: " 42 " } });
     fireEvent.submit(field.closest("form") as HTMLFormElement);
-    await waitFor(() => expect(mocks.commands.playerOpen).toHaveBeenCalledWith("42"));
-  });
-
-  it("makes the page transparent while a scene is open, and restores it on close", async () => {
-    render(() => <PlayerScreen onExit={() => {}} />);
-    mocks.emit({ ...idle, sceneId: "1", title: "Scene 1", state: "playing" });
-    await waitFor(() =>
-      expect(document.documentElement.classList.contains("player-open")).toBe(true),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Close player" }));
-    expect(mocks.commands.playerClose).toHaveBeenCalled();
-    mocks.emit(idle);
-    await waitFor(() =>
-      expect(document.documentElement.classList.contains("player-open")).toBe(false),
-    );
-  });
-
-  it("shows a plain-language error with a way back to the list", async () => {
-    render(() => <PlayerScreen onExit={() => {}} />);
-    mocks.emit({
-      ...idle,
-      sceneId: "9",
-      title: "Broken",
-      state: "error",
-      error: { kind: "streamUnreachable" },
-    });
-    expect(await screen.findByText("Couldn't open this scene's video")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Back to scenes" }));
-    expect(mocks.commands.playerClose).toHaveBeenCalled();
-  });
-
-  it("shows an error when opening fails before playback starts", async () => {
-    mocks.commands.playerOpen.mockResolvedValue({
-      status: "error",
-      error: { kind: "sceneNotFound", id: "999" },
-    });
-    render(() => <PlayerScreen onExit={() => {}} />);
-    fireEvent.input(screen.getByLabelText("Scene ID"), { target: { value: "999" } });
-    fireEvent.click(screen.getByRole("button", { name: "Play" }));
-    expect(await screen.findByText("That scene doesn't exist")).toBeInTheDocument();
+    expect(currentRoute()).toEqual({ kind: "scene", sceneId: "42", title: "" });
   });
 });

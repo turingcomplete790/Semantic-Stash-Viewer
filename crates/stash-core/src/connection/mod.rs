@@ -7,6 +7,7 @@ pub mod manager;
 pub mod security;
 pub mod snapshot;
 pub mod version;
+pub mod watch;
 
 use serde::Serialize;
 

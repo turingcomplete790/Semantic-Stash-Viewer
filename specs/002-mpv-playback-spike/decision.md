@@ -82,6 +82,20 @@ Notes:
   (hidden or covered). mpv counts undrawn frames as dropped. With the window visible, the rerun
   dropped 0. Playback keeps running while the window is hidden; only the frames go undrawn.
 
+### Re-measured in the app shell (004, 2026-09-29)
+
+Same method (`SSV_MEASURE_LONG`), with the scene shown in a tab of the 004 app shell (navigation
+bar and tab strip over the page, video confined by viewport margins) and the window visible.
+
+| Run | Dropped frames | Main-thread CPU | Compared with 002 |
+|---|---|---|---|
+| 1080p H.264, scene 10861, 5 min | 0 | 9% of a core | 0 drops, 6–7% |
+| 4K HEVC, scene 2328, 2 min | 0 | 9% of a core | 0 drops, 6–7% |
+
+Still no dropped frames. The main thread does about 2 percentage points more work, from the
+larger webview (navigation bar, tab strip, and panes) composited over the video. That's well
+below the ~50% threshold for fallback 1, so the decision stands.
+
 ### Quickstart V1–V10
 
 | Check | Result |

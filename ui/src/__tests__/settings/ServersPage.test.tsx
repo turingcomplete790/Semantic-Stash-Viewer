@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ProfileSummary } from "../bindings";
+import type { ProfileSummary } from "../../bindings";
 
 const mocks = vi.hoisted(() => {
   let profilesHandler: ((e: { payload: unknown }) => void) | undefined;
@@ -24,10 +24,10 @@ const mocks = vi.hoisted(() => {
     },
   };
 });
-vi.mock("../bindings", () => ({ commands: mocks.commands, events: mocks.events }));
+vi.mock("../../bindings", () => ({ commands: mocks.commands, events: mocks.events }));
 
-import ProfileManager from "../components/ProfileManager";
-import { initConnection } from "../state/connection";
+import ServersPage from "../../settings/ServersPage";
+import { initConnection } from "../../state/connection";
 
 const home: ProfileSummary = {
   id: "home",
@@ -69,22 +69,22 @@ function row(name: string) {
   return screen.getByRole("listitem", { name });
 }
 
-describe("ProfileManager", () => {
+describe("Settings → Servers", () => {
   it("lists profiles with address and strict setting, marking the active one", () => {
-    render(() => <ProfileManager onClose={() => {}} onAdd={() => {}} />);
+    render(() => <ServersPage onAdd={() => {}} />);
     expect(within(row("Home")).getByText("http://localhost:9999")).toBeInTheDocument();
     expect(within(row("Home")).getByText("Active")).toBeInTheDocument();
     expect(within(row("Travel")).getByText(/Strict/)).toBeInTheDocument();
   });
 
   it("switching calls connect with the chosen profile id", () => {
-    render(() => <ProfileManager onClose={() => {}} onAdd={() => {}} />);
+    render(() => <ServersPage onAdd={() => {}} />);
     fireEvent.click(within(row("Travel")).getByRole("button", { name: "Switch" }));
     expect(mocks.commands.connect).toHaveBeenCalledWith("travel", expect.any(String));
   });
 
   it("asks for confirmation before deleting", async () => {
-    render(() => <ProfileManager onClose={() => {}} onAdd={() => {}} />);
+    render(() => <ServersPage onAdd={() => {}} />);
     fireEvent.click(within(row("Travel")).getByRole("button", { name: "Delete" }));
     expect(mocks.commands.deleteProfile).not.toHaveBeenCalled();
 
@@ -95,7 +95,7 @@ describe("ProfileManager", () => {
   });
 
   it("cancelling the confirmation deletes nothing", () => {
-    render(() => <ProfileManager onClose={() => {}} onAdd={() => {}} />);
+    render(() => <ServersPage onAdd={() => {}} />);
     fireEvent.click(within(row("Travel")).getByRole("button", { name: "Delete" }));
     fireEvent.click(
       within(screen.getByRole("alertdialog")).getByRole("button", { name: "Cancel" }),
@@ -105,7 +105,7 @@ describe("ProfileManager", () => {
 
   it("shows the API key as plain text in edit mode and saves the edited profile", async () => {
     mocks.commands.updateProfile.mockResolvedValue({ status: "ok", data: home });
-    render(() => <ProfileManager onClose={() => {}} onAdd={() => {}} />);
+    render(() => <ServersPage onAdd={() => {}} />);
     fireEvent.click(within(row("Home")).getByRole("button", { name: "Edit" }));
 
     const key = screen.getByLabelText("API key");
@@ -135,7 +135,7 @@ describe("ProfileManager", () => {
         error: { kind: "connect", failure: { kind: "unreachable", tried: ["http://x:1"] } },
       })
       .mockResolvedValueOnce({ status: "ok", data: home });
-    render(() => <ProfileManager onClose={() => {}} onAdd={() => {}} />);
+    render(() => <ServersPage onAdd={() => {}} />);
     fireEvent.click(within(row("Home")).getByRole("button", { name: "Edit" }));
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
@@ -152,7 +152,7 @@ describe("ProfileManager", () => {
         failure: { kind: "duplicateProfile", existingId: "travel" },
       },
     });
-    render(() => <ProfileManager onClose={() => {}} onAdd={() => {}} />);
+    render(() => <ServersPage onAdd={() => {}} />);
     fireEvent.click(within(row("Home")).getByRole("button", { name: "Edit" }));
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
@@ -161,7 +161,7 @@ describe("ProfileManager", () => {
   });
 
   it("moves a profile down and saves the new order", async () => {
-    render(() => <ProfileManager onClose={() => {}} onAdd={() => {}} />);
+    render(() => <ServersPage onAdd={() => {}} />);
     fireEvent.click(within(row("Home")).getByRole("button", { name: "Move Home down" }));
     await waitFor(() =>
       expect(mocks.commands.reorderProfiles).toHaveBeenCalledWith(["travel", "home"]),
@@ -170,7 +170,7 @@ describe("ProfileManager", () => {
 
   it("Add server calls onAdd", () => {
     const onAdd = vi.fn();
-    render(() => <ProfileManager onClose={() => {}} onAdd={onAdd} />);
+    render(() => <ServersPage onAdd={onAdd} />);
     fireEvent.click(screen.getByRole("button", { name: "Add server" }));
     expect(onAdd).toHaveBeenCalled();
   });

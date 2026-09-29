@@ -120,7 +120,7 @@ and makes low-power Stash hosts viable.
   for a "10-foot" mode, in the spirit of Jellyfin clients.
 - The product is opinionated: when a Stash web UI behaviour conflicts with speed or clarity, the
   viewer MAY redesign how it is presented, but MUST NOT drop the capability itself
-  (Principle VIII).
+  (Principle VIII). Navigation, tabs, and notifications follow Principle IX.
 
 **Rationale**: "Near-native" is a measurable promise. Budgets make regressions visible and keep
 the experience from sliding back toward a sluggish web page in a window.
@@ -177,6 +177,44 @@ and strict checking stays available per server.
 it if it fully replaces the web UI. A fast client that still sends users to the browser to add a
 marker or run a scraper fails the "Jellyfin-style client" promise.
 
+### IX. One App Shell: Navigation, Tabs, and Notifications
+
+- Every feature MUST live inside one consistent app shell. A new feature fits into the shell as a
+  navigation section, a kind of tab, a settings page, or a notification. It MUST NOT add its own
+  navigation scheme or a stand-alone screen that bypasses the shell.
+- **Navigation bar**: a persistent navigation bar MUST give one-click (and keyboard) access to
+  each top-level section, modelled on the Stash web UI's (Scenes, Images, Galleries, Groups,
+  Markers, Performers, Studios, Tags), plus Settings and the notification centre. Sections are
+  added to it as their features land.
+- **Tabs**: users MUST be able to keep several views open at once inside the main window, e.g. a
+  scene list, a gallery, and a performer, and switch between them. Each tab MUST keep its own
+  state (scroll position, filters, selection) while in the background, so switching back meets
+  Principle VI's navigation budget without reloading. Opening, closing, and switching tabs MUST
+  be keyboard-accessible.
+- **Notification centre**: one place MUST collect events the user may need to know about:
+  - connection alerts (server unreachable, reconnected, authentication failures);
+  - failures from background work;
+  - Stash jobs (scan, generate, identify, auto-tag, clean, plugin tasks), with live progress and
+    cancellation where Stash allows it.
+
+  Important events MAY also appear briefly as a toast, but every notification MUST stay in the
+  centre until dismissed, and a badge MUST show unread or active items. Notifications MUST NOT
+  steal focus or block interaction.
+- **Quiet infrastructure**: internal machinery (caches, indexes, prefetching) MUST work without
+  the user managing it. It MUST NOT show its own banners or prompts on the main screens. It
+  surfaces only through the notification centre when the user needs to act, plus a
+  troubleshooting control in Settings where one is needed.
+- **Windows**: the main window with tabs is the primary model. Additional windows (for example a
+  pop-out player on a second monitor) MAY be added by a feature spec, provided they stay part of
+  the same shell and state.
+
+**Rationale**: The viewer will grow to cover the whole Stash web UI plus semantic tagging.
+Without one shell, each feature invents its own navigation and alerts, and the app turns into a
+maze. A Stash-like navigation bar keeps it familiar to Stash users. Tabs make moving between
+scenes, galleries, and performers instant and stateful, which fits a desktop client better than
+browser-style back-and-forth. A single notification centre gives connection problems and
+long-running Stash jobs one predictable home, and keeps infrastructure out of the way.
+
 ## Technology & Platform Constraints
 
 - **Application shell**: Tauri (v2 or later) with a Rust backend. Business logic lives in Rust
@@ -202,7 +240,7 @@ marker or run a scraper fails the "Jellyfin-style client" promise.
 
 - **Spec-driven flow**: features proceed through `/speckit-specify` → `/speckit-plan` →
   `/speckit-tasks` → `/speckit-implement`. Every plan MUST include a Constitution Check that
-  explicitly addresses Principles I–VIII, and any deviation MUST be recorded in the plan's
+  explicitly addresses Principles I–IX, and any deviation MUST be recorded in the plan's
   Complexity Tracking table with justification.
 - **Parity check**: specs touching semantic data MUST cite the semantic-tagging plugin modules
   they mirror and describe how compatibility with the plugin's data is verified (Principle II).
@@ -232,11 +270,11 @@ marker or run a scraper fails the "Jellyfin-style client" promise.
   - MINOR — a principle or section is added, or guidance is materially expanded.
   - PATCH — clarifications, wording, or typo fixes with no change in meaning.
 - **Compliance review**: every `/speckit-plan` Constitution Check and every code review MUST
-  verify compliance with Principles I–VIII. Unjustified violations block merge. Justified
+  verify compliance with Principles I–IX. Unjustified violations block merge. Justified
   exceptions are recorded in the plan's Complexity Tracking and revisited when the related
   feature is next touched.
 - **Periodic review**: when the semantic-tagging plugin gains a significant new feature or data
   structure, Principle II's parity expectations MUST be re-evaluated and parity work added to the
   backlog.
 
-**Version**: 3.0.0 | **Ratified**: 2026-09-23 | **Last Amended**: 2026-09-24
+**Version**: 3.1.0 | **Ratified**: 2026-09-23 | **Last Amended**: 2026-09-27

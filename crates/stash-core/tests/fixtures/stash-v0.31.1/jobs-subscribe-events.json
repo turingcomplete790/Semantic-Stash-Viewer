@@ -1,0 +1,313 @@
+{
+  "_note": "graphql-transport-ws messages from Stash v0.31 jobsSubscribe. 'cancelledAndFinished' was recorded from the disposable test instance (a generate job stopped mid-run while a queued scan finished). 'failed' is constructed in the same shape, because a failing job can't be triggered reliably.",
+  "cancelledAndFinished": [
+    {
+      "type": "connection_ack"
+    },
+    {
+      "payload": {
+        "data": {
+          "jobsSubscribe": {
+            "type": "ADD",
+            "job": {
+              "id": "5",
+              "status": "READY",
+              "description": "Generating...",
+              "progress": 0,
+              "startTime": null,
+              "endTime": null,
+              "error": null
+            }
+          }
+        }
+      },
+      "id": "1",
+      "type": "next"
+    },
+    {
+      "payload": {
+        "data": {
+          "jobsSubscribe": {
+            "type": "UPDATE",
+            "job": {
+              "id": "5",
+              "status": "RUNNING",
+              "description": "Generating...",
+              "progress": 0,
+              "startTime": "2026-09-28T10:40:11.717674032-06:00",
+              "endTime": null,
+              "error": null
+            }
+          }
+        }
+      },
+      "id": "1",
+      "type": "next"
+    },
+    {
+      "payload": {
+        "data": {
+          "jobsSubscribe": {
+            "type": "ADD",
+            "job": {
+              "id": "6",
+              "status": "READY",
+              "description": "Scanning...",
+              "progress": 0,
+              "startTime": null,
+              "endTime": null,
+              "error": null
+            }
+          }
+        }
+      },
+      "id": "1",
+      "type": "next"
+    },
+    {
+      "payload": {
+        "data": {
+          "jobsSubscribe": {
+            "type": "UPDATE",
+            "job": {
+              "id": "5",
+              "status": "RUNNING",
+              "description": "Generating...",
+              "progress": null,
+              "startTime": "2026-09-28T10:40:11.717674032-06:00",
+              "endTime": null,
+              "error": null
+            }
+          }
+        }
+      },
+      "id": "1",
+      "type": "next"
+    },
+    {
+      "payload": {
+        "data": {
+          "jobsSubscribe": {
+            "type": "UPDATE",
+            "job": {
+              "id": "5",
+              "status": "RUNNING",
+              "description": "Generating...",
+              "progress": 0,
+              "startTime": "2026-09-28T10:40:11.717674032-06:00",
+              "endTime": null,
+              "error": null
+            }
+          }
+        }
+      },
+      "id": "1",
+      "type": "next"
+    },
+    {
+      "payload": {
+        "data": {
+          "jobsSubscribe": {
+            "type": "UPDATE",
+            "job": {
+              "id": "5",
+              "status": "STOPPING",
+              "description": "Generating...",
+              "progress": 0.16666666666666666,
+              "startTime": "2026-09-28T10:40:11.717674032-06:00",
+              "endTime": null,
+              "error": null
+            }
+          }
+        }
+      },
+      "id": "1",
+      "type": "next"
+    },
+    {
+      "payload": {
+        "data": {
+          "jobsSubscribe": {
+            "type": "UPDATE",
+            "job": {
+              "id": "5",
+              "status": "STOPPING",
+              "description": "Generating...",
+              "progress": 0.16666666666666666,
+              "startTime": "2026-09-28T10:40:11.717674032-06:00",
+              "endTime": null,
+              "error": null
+            }
+          }
+        }
+      },
+      "id": "1",
+      "type": "next"
+    },
+    {
+      "payload": {
+        "data": {
+          "jobsSubscribe": {
+            "type": "UPDATE",
+            "job": {
+              "id": "5",
+              "status": "STOPPING",
+              "description": "Generating...",
+              "progress": 0.3333333333333333,
+              "startTime": "2026-09-28T10:40:11.717674032-06:00",
+              "endTime": null,
+              "error": null
+            }
+          }
+        }
+      },
+      "id": "1",
+      "type": "next"
+    },
+    {
+      "payload": {
+        "data": {
+          "jobsSubscribe": {
+            "type": "REMOVE",
+            "job": {
+              "id": "5",
+              "status": "CANCELLED",
+              "description": "Generating...",
+              "progress": 0.3333333333333333,
+              "startTime": "2026-09-28T10:40:11.717674032-06:00",
+              "endTime": "2026-09-28T10:40:30.254451896-06:00",
+              "error": null
+            }
+          }
+        }
+      },
+      "id": "1",
+      "type": "next"
+    },
+    {
+      "payload": {
+        "data": {
+          "jobsSubscribe": {
+            "type": "UPDATE",
+            "job": {
+              "id": "6",
+              "status": "RUNNING",
+              "description": "Scanning...",
+              "progress": 0,
+              "startTime": "2026-09-28T10:40:30.25445972-06:00",
+              "endTime": null,
+              "error": null
+            }
+          }
+        }
+      },
+      "id": "1",
+      "type": "next"
+    },
+    {
+      "payload": {
+        "data": {
+          "jobsSubscribe": {
+            "type": "UPDATE",
+            "job": {
+              "id": "6",
+              "status": "RUNNING",
+              "description": "Scanning...",
+              "progress": null,
+              "startTime": "2026-09-28T10:40:30.25445972-06:00",
+              "endTime": null,
+              "error": null
+            }
+          }
+        }
+      },
+      "id": "1",
+      "type": "next"
+    },
+    {
+      "payload": {
+        "data": {
+          "jobsSubscribe": {
+            "type": "REMOVE",
+            "job": {
+              "id": "6",
+              "status": "FINISHED",
+              "description": "Scanning...",
+              "progress": 1,
+              "startTime": "2026-09-28T10:40:30.25445972-06:00",
+              "endTime": "2026-09-28T10:40:30.260169327-06:00",
+              "error": null
+            }
+          }
+        }
+      },
+      "id": "1",
+      "type": "next"
+    }
+  ],
+  "failed": [
+    {
+      "type": "connection_ack"
+    },
+    {
+      "payload": {
+        "data": {
+          "jobsSubscribe": {
+            "type": "ADD",
+            "job": {
+              "id": "7",
+              "status": "READY",
+              "description": "Scanning...",
+              "progress": 0,
+              "startTime": null,
+              "endTime": null,
+              "error": null
+            }
+          }
+        }
+      },
+      "id": "1",
+      "type": "next"
+    },
+    {
+      "payload": {
+        "data": {
+          "jobsSubscribe": {
+            "type": "UPDATE",
+            "job": {
+              "id": "7",
+              "status": "RUNNING",
+              "description": "Scanning...",
+              "progress": 0,
+              "startTime": null,
+              "endTime": null,
+              "error": null
+            }
+          }
+        }
+      },
+      "id": "1",
+      "type": "next"
+    },
+    {
+      "payload": {
+        "data": {
+          "jobsSubscribe": {
+            "type": "REMOVE",
+            "job": {
+              "id": "7",
+              "status": "FAILED",
+              "description": "Scanning...",
+              "progress": 0.5,
+              "startTime": null,
+              "endTime": null,
+              "error": "scan failed: path not found"
+            }
+          }
+        }
+      },
+      "id": "1",
+      "type": "next"
+    }
+  ]
+}

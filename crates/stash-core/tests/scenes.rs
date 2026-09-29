@@ -208,3 +208,43 @@ fn legacy_formats_and_short_clips_get_a_sized_cache() {
     assert_eq!(scene("avi", 7250.0, Some(1400 * MIB)).seek_cache(), capped);
     assert_eq!(scene("flv", 1800.0, None).seek_cache(), capped);
 }
+
+#[tokio::test]
+async fn fetches_a_scene_screenshot_as_a_data_url_with_the_api_key() {
+    use stash_core::adapter::scenes::scene_screenshot;
+    use wiremock::matchers::header;
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/scene/5/screenshot"))
+        .and(header("ApiKey", "secret"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "image/jpeg")
+                .set_body_bytes(vec![0xFF, 0xD8, 0xFF]),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/scene/6/screenshot"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/scene/7/screenshot"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "image/jpeg")
+                .set_body_bytes(vec![0u8; 3 * 1024 * 1024]),
+        )
+        .mount(&server)
+        .await;
+    let client =
+        StashClient::new(url(&server.uri()), false, Some("secret".into())).expect("client");
+
+    let shot = scene_screenshot(&client, "5").await.expect("fetch");
+    assert_eq!(shot.as_deref(), Some("data:image/jpeg;base64,/9j/"));
+    // Missing screenshot: nothing to show, not an error.
+    assert_eq!(scene_screenshot(&client, "6").await.expect("fetch"), None);
+    // Oversized: skipped rather than pushed through the UI bridge.
+    assert_eq!(scene_screenshot(&client, "7").await.expect("fetch"), None);
+}

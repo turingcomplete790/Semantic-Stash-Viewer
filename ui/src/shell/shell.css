@@ -1,0 +1,545 @@
+/* App shell layout (004 research R11). Opaque everywhere except the scene view's video area,
+   which the player makes transparent so mpv's GPU output shows through. */
+/* Named areas: hiding an empty slot (tabs, now playing) must not shift the content area into
+   an auto-sized row, or the scene view (absolutely positioned) collapses to zero height. */
+.shell {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "top"
+    "tabs"
+    "content"
+    "now-playing";
+  height: 100vh;
+  background: var(--bg);
+}
+
+.shell-top {
+  grid-area: top;
+}
+
+.shell-tabs {
+  grid-area: tabs;
+}
+
+.shell-content {
+  grid-area: content;
+}
+
+.shell-now-playing {
+  grid-area: now-playing;
+}
+
+.shell-top {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 48px;
+  padding: 0 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.shell-tabs:empty,
+.shell-now-playing:empty,
+.shell-toasts:empty {
+  display: none;
+}
+
+.shell-content {
+  position: relative;
+  overflow: auto;
+}
+
+.view-page {
+  display: flex;
+  justify-content: center;
+  padding: 32px 20px;
+}
+
+.shell-toasts {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+/* While a scene plays, let the video through the content area only. */
+html.player-open,
+html.player-open body,
+html.player-open #root,
+html.player-open .shell,
+html.player-open .shell-content {
+  background: transparent;
+}
+
+/* Fullscreen playback: no shell chrome (004 spec edge case). */
+html.player-fullscreen .shell-top,
+html.player-fullscreen .shell-tabs,
+html.player-fullscreen .shell-now-playing,
+html.player-fullscreen .shell-toasts {
+  display: none;
+}
+
+/* Navigation bar (004 US1). */
+.navbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+}
+
+.nav-brand {
+  font-weight: 600;
+  background: none;
+  border: none;
+  padding: 4px 6px;
+  white-space: nowrap;
+}
+
+.nav-sections {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.nav-section {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.nav-section.current,
+.nav-icon-button.current {
+  background: var(--bg);
+  border-color: var(--border);
+  font-weight: 600;
+}
+
+.nav-measure {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+  display: flex;
+  gap: 2px;
+  top: 0;
+  left: 0;
+}
+
+.nav-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.nav-icon-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+}
+
+.nav-server-name {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-more,
+.nav-server,
+.nav-notifications {
+  position: relative;
+}
+
+.nav-menu,
+.nav-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  z-index: 20;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+}
+
+.nav-menu {
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  padding: 4px;
+  right: 0;
+}
+
+.nav-more .nav-menu {
+  left: 0;
+  right: auto;
+}
+
+.nav-menu [role="menuitem"] {
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 8px 10px;
+  border-radius: 6px;
+}
+
+.nav-menu [role="menuitem"]:hover,
+.nav-menu [role="menuitem"]:focus-visible {
+  background: var(--bg);
+}
+
+.nav-panel {
+  right: 0;
+  width: 360px;
+  max-height: 70vh;
+  overflow: auto;
+  padding: 12px;
+}
+
+/* Tabs (004 US2). Each pane is its own scroll container; hidden panes aren't painted. */
+.tab-pane {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+}
+
+.tab-strip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 36px;
+  padding: 0 8px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.tab-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.tab-list {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  flex: 0 1 200px;
+  min-width: 110px;
+  border: 1px solid transparent;
+  border-radius: 6px 6px 0 0;
+}
+
+.tab.selected {
+  background: var(--bg);
+  border-color: var(--border);
+  border-bottom-color: var(--bg);
+}
+
+.tab-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  background: none;
+  border: none;
+  text-align: left;
+}
+
+.tab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-close {
+  display: inline-flex;
+  padding: 3px;
+  margin-right: 4px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  opacity: 0.6;
+}
+
+.tab-close:hover,
+.tab-close:focus-visible {
+  opacity: 1;
+  background: var(--border);
+}
+
+/* "Now playing" (FR-015): part of the layout, so it shrinks the content area instead of
+   covering it. */
+.now-playing {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 0 16px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+
+.now-playing-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+/* Keyboard help overlay (FR-012). */
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 40%);
+}
+
+.keyboard-help {
+  width: min(640px, calc(100vw - 32px));
+  max-height: 80vh;
+  overflow: auto;
+  padding: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.shortcut-group h3 {
+  margin: 16px 0 6px;
+  font-size: 0.95rem;
+}
+
+.shortcut-group dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 16px;
+  margin: 0;
+}
+
+.shortcut-group dt {
+  display: flex;
+  gap: 4px;
+}
+
+.shortcut-group dd {
+  margin: 0;
+}
+
+kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  font: inherit;
+  font-size: 0.85em;
+}
+
+/* Notification centre (004 US3). Progress uses transform only (research R11). */
+.nav-icon-button {
+  position: relative;
+}
+
+.nav-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 0.7rem;
+  line-height: 16px;
+  text-align: center;
+}
+
+.nav-activity {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.notification-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.notification-header h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.notification-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.notification {
+  display: flex;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--muted);
+  border-radius: 6px;
+}
+
+.notification.unread {
+  background: var(--bg);
+}
+
+.notification.sev-warning {
+  border-left-color: var(--warn);
+}
+
+.notification.sev-error {
+  border-left-color: var(--danger);
+}
+
+.notification-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.notification-severity,
+.notification-time,
+.job-status {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.notification-detail {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.notification-job {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.job-progress {
+  flex: 1;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--border);
+}
+
+.job-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transform-origin: left;
+}
+
+.job-progress.indeterminate .job-progress-fill {
+  width: 40%;
+  transform: none;
+  animation: job-indeterminate 1.4s ease-in-out infinite;
+}
+
+@keyframes job-indeterminate {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
+.notification-dismiss {
+  align-self: flex-start;
+  display: inline-flex;
+  padding: 3px;
+  background: none;
+  border: none;
+  opacity: 0.6;
+}
+
+.notification-dismiss:hover,
+.notification-dismiss:focus-visible {
+  opacity: 1;
+}
+
+/* Toasts (FR-020): never focused, above the now-playing bar. */
+.shell:has(.now-playing) .shell-toasts {
+  bottom: 80px;
+}
+
+.toasts ul {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.toast {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 320px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--muted);
+  border-radius: 8px;
+  /* No box-shadow: toasts can sit over the video (research R11). */
+}
+
+.toast.sev-warning {
+  border-left-color: var(--warn);
+}
+
+.toast.sev-error {
+  border-left-color: var(--danger);
+}

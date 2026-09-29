@@ -42,6 +42,14 @@ pub enum AppError {
     #[error("storage error: {message}")]
     Storage { message: String },
 
+    /// A tab set failed validation (empty, missing selection, or over the size limits).
+    #[error("invalid tab set: {reason}")]
+    TabSetInvalid { reason: String },
+
+    /// The system couldn't open a folder or file for the user (e.g. the log folder).
+    #[error("couldn't open: {detail}")]
+    OpenFailed { detail: String },
+
     /// The request was cancelled by the user.
     #[error("cancelled")]
     Cancelled,

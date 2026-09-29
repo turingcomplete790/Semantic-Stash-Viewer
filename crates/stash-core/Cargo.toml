@@ -10,7 +10,7 @@ license.workspace = true
 
 [features]
 default = []
-specta = ["dep:specta"]
+specta = ["dep:specta", "dep:specta-typescript"]
 
 [dependencies]
 tokio = { workspace = true }
@@ -22,10 +22,20 @@ uuid = { workspace = true }
 url = { workspace = true }
 chrono = { workspace = true }
 specta = { workspace = true, optional = true }
+# Only for `specta_typescript::Unknown`: opaque JSON fields (tab routes, view state) export as
+# TypeScript `unknown` instead of serde_json::Value's i64-based model.
+specta-typescript = { version = "0.0.12", optional = true }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "http2"] }
 graphql_client = "0.16"
 tokio-util = "0.7"
 semver = "1"
+# Scene screenshots cross the UI bridge as data URLs (004 restored scene tabs).
+base64 = "0.22"
+# Jobs subscription over graphql-transport-ws (research R5). rustls + futures-util are already
+# in the tree via reqwest; they're named here for the lenient-TLS verifier and the socket stream.
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
+rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "std"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 
 [dev-dependencies]
 wiremock = "0.6"

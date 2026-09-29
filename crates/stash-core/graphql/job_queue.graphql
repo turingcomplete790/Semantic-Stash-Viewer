@@ -1,0 +1,13 @@
+# Jobs currently queued or running on the server, to seed the notification centre when a
+# session connects (004 research R5). Only the fields the centre shows (Principle IV).
+query JobQueue {
+  jobQueue {
+    id
+    status
+    description
+    progress
+    startTime
+    endTime
+    error
+  }
+}

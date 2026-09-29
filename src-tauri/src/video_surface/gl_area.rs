@@ -33,6 +33,50 @@ fn queue_redraw() {
     });
 }
 
+/// Confine mpv's drawing to `rect` (window-relative logical px, i.e. CSS px) by setting the GL
+/// area's margins inside its full-window holder box; `None` fills the window (004 research R6).
+/// Must run on the GTK main thread. Only margins change, never the widget tree (research R2).
+pub(super) fn apply_viewport(rect: Option<super::Rect>) {
+    VIDEO_AREA.with(|slot| {
+        let Some(area) = slot.borrow().clone() else {
+            return;
+        };
+        let (top, start, end, bottom) = match rect {
+            None => (0, 0, 0, 0),
+            Some(r) => {
+                let (width, height) = area
+                    .parent()
+                    .map(|p| (p.allocated_width(), p.allocated_height()))
+                    .unwrap_or((r.x + r.width, r.y + r.height));
+                (
+                    r.y.max(0),
+                    r.x.max(0),
+                    (width - r.x - r.width).max(0),
+                    (height - r.y - r.height).max(0),
+                )
+            }
+        };
+        area.set_margin_top(top);
+        area.set_margin_start(start);
+        area.set_margin_end(end);
+        area.set_margin_bottom(bottom);
+        area.queue_render();
+    });
+}
+
+/// Show or hide the video surface. Hidden, mpv keeps decoding and playing audio; frames just
+/// aren't drawn (004 FR-015, research R6). Must run on the GTK main thread.
+pub(super) fn apply_visible(visible: bool) {
+    VIDEO_AREA.with(|slot| {
+        if let Some(area) = slot.borrow().as_ref() {
+            area.set_visible(visible);
+            if visible {
+                area.queue_render();
+            }
+        }
+    });
+}
+
 /// Build the GL area and wire it to `player`.
 pub fn build(player: Arc<Player>) -> gtk::GLArea {
     let area = gtk::GLArea::new();

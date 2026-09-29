@@ -14,7 +14,7 @@ Each checkbox group is meant to become one or more Spec Kit features
 | Phase | Theme | Result |
 |---|---|---|
 | 0 | Foundation | The app connects to Stash securely, and the core, the adapter, and mpv are proven |
-| 1 | Browse & play | Read-only browsing of the whole library, with mpv playback |
+| 1 | Browse & play | The app shell (navigation bar, tabs, notifications), then read-only browsing of the whole library, with mpv playback |
 | 2 | Tags & editing | Everyday editing: tags, metadata, ratings, markers |
 | 3 | Advanced Stash features | Scrapers, StashBox, tasks, and settings. Full web UI parity (Principle VIII) |
 | 4 | Semantic tagging | Parity with the semantic-tagging plugin (Principle II) |
@@ -39,22 +39,25 @@ Principles III, IV, V, and VII in place before any features are built on it.
 - [x] Version check on connect: refuse servers older than **Stash v0.31.1** with a clear message
 - [x] TLS: validation off by default, a per-profile setting to turn strict validation on, and a
       connection-security indicator (unencrypted / unverified / verified)
-- [ ] Cache layer: discardable local cache, mutation-driven invalidation, and a manual "clear
-      cache" control
+- [ ] Cache layer: discardable local cache, mutation-driven invalidation, and a "clear cache"
+      troubleshooting control in Settings (in progress:
+      [specs/003-complete-foundation](specs/003-complete-foundation/))
 - [x] mpv spike: embed libmpv in the Tauri window (or a managed mpv process as fallback) playing
       a Stash direct stream authenticated with the API key
       - Decision: libmpv's OpenGL render API into a GTK GL area under the transparent webview;
         every success criterion passed, no fallback needed
         ([decision record](specs/002-mpv-playback-spike/decision.md))
 - [ ] Performance harness: a way to measure Principle VI's budgets (input latency, first paint,
-      scroll fps, cold start)
-- [ ] CI: `cargo fmt`, `cargo clippy`, the frontend linter, and core unit tests
+      scroll fps, cold start) (in progress: 003)
+- [ ] CI: `cargo fmt`, `cargo clippy`, the frontend linter, and core unit tests (a check already
+      runs on every push; 003 confirms coverage and adds a README status badge)
 
 **Exit criteria:** you can add a server profile, connect, see server info, and play one scene in
 mpv.
 
 **Suggested specs:** `connect-to-stash` (done: [specs/001-connect-to-stash](specs/001-connect-to-stash/)),
-`mpv-playback-spike` (done: [specs/002-mpv-playback-spike](specs/002-mpv-playback-spike/))
+`mpv-playback-spike` (done: [specs/002-mpv-playback-spike](specs/002-mpv-playback-spike/)),
+`complete-foundation` (in progress: [specs/003-complete-foundation](specs/003-complete-foundation/))
 
 ---
 
@@ -69,6 +72,8 @@ mpv.
 - [ ] Scene detail page: metadata, performers, studio, tags, groups, galleries, files
 - [ ] mpv playback: direct stream, hardware decode, resume position, markers as chapters
 - [ ] Play count, play duration, and resume position sync back to Stash (Principle V)
+- [ ] Resume where you left off: a Settings → Playback option (as in the Stash web UI) to start
+      scenes from their saved resume point instead of the beginning
 - [ ] Scene previews and sprite/scrubber thumbnails
 - [ ] Transcoding fallback: explicit, user-visible, and logged, only when mpv can't play a file
 
@@ -89,7 +94,18 @@ mpv.
 - [ ] Groups (formerly Movies): grid and detail page with scene ordering
 - [ ] Markers: marker wall/list, filtered by tag, playing from the marker position
 
-### App shell
+### App shell (Principle IX)
+- [x] Navigation bar modelled on the Stash web UI's sections (Scenes, Images, Galleries, Groups,
+      Markers, Performers, Studios, Tags), plus Settings and notifications. Sections are added
+      as their features land.
+- [x] Tabs: several views open at once in the main window, each keeping its scroll position,
+      filters, and selection; keyboard shortcuts to open, close, and switch tabs
+- [x] Notification centre: connection alerts (server unreachable, reconnected, authentication
+      failures) and background failures, with a badge for unread items, and toasts for important
+      events. Running Stash jobs are shown read-only with live progress; starting and cancelling
+      them arrive in Phase 3.
+- [x] Settings page: viewer preferences and troubleshooting controls (e.g. clear cache)
+      (done: [specs/004-app-shell](specs/004-app-shell/) for the four items above)
 - [ ] Home page with configurable rows (recently added, recently played, saved filters)
 - [ ] Global search across entity types
 - [ ] Keyboard navigation throughout; groundwork for a 10-foot (remote/controller) mode
@@ -97,7 +113,7 @@ mpv.
 **Exit criteria:** every entity type can be browsed, filtered, and opened. Scenes play in mpv
 and resume state syncs back. Principle VI's budgets are met on a large library.
 
-**Suggested specs:** `browse-scenes-and-play`, `browse-images-and-galleries`,
+**Suggested specs:** `app-shell` (done: [specs/004-app-shell](specs/004-app-shell/)), `browse-scenes-and-play`, `browse-images-and-galleries`,
 `browse-performers-studios-tags-groups`, `markers-wall`, `home-and-global-search`
 
 ---
@@ -150,7 +166,8 @@ Every write goes to Stash, and the cache updates without a manual refresh.
 
 ### Library tasks & jobs
 - [ ] Scan, Generate (previews, sprites, phashes, and so on), Auto Tag, Identify, Clean
-- [ ] Job queue with live progress, cancellation, and notifications
+- [ ] Job queue in the notification centre (Principle IX): live progress, cancellation, and
+      completion or failure notifications
 - [ ] Running plugin tasks and scripts registered with Stash
 
 ### Library maintenance

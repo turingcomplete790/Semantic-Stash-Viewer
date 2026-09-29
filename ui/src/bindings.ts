@@ -75,6 +75,54 @@ export const commands = {
 	playerReplay: () => typedError<null, AppError>(__TAURI_INVOKE("player_replay")),
 	/**  Enter or leave fullscreen (the window), mirrored into the player snapshot. */
 	playerSetFullscreen: (fullscreen: boolean) => typedError<null, AppError>(__TAURI_INVOKE("player_set_fullscreen", { fullscreen })),
+	/**  Confine mpv's drawing to the scene view's area; `None` fills the window (fullscreen). */
+	playerSetViewport: (viewport: {
+	x: number,
+	y: number,
+	width: number,
+	height: number,
+} | null) => __TAURI_INVOKE<void>("player_set_viewport", { viewport }),
+	/**
+	 *  Hide the video while another tab is shown, and show it again on return. Playback and audio
+	 *  continue (004 FR-015).
+	 */
+	playerSetVideoVisible: (visible: boolean) => __TAURI_INVOKE<void>("player_set_video_visible", { visible }),
+	/**
+	 *  A scene's screenshot as a `data:` URL (e.g. under Play on a restored scene tab), or `None`.
+	 *  Fetched by the core with the API key; read-only.
+	 */
+	sceneScreenshotUrl: (sceneId: string) => typedError<string | null, AppError>(__TAURI_INVOKE("scene_screenshot_url", { sceneId })),
+	/**
+	 *  Debug builds only: a scene to open once connected (`SSV_DEBUG_OPEN`), for checking the video
+	 *  surface without clicking through the UI.
+	 */
+	debugOpenScene: () => __TAURI_INVOKE<string | null>("debug_open_scene"),
+	/**  Debug builds only: run the UI bench (`SSV_DEBUG_BENCH=1`, 004 T063). */
+	debugBenchEnabled: () => __TAURI_INVOKE<boolean>("debug_bench_enabled"),
+	/**  Debug builds only: print one bench result line (`MEASURE {json}`) to the terminal. */
+	debugReport: (line: string) => __TAURI_INVOKE<void>("debug_report", { line }),
+	/**  The saved tabs for a server profile, or `None` (the UI then starts with one Home tab). */
+	shellLoadTabs: (profileId: string) => __TAURI_INVOKE<{
+	/**  1–100 tabs, in strip order. */
+	tabs: Tab[],
+	/**  Must match a tab. */
+	selectedTabId: string,
+} | null>("shell_load_tabs", { profileId }),
+	/**
+	 *  Validate and save a profile's tabs. Returns once validated; the file is written in the
+	 *  background so the UI never waits on disk (Principle VI).
+	 */
+	shellSaveTabs: (profileId: string, tabs: TabSet) => typedError<null, AppError>(__TAURI_INVOKE("shell_save_tabs", { profileId, tabs })),
+	/**  All notifications, newest first (updates arrive as `notifications-changed`). */
+	notificationsList: () => __TAURI_INVOKE<Notification[]>("notifications_list"),
+	/**  Mark notifications read (when the centre is opened). */
+	notificationsMarkRead: (ids: string[]) => __TAURI_INVOKE<void>("notifications_mark_read", { ids }),
+	notificationDismiss: (id: string) => __TAURI_INVOKE<void>("notification_dismiss", { id }),
+	/**  Remove every notification except jobs that are still running. */
+	notificationsDismissAll: () => __TAURI_INVOKE<void>("notifications_dismiss_all"),
+	/**  Open the viewer's log folder (Settings → Troubleshooting, FR-027). */
+	openLogFolder: () => typedError<null, AppError>(__TAURI_INVOKE("open_log_folder")),
+	appInfo: () => __TAURI_INVOKE<AppInfo>("app_info"),
 	/**  Measurements for the decision record. Debug builds only. */
 	playerStats: () => typedError<PlayerStats, AppError>(__TAURI_INVOKE("player_stats")),
 };
@@ -82,6 +130,7 @@ export const commands = {
 /** Events */
 export const events = {
 	connectionState: makeEvent<ConnectionStateEvent>("connection-state"),
+	notificationsChanged: makeEvent<NotificationsChangedEvent>("notifications-changed"),
 	playerState: makeEvent<PlayerStateEvent>("player-state"),
 	profilesChanged: makeEvent<ProfilesChangedEvent>("profiles-changed"),
 };
@@ -105,10 +154,19 @@ export type AppError = { kind: "connect"; failure: ConnectFailure } |
 { kind: "unsupportedProfilesVersion"; found: number } | 
 /**  Reading or writing the local config failed. */
 { kind: "storage"; message: string } | 
+/**  A tab set failed validation (empty, missing selection, or over the size limits). */
+{ kind: "tabSetInvalid"; reason: string } | 
+/**  The system couldn't open a folder or file for the user (e.g. the log folder). */
+{ kind: "openFailed"; detail: string } | 
 /**  The request was cancelled by the user. */
 { kind: "cancelled" } | 
 /**  Anything else that shouldn't happen (for example the HTTP client failing to build). */
 { kind: "internal"; message: string };
+
+/**  The viewer's version, for Settings → About (FR-028). */
+export type AppInfo = {
+	version: string,
+};
 
 /**  A classified connection failure. No variant carries a raw response body. */
 export type ConnectFailure = 
@@ -153,6 +211,25 @@ export type ConnectionStateEvent = ConnectionSnapshot;
 
 export type FrameDirection = "forward" | "back";
 
+export type HistoryEntry = {
+	/**  A UI route, opaque to the core. */
+	route: unknown,
+	/**  Scroll offsets, filters, selection, typed text. Opaque; at most 16 KB serialised. */
+	viewState: unknown | null,
+};
+
+export type JobProgress = {
+	status: JobStatus,
+	/**  0–1, when Stash reports it. */
+	progress: number | null,
+	startedAt: string | null,
+	endedAt: string | null,
+};
+
+export type JobStatus = "queued" | "running" | "stopping" | "finished" | "failed" | "cancelled" | 
+/**  Can't be watched right now (disconnected, or just launched). */
+"unknown";
+
 /**  Library summary shown after connecting (FR-007). */
 export type LibraryCounts = {
 	scenes: number,
@@ -160,6 +237,30 @@ export type LibraryCounts = {
 	galleries: number,
 	performers: number,
 };
+
+export type Notification = {
+	id: string,
+	key: string | null,
+	profileId: string | null,
+	kind: NotificationKind,
+	severity: Severity,
+	/**  Plain language, e.g. "Server unreachable". */
+	title: string,
+	/**  Plain language, with any next step. */
+	detail: string | null,
+	/**  ISO 8601. */
+	createdAt: string,
+	updatedAt: string,
+	read: boolean,
+	/**  Show a toast for this post or update (live changes only; cleared on reload). */
+	toast: boolean,
+	job: JobProgress | null,
+};
+
+export type NotificationKind = "connection" | "playback" | "job" | "background";
+
+/**  The full notification list, on every change (004 contracts "Events"). */
+export type NotificationsChangedEvent = Notification[];
 
 export type PlayerError = { kind: "notConnected" } | { kind: "sceneNotFound" } | { kind: "noPlayableFile" } | 
 /**  The stream couldn't be opened (network error, 401/403, 404). */
@@ -273,6 +374,24 @@ export type SessionState = { kind: "idle" } | { kind: "connecting"; attemptUrl: 
 /**  The key was missing, rejected, or wrong. Retries stop until the key is updated (FR-017). */
 { kind: "authFailed"; failure: ConnectFailure } | { kind: "failed"; failure: ConnectFailure };
 
+/**  Ordered: `Info < Warning < Error`. */
+export type Severity = "info" | "warning" | "error";
+
+export type Tab = {
+	id: string,
+	/**  1–50 entries, oldest first. */
+	history: HistoryEntry[],
+	/**  The entry shown: `0 ≤ index < history.len()`. */
+	index: number,
+};
+
+export type TabSet = {
+	/**  1–100 tabs, in strip order. */
+	tabs: Tab[],
+	/**  Must match a tab. */
+	selectedTabId: string,
+};
+
 /**  What `test_connection` returns to the UI (contracts/tauri-commands.md `TestResult`). */
 export type TestResult = {
 	/**  Final base URL after redirects, as shown to the user. */
@@ -308,6 +427,14 @@ export type VersionStatus =
  *  warning.
  */
 "unknownButCompatible";
+
+/**  Where the scene view's video area is, in window-relative CSS pixels (004 research R6). */
+export type Viewport = {
+	x: number,
+	y: number,
+	width: number,
+	height: number,
+};
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {

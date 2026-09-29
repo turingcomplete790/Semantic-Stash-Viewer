@@ -2,6 +2,7 @@
 //! (constitution Principle III). Everything else reaches Stash through `StashClient`.
 
 pub mod health;
+pub mod jobs;
 pub mod probe;
 pub mod scenes;
 
@@ -78,6 +79,10 @@ impl StashClient {
         self.strict_tls
     }
 
+    pub(crate) fn api_key(&self) -> Option<&str> {
+        self.api_key.as_deref()
+    }
+
     pub fn has_api_key(&self) -> bool {
         self.api_key.is_some()
     }
@@ -95,6 +100,15 @@ impl StashClient {
             if let Some(key) = &self.api_key {
                 req = req.header("ApiKey", key);
             }
+        }
+        req
+    }
+
+    /// Start a GET to `{base}/{path}` with the API key, when one is configured.
+    pub(crate) fn get_with_key(&self, url: Url) -> reqwest::RequestBuilder {
+        let mut req = self.http.get(url);
+        if let Some(key) = &self.api_key {
+            req = req.header("ApiKey", key);
         }
         req
     }

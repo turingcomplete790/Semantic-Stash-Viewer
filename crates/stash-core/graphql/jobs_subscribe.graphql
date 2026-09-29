@@ -1,0 +1,16 @@
+# Live job updates (ADD / UPDATE / REMOVE) over the graphql-transport-ws WebSocket
+# (004 research R5). REMOVE carries the final status. Read-only.
+subscription JobsSubscribe {
+  jobsSubscribe {
+    type
+    job {
+      id
+      status
+      description
+      progress
+      startTime
+      endTime
+      error
+    }
+  }
+}

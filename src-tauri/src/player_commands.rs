@@ -10,7 +10,7 @@ use player::{
     PlayerStateKind, PlayerStats,
 };
 use serde::Serialize;
-use stash_core::adapter::scenes::{playable_scene, recent_scenes, test_scenes};
+use stash_core::adapter::scenes::{playable_scene, recent_scenes, scene_screenshot, test_scenes};
 use stash_core::adapter::StashClient;
 use stash_core::scenes::{is_direct_stream, PlayableScene, SceneGroup, SceneListItem};
 use stash_core::AppError;
@@ -33,8 +33,14 @@ pub fn forward_player_state(app: AppHandle, player: &Arc<Player>) {
     let player = Arc::clone(player);
     tauri::async_runtime::spawn(async move {
         let mut was_idle = true;
+        let mut was_error = false;
         while rx.changed().await.is_ok() {
             let snapshot = rx.borrow_and_update().clone();
+            let is_error = snapshot.state == PlayerStateKind::Error;
+            if is_error && !was_error {
+                notify_playback_error(&app, &snapshot);
+            }
+            was_error = is_error;
             let idle = snapshot.state == PlayerStateKind::Idle;
             if idle && !was_idle {
                 leave_fullscreen(&app, &player);
@@ -172,6 +178,39 @@ pub(crate) async fn open_scene(
     Ok(scene)
 }
 
+/// "Couldn't play …" in the notification centre when playback fails (004 FR-018).
+fn notify_playback_error(app: &AppHandle, snapshot: &PlayerSnapshot) {
+    use stash_core::shell::notifications::{NewNotification, NotificationKind, Severity};
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let detail = snapshot.error.as_ref().map(|e| {
+        let text = e.to_string();
+        let mut chars = text.chars();
+        let first = chars
+            .next()
+            .map(|c| c.to_uppercase().collect::<String>())
+            .unwrap_or_default();
+        format!("{first}{}.", chars.as_str())
+    });
+    state.notifications.post(NewNotification {
+        key: snapshot
+            .scene_id
+            .as_ref()
+            .map(|id| format!("playback:{id}")),
+        profile_id: state.manager.active_profile_id(),
+        kind: NotificationKind::Playback,
+        severity: Severity::Error,
+        title: format!(
+            "Couldn't play {}",
+            snapshot.title.as_deref().unwrap_or("the scene")
+        ),
+        detail,
+        toast: true,
+        job: None,
+    });
+}
+
 /// Stop playback and release audio/video (FR-007).
 #[tauri::command]
 #[specta::specta]
@@ -275,6 +314,85 @@ pub fn player_set_fullscreen(
         })?;
     player(&state)?.set_fullscreen_flag(fullscreen);
     Ok(())
+}
+
+/// Where the scene view's video area is, in window-relative CSS pixels (004 research R6).
+#[derive(Debug, Clone, Copy, serde::Deserialize, specta::Type)]
+pub struct Viewport {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
+/// Confine mpv's drawing to the scene view's area; `None` fills the window (fullscreen).
+#[tauri::command]
+#[specta::specta]
+pub fn player_set_viewport(viewport: Option<Viewport>) {
+    if cfg!(debug_assertions) && std::env::var_os("SSV_DEBUG_NO_VIEWPORT").is_some() {
+        return;
+    }
+    #[cfg(target_os = "linux")]
+    crate::video_surface::set_viewport(viewport.map(|v| crate::video_surface::Rect {
+        x: v.x,
+        y: v.y,
+        width: v.width.max(0),
+        height: v.height.max(0),
+    }));
+    #[cfg(not(target_os = "linux"))]
+    let _ = viewport;
+}
+
+/// A scene's screenshot as a `data:` URL (e.g. under Play on a restored scene tab), or `None`.
+/// Fetched by the core with the API key; read-only.
+#[tauri::command]
+#[specta::specta]
+pub async fn scene_screenshot_url(
+    state: State<'_, AppState>,
+    scene_id: String,
+) -> Result<Option<String>, AppError> {
+    let (client, _, _) = active_client(&state)?;
+    scene_screenshot(&client, scene_id.trim()).await
+}
+
+/// Hide the video while another tab is shown, and show it again on return. Playback and audio
+/// continue (004 FR-015).
+#[tauri::command]
+#[specta::specta]
+pub fn player_set_video_visible(visible: bool) {
+    #[cfg(target_os = "linux")]
+    crate::video_surface::set_visible(visible);
+    #[cfg(not(target_os = "linux"))]
+    let _ = visible;
+}
+
+/// Debug builds only: a scene to open once connected (`SSV_DEBUG_OPEN`), for checking the video
+/// surface without clicking through the UI.
+#[tauri::command]
+#[specta::specta]
+pub fn debug_open_scene() -> Option<String> {
+    if !cfg!(debug_assertions) {
+        return None;
+    }
+    std::env::var("SSV_DEBUG_OPEN")
+        .ok()
+        .filter(|s| !s.is_empty())
+}
+
+/// Debug builds only: run the UI bench (`SSV_DEBUG_BENCH=1`, 004 T063).
+#[tauri::command]
+#[specta::specta]
+pub fn debug_bench_enabled() -> bool {
+    cfg!(debug_assertions) && std::env::var_os("SSV_DEBUG_BENCH").is_some()
+}
+
+/// Debug builds only: print one bench result line (`MEASURE {json}`) to the terminal.
+#[tauri::command]
+#[specta::specta]
+pub fn debug_report(line: String) {
+    if cfg!(debug_assertions) {
+        println!("MEASURE {line}");
+    }
 }
 
 /// Measurements for the decision record. Debug builds only.

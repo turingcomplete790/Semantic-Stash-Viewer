@@ -1,0 +1,68 @@
+/* Settings (004 US4): page list on the left, the page on the right. */
+.settings {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 24px;
+  width: 100%;
+  max-width: 960px;
+}
+
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-nav h1 {
+  margin: 0 0 12px;
+  font-size: 1.2rem;
+}
+
+.settings-nav button {
+  text-align: left;
+  background: none;
+  border-color: transparent;
+}
+
+.settings-nav button.current {
+  background: var(--bg);
+  border-color: var(--border);
+  font-weight: 600;
+}
+
+.settings-page h2 {
+  margin-top: 0;
+}
+
+.settings-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-item p {
+  margin: 2px 0 0;
+}
+
+.about-list {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 8px 20px;
+}
+
+.about-list dt {
+  color: var(--muted);
+}
+
+.about-list dd {
+  margin: 0;
+}
+
+@media (max-width: 720px) {
+  .settings {
+    grid-template-columns: 1fr;
+  }
+}

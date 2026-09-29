@@ -132,6 +132,18 @@ describe("Controls", () => {
     expect(screen.getByText("2:30")).toBeInTheDocument();
   });
 
+  it("moves the hover time with a transform, not a layout property", () => {
+    render(() => <Controls />);
+    const bar = screen.getByRole("slider", { name: "Seek" });
+    bar.getBoundingClientRect = () =>
+      ({ left: 0, width: 200, top: 0, height: 10, right: 200, bottom: 10 }) as DOMRect;
+    fireEvent.mouseMove(bar, { clientX: 50 });
+    const anchor = screen.getByText("2:30").parentElement as HTMLElement;
+    expect(anchor.style.transform).toBe("translateX(25%)");
+    expect(anchor.style.left).toBe("");
+    expect(screen.getByText("2:30").style.left).toBe("");
+  });
+
   it("offers the speed list and sets the chosen speed", () => {
     render(() => <Controls />);
     const menu = screen.getByRole("combobox", { name: "Playback speed" });
