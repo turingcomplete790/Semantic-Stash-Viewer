@@ -96,3 +96,14 @@ Cover the window during a run. **Expect**: the frame measurements are marked inv
 1. The README shows the CI badge for `main`, and it's green.
 2. On a throwaway branch, push a commit with a formatting error. **Expect**: the run fails on
    "Rust format". Then delete the branch. This pushes, so do it only with the owner's go-ahead.
+
+**Recorded 2026-09-29** (with the owner's go-ahead):
+
+| Run | Commit | Result | Duration |
+|---|---|---|---|
+| [`003-complete-foundation`](https://github.com/turingcomplete790/Semantic-Stash-Viewer/actions/runs/36631206353) | `92466bc` | pass, all 19 steps | 4 min 22 s |
+| [Throwaway branch, deliberate format error](https://github.com/turingcomplete790/Semantic-Stash-Viewer/actions/runs/36631231210) | `5520f9d` | fail at "Rust format"; later steps skipped | 1 min 30 s |
+
+- Both are well under SC-008's 15 minutes.
+- The throwaway branch was deleted locally and on GitHub afterwards.
+- The badge will show `main`'s status once 003 is merged; it points at `main` by design.

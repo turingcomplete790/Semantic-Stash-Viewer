@@ -210,7 +210,7 @@ its status in the README.
 
 - [X] T022 [P] [US3] Harden `.github/workflows/ci.yml`: add `timeout-minutes: 30` to the `check` job, and top-level `concurrency: { group: ci-${{ github.ref }}, cancel-in-progress: true }`. Keep every existing named step (FR-019, FR-020; research R10)
 - [X] T023 [P] [US3] Add the CI badge to the top of `README.md`: `![CI](https://github.com/turingcomplete790/Semantic-Stash-Viewer/actions/workflows/ci.yml/badge.svg?branch=main)`, linked to the workflow page (FR-022)
-- [ ] T024 [US3] Verify SC-008 **with the user's go-ahead** (it pushes):
+- [X] T024 [US3] Verify SC-008 **with the user's go-ahead** (it pushes):
   - push this branch and confirm the run passes in under 15 minutes;
   - push a throwaway branch with one deliberate formatting error, confirm the run fails at "Rust format", then delete the throwaway branch (locally and on the remote).
 
@@ -222,9 +222,9 @@ its status in the README.
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T025 [P] Update `ROADMAP.md` Phase 0: tick the cache layer, performance harness, and CI items and link `specs/003-complete-foundation/` (FR-023); tick Phase 0 as complete in the overview if every item is done
-- [ ] T026 [P] Update `README.md`: the status line (Phase 0 complete), a short "Performance harness" section (`cargo run --bin perf-harness -- --profile "<name>"`, where reports go), and the cache location (`~/.cache/semantic-stash-viewer/`, safe to delete)
-- [ ] T027 Run the full gate: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, bindings drift (`cargo run -p semantic-stash-viewer --bin export-bindings` then `git diff --exit-code ui/src/bindings.ts`), `npm --prefix ui run lint`, `npm --prefix ui run typecheck`, and `npm --prefix ui test`
+- [X] T025 [P] Update `ROADMAP.md` Phase 0: tick the cache layer, performance harness, and CI items and link `specs/003-complete-foundation/` (FR-023); tick Phase 0 as complete in the overview if every item is done
+- [X] T026 [P] Update `README.md`: the status line (Phase 0 complete), a short "Performance harness" section (`cargo run --bin perf-harness -- --profile "<name>"`, where reports go), and the cache location (`~/.cache/semantic-stash-viewer/`, safe to delete)
+- [X] T027 Run the full gate: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, bindings drift (`cargo run -p semantic-stash-viewer --bin export-bindings` then `git diff --exit-code ui/src/bindings.ts`), `npm --prefix ui run lint`, `npm --prefix ui run typecheck`, and `npm --prefix ui test`
 
 ---
 
