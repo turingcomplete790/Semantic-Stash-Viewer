@@ -13,7 +13,7 @@ Each checkbox group is meant to become one or more Spec Kit features
 
 | Phase | Theme | Result |
 |---|---|---|
-| 0 | Foundation | The app connects to Stash securely, and the core, the adapter, and mpv are proven |
+| 0 | Foundation (done) | The app connects to Stash securely, and the core, the adapter, and mpv are proven |
 | 1 | Browse & play | The app shell (navigation bar, tabs, notifications), then read-only browsing of the whole library, with mpv playback |
 | 2 | Tags & editing | Everyday editing: tags, metadata, ratings, markers |
 | 3 | Advanced Stash features | Scrapers, StashBox, tasks, and settings. Full web UI parity (Principle VIII) |
@@ -39,25 +39,31 @@ Principles III, IV, V, and VII in place before any features are built on it.
 - [x] Version check on connect: refuse servers older than **Stash v0.31.1** with a clear message
 - [x] TLS: validation off by default, a per-profile setting to turn strict validation on, and a
       connection-security indicator (unencrypted / unverified / verified)
-- [ ] Cache layer: discardable local cache, mutation-driven invalidation, and a "clear cache"
-      troubleshooting control in Settings (in progress:
-      [specs/003-complete-foundation](specs/003-complete-foundation/))
+- [x] Cache layer: discardable local cache, mutation-driven invalidation, and a "clear cache"
+      troubleshooting control in Settings
+      ([specs/003-complete-foundation](specs/003-complete-foundation/))
+      - Per-server SQLite cache sized to 5% of free disk (64 MB–10 GB), never shared across
+        servers; screens show cached data at once and refresh quietly. Targeted invalidation is
+        ready for Phase 2's writes
 - [x] mpv spike: embed libmpv in the Tauri window (or a managed mpv process as fallback) playing
       a Stash direct stream authenticated with the API key
       - Decision: libmpv's OpenGL render API into a GTK GL area under the transparent webview;
         every success criterion passed, no fallback needed
         ([decision record](specs/002-mpv-playback-spike/decision.md))
-- [ ] Performance harness: a way to measure Principle VI's budgets (input latency, first paint,
-      scroll fps, cold start) (in progress: 003)
-- [ ] CI: `cargo fmt`, `cargo clippy`, the frontend linter, and core unit tests (a check already
-      runs on every push; 003 confirms coverage and adds a README status badge)
+- [x] Performance harness: a way to measure Principle VI's budgets (input latency, first paint,
+      scroll fps, cold start) (003)
+      - `cargo run --bin perf-harness -- --profile "<name>"`: every budget passes on the reference
+        machine, about 2 minutes per run, repeatable within 10%
+- [x] CI: `cargo fmt`, `cargo clippy`, the frontend linter, and core unit tests (003)
+      - Every push runs all checks in about 4–6 minutes, with a timeout, superseded runs
+        cancelled, and a README status badge
 
 **Exit criteria:** you can add a server profile, connect, see server info, and play one scene in
 mpv.
 
 **Suggested specs:** `connect-to-stash` (done: [specs/001-connect-to-stash](specs/001-connect-to-stash/)),
 `mpv-playback-spike` (done: [specs/002-mpv-playback-spike](specs/002-mpv-playback-spike/)),
-`complete-foundation` (in progress: [specs/003-complete-foundation](specs/003-complete-foundation/))
+`complete-foundation` (done: [specs/003-complete-foundation](specs/003-complete-foundation/))
 
 ---
 

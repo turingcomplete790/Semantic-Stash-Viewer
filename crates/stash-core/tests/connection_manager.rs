@@ -75,6 +75,7 @@ impl Prober for FakeProber {
 
 fn server(version: &str) -> ServerInfo {
     ServerInfo {
+        identity: "0000000000000000".into(),
         version: version.into(),
         version_status: VersionStatus::Supported,
         app_schema: 85,

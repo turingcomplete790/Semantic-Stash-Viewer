@@ -19,8 +19,8 @@ const mocks = vi.hoisted(() => {
       playerSnapshot: vi.fn(() =>
         Promise.resolve({ status: "error", error: { kind: "internal" } }),
       ),
-      listRecentScenes: vi.fn(() => ok([])),
-      listTestScenes: vi.fn(() => ok([])),
+      listRecentScenes: vi.fn(() => ok({ data: [], fromCache: false, fetchedAt: "" })),
+      listTestScenes: vi.fn(() => ok({ data: [], fromCache: false, fetchedAt: "" })),
       playerSetViewport: vi.fn(() => ok(null)),
       debugOpenScene: vi.fn(() => Promise.resolve(null)),
       shellLoadTabs: vi.fn(() => Promise.resolve(null)),
@@ -28,12 +28,16 @@ const mocks = vi.hoisted(() => {
       playerSetVideoVisible: vi.fn(() => Promise.resolve(null)),
       notificationsList: vi.fn(() => Promise.resolve([])),
       debugBenchEnabled: vi.fn(() => Promise.resolve(false)),
+      debugMeasureEnabled: vi.fn(() => Promise.resolve(false)),
+      debugMarkInteractive: vi.fn(() => Promise.resolve(null)),
+      cachedServerInfo: vi.fn(() => Promise.resolve(null)),
     },
     events: {
       connectionState: { listen: listen("connectionState") },
       profilesChanged: { listen: listen("profilesChanged") },
       playerState: { listen: listen("playerState") },
       notificationsChanged: { listen: listen("notificationsChanged") },
+      viewDataChanged: { listen: listen("viewDataChanged") },
     },
   };
 });
@@ -60,6 +64,7 @@ const connected: ConnectionSnapshot = {
     version: "v0.31.1",
     versionStatus: "supported",
     appSchema: 85,
+    identity: "0000000000000000",
     counts: { scenes: 10, images: 2, galleries: 1, performers: 3 },
   },
   lastContactAt: null,

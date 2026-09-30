@@ -44,12 +44,12 @@ export const commands = {
 	/**  Current player state, for UI hydration. */
 	playerSnapshot: () => typedError<PlayerSnapshot, AppError>(__TAURI_INVOKE("player_snapshot")),
 	/**  The 20 most recently added scenes on the active server (FR-001). */
-	listRecentScenes: () => typedError<SceneListItem[], AppError>(__TAURI_INVOKE("list_recent_scenes")),
+	listRecentScenes: () => typedError<Cached<SceneListItem[]>, AppError>(__TAURI_INVOKE("list_recent_scenes")),
 	/**
 	 *  The spike's test set: a few random 4K, WMV, VP9, AV1, MPEG-4, and FLV scenes, in one
 	 *  request (research R7). Each call reshuffles.
 	 */
-	listTestScenes: () => typedError<SceneGroup[], AppError>(__TAURI_INVOKE("list_test_scenes")),
+	listTestScenes: (shuffle: boolean) => typedError<Cached<SceneGroup[]>, AppError>(__TAURI_INVOKE("list_test_scenes", { shuffle })),
 	/**  Look up a scene and start playing its direct stream (FR-001, FR-003, FR-004). */
 	playerOpen: (sceneId: string) => typedError<PlayerSnapshot, AppError>(__TAURI_INVOKE("player_open", { sceneId })),
 	/**  Stop playback and release audio/video (FR-007). */
@@ -99,8 +99,18 @@ export const commands = {
 	debugOpenScene: () => __TAURI_INVOKE<string | null>("debug_open_scene"),
 	/**  Debug builds only: run the UI bench (`SSV_DEBUG_BENCH=1`, 004 T063). */
 	debugBenchEnabled: () => __TAURI_INVOKE<boolean>("debug_bench_enabled"),
+	/**
+	 *  Debug builds only: a playback measurement run is on (`SSV_MEASURE`). The UI then shows each
+	 *  scene it plays in a scene tab, so the video is drawn as it is for users (003 research R8).
+	 */
+	debugMeasureEnabled: () => __TAURI_INVOKE<boolean>("debug_measure_enabled"),
 	/**  Debug builds only: print one bench result line (`MEASURE {json}`) to the terminal. */
 	debugReport: (line: string) => __TAURI_INVOKE<void>("debug_report", { line }),
+	/**
+	 *  Debug builds only: the UI calls this once Home first paints with server info (live or
+	 *  cached). Prints `MEASURE {"coldStartMs": …}` the first time (research R8).
+	 */
+	debugMarkInteractive: (visible: boolean) => __TAURI_INVOKE<void>("debug_mark_interactive", { visible }),
 	/**  The saved tabs for a server profile, or `None` (the UI then starts with one Home tab). */
 	shellLoadTabs: (profileId: string) => __TAURI_INVOKE<{
 	/**  1–100 tabs, in strip order. */
@@ -122,6 +132,19 @@ export const commands = {
 	notificationsDismissAll: () => __TAURI_INVOKE<void>("notifications_dismiss_all"),
 	/**  Open the viewer's log folder (Settings → Troubleshooting, FR-027). */
 	openLogFolder: () => typedError<null, AppError>(__TAURI_INVOKE("open_log_folder")),
+	/**  The last known server summary, for Home while connecting or offline (research R6). */
+	cachedServerInfo: () => __TAURI_INVOKE<{
+	server: ServerInfo,
+	/**  When it was read from the server (ISO 8601). */
+	fetchedAt: string,
+} | null>("cached_server_info"),
+	/**
+	 *  The cache's size in bytes (Settings → Troubleshooting). A float because the bindings have
+	 *  no 64-bit integers; sizes stay exact far past any cache limit.
+	 */
+	cacheSize: () => __TAURI_INVOKE<number | null>("cache_size"),
+	/**  Clear the cache (FR-005). Returns the bytes freed; open views reload from the server. */
+	clearCache: () => typedError<number | null, AppError>(__TAURI_INVOKE("clear_cache")),
 	appInfo: () => __TAURI_INVOKE<AppInfo>("app_info"),
 	/**  Measurements for the decision record. Debug builds only. */
 	playerStats: () => typedError<PlayerStats, AppError>(__TAURI_INVOKE("player_stats")),
@@ -133,6 +156,7 @@ export const events = {
 	notificationsChanged: makeEvent<NotificationsChangedEvent>("notifications-changed"),
 	playerState: makeEvent<PlayerStateEvent>("player-state"),
 	profilesChanged: makeEvent<ProfilesChangedEvent>("profiles-changed"),
+	viewDataChanged: makeEvent<ViewDataChangedEvent>("view-data-changed"),
 };
 
 /* Types */
@@ -158,6 +182,8 @@ export type AppError = { kind: "connect"; failure: ConnectFailure } |
 { kind: "tabSetInvalid"; reason: string } | 
 /**  The system couldn't open a folder or file for the user (e.g. the log folder). */
 { kind: "openFailed"; detail: string } | 
+/**  There's no connection to a server right now (not connected yet, or it's unreachable). */
+{ kind: "notConnected" } | 
 /**  The request was cancelled by the user. */
 { kind: "cancelled" } | 
 /**  Anything else that shouldn't happen (for example the HTTP client failing to build). */
@@ -166,6 +192,15 @@ export type AppError = { kind: "connect"; failure: ConnectFailure } |
 /**  The viewer's version, for Settings → About (FR-028). */
 export type AppInfo = {
 	version: string,
+};
+
+/**  Data served to the UI, with where it came from (contracts "Cached<T>"). */
+export type Cached<T> = {
+	data: T,
+	/**  True when served from the cache (a background refresh may follow). */
+	fromCache: boolean,
+	/**  When the data came from the server (ISO 8601). */
+	fetchedAt: string,
 };
 
 /**  A classified connection failure. No variant carries a raw response body. */
@@ -229,6 +264,16 @@ export type JobProgress = {
 export type JobStatus = "queued" | "running" | "stopping" | "finished" | "failed" | "cancelled" | 
 /**  Can't be watched right now (disconnected, or just launched). */
 "unknown";
+
+/**
+ *  The last known server summary. (A named type: the bindings generator mangles
+ *  `Option<Cached<ServerInfo>>`.)
+ */
+export type LastServerInfo = {
+	server: ServerInfo,
+	/**  When it was read from the server (ISO 8601). */
+	fetchedAt: string,
+};
 
 /**  Library summary shown after connecting (FR-007). */
 export type LibraryCounts = {
@@ -365,6 +410,8 @@ export type ServerInfo = {
 	versionStatus: VersionStatus,
 	appSchema: number,
 	counts: LibraryCounts,
+	/**  Which Stash instance this is (003 research R2): a hash, never the paths themselves. */
+	identity: string,
 };
 
 /**  Session state (data-model.md "ConnectionState and transitions"). */
@@ -427,6 +474,15 @@ export type VersionStatus =
  *  warning.
  */
 "unknownButCompatible";
+
+/**
+ *  A cached view's data changed (a refresh returned something different, or the cache was
+ *  cleared). `key` is `*` when everything changed. The UI re-reads the matching command.
+ */
+export type ViewDataChangedEvent = {
+	profileId: string,
+	key: string,
+};
 
 /**  Where the scene view's video area is, in window-relative CSS pixels (004 research R6). */
 export type Viewport = {

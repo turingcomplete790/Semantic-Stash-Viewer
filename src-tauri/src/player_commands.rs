@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use crate::cache_commands::read_cached;
 use player::{
     CacheLimits, FrameDirection, OpenRequest, Player, PlayerCommand, PlayerSnapshot,
     PlayerStateKind, PlayerStats,
@@ -12,6 +13,9 @@ use player::{
 use serde::Serialize;
 use stash_core::adapter::scenes::{playable_scene, recent_scenes, scene_screenshot, test_scenes};
 use stash_core::adapter::StashClient;
+use stash_core::cache::refresh::RefreshPolicy;
+use stash_core::cache::Cached;
+use stash_core::connection::snapshot::SessionState;
 use stash_core::scenes::{is_direct_stream, PlayableScene, SceneGroup, SceneListItem};
 use stash_core::AppError;
 use tauri::{AppHandle, Manager, State, WebviewWindow};
@@ -87,13 +91,13 @@ pub(crate) fn player(state: &AppState) -> Result<&Arc<Player>, AppError> {
 }
 
 /// A client for the active profile. Fails if no server is active.
-fn active_client(state: &AppState) -> Result<(StashClient, Option<String>, bool), AppError> {
+pub(crate) fn active_client(
+    state: &AppState,
+) -> Result<(StashClient, Option<String>, bool), AppError> {
     let id = state
         .manager
         .active_profile_id()
-        .ok_or_else(|| AppError::Internal {
-            message: "not connected to a server".into(),
-        })?;
+        .ok_or(AppError::NotConnected)?;
     let profile = state
         .profiles
         .lock()
@@ -123,18 +127,34 @@ pub fn player_snapshot(state: State<'_, AppState>) -> Result<PlayerSnapshot, App
 #[specta::specta]
 pub async fn list_recent_scenes(
     state: State<'_, AppState>,
-) -> Result<Vec<SceneListItem>, AppError> {
-    let (client, _, _) = active_client(&state)?;
-    recent_scenes(&client).await
+) -> Result<Cached<Vec<SceneListItem>>, AppError> {
+    read_cached(
+        &state,
+        "scenes:recent",
+        RefreshPolicy::Auto,
+        false,
+        |client| async move { recent_scenes(&client).await },
+    )
+    .await
 }
 
 /// The spike's test set: a few random 4K, WMV, VP9, AV1, MPEG-4, and FLV scenes, in one
 /// request (research R7). Each call reshuffles.
 #[tauri::command]
 #[specta::specta]
-pub async fn list_test_scenes(state: State<'_, AppState>) -> Result<Vec<SceneGroup>, AppError> {
-    let (client, _, _) = active_client(&state)?;
-    test_scenes(&client).await
+pub async fn list_test_scenes(
+    state: State<'_, AppState>,
+    shuffle: bool,
+) -> Result<Cached<Vec<SceneGroup>>, AppError> {
+    // Random by design: only Shuffle fetches a new set (research R4).
+    read_cached(
+        &state,
+        "scenes:test-set",
+        RefreshPolicy::Manual,
+        shuffle,
+        |client| async move { test_scenes(&client).await },
+    )
+    .await
 }
 
 /// Look up a scene and start playing its direct stream (FR-001, FR-003, FR-004).
@@ -154,8 +174,25 @@ pub(crate) async fn open_scene(
     scene_id: &str,
 ) -> Result<PlayableScene, AppError> {
     let player = Arc::clone(player(state)?);
-    let (client, api_key, strict_tls) = active_client(state)?;
-    let scene = playable_scene(&client, scene_id.trim()).await?;
+    let (_, api_key, strict_tls) = active_client(state)?;
+    // The stream comes from the server, so cached details alone can't play (003 V2).
+    if !matches!(state.manager.snapshot().state, SessionState::Connected) {
+        return Err(AppError::NotConnected);
+    }
+    let id = scene_id.trim().to_owned();
+    // Cached details start playback without waiting on the server (003 research R3).
+    let scene = read_cached(
+        state,
+        &format!("scene:{id}"),
+        RefreshPolicy::Auto,
+        false,
+        move |client| {
+            let id = id.clone();
+            async move { playable_scene(&client, &id).await }
+        },
+    )
+    .await?
+    .data;
     if !is_direct_stream(&scene.stream_url) {
         // Can't happen (the URL is built by stash-core), but never hand mpv a transcode URL.
         return Err(AppError::Internal {
@@ -386,12 +423,25 @@ pub fn debug_bench_enabled() -> bool {
     cfg!(debug_assertions) && std::env::var_os("SSV_DEBUG_BENCH").is_some()
 }
 
+/// Debug builds only: a playback measurement run is on (`SSV_MEASURE`). The UI then shows each
+/// scene it plays in a scene tab, so the video is drawn as it is for users (003 research R8).
+#[tauri::command]
+#[specta::specta]
+pub fn debug_measure_enabled() -> bool {
+    cfg!(debug_assertions) && std::env::var_os("SSV_MEASURE").is_some()
+}
+
 /// Debug builds only: print one bench result line (`MEASURE {json}`) to the terminal.
 #[tauri::command]
 #[specta::specta]
 pub fn debug_report(line: String) {
     if cfg!(debug_assertions) {
         println!("MEASURE {line}");
+        let done = serde_json::from_str::<serde_json::Value>(&line)
+            .is_ok_and(|v| v.get("bench").and_then(|b| b.as_str()) == Some("done"));
+        if done {
+            crate::harness::finished(crate::harness::Finish::Bench);
+        }
     }
 }
 

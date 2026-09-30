@@ -1,9 +1,18 @@
-import { createEffect, createSignal, Match, onCleanup, onMount, Show, Switch } from "solid-js";
+import {
+  createEffect,
+  createRoot,
+  createSignal,
+  Match,
+  onCleanup,
+  onMount,
+  Show,
+  Switch,
+} from "solid-js";
 import { commands } from "./bindings";
 import ConnectionForm from "./components/ConnectionForm";
 import KeyPrompt from "./components/KeyPrompt";
 import ProfilePicker from "./components/ProfilePicker";
-import { initPlayer } from "./player/state";
+import { initPlayer, player } from "./player/state";
 import { newRequestId } from "./lib/requestId";
 import KeyboardHelp from "./shell/KeyboardHelp";
 import { installKeymap, register } from "./shell/keymap";
@@ -16,11 +25,14 @@ import {
   close,
   currentRoute,
   installMouseNavigation,
+  isPlayingTab,
   loadTabsFor,
   navigate,
   navigateIn,
   registerTabShortcuts,
   resetTabs,
+  suspendSaving,
+  tabs,
   wasRestored,
 } from "./shell/tabs";
 import { connection, initConnection, refreshProfiles } from "./state/connection";
@@ -30,6 +42,7 @@ import Toasts from "./shell/Toasts";
 import SettingsView from "./settings/SettingsView";
 import RouteView from "./views/RouteView";
 import "./App.css";
+import { markInteractive } from "./debug/interactive";
 
 /**
  * Hosts the app shell (constitution Principle IX) and routes on the core's connection state:
@@ -67,6 +80,13 @@ export default function App() {
     onCleanup(registerPlayerKeyListing());
   });
 
+  // Cold start ends at the first frame with server info (003 research R8). Home also marks it
+  // when it shows the last known summary before connecting.
+  createEffect(() => {
+    const snap = connection.snapshot();
+    if (snap.state.kind === "connected" && snap.server) markInteractive();
+  });
+
   // Debug builds: the UI bench (`SSV_DEBUG_BENCH=1`, 004 T063).
   let benchStarted = false;
   createEffect(() => {
@@ -75,6 +95,21 @@ export default function App() {
     void commands.debugBenchEnabled().then((on) => {
       if (on) setTimeout(() => void import("./debug/bench").then((m) => m.runBench()), 3000);
     });
+  });
+
+  // Debug builds: a playback measurement run (`SSV_MEASURE`) plays scenes from the core; show
+  // each in a scene tab so the video is drawn (the shell hides it otherwise). Tabs aren't saved.
+  void commands.debugMeasureEnabled().then((on) => {
+    if (!on) return;
+    suspendSaving(true);
+    createRoot(() =>
+      createEffect(() => {
+        const id = player.snapshot().sceneId;
+        if (id && player.isOpen() && !tabs().some((t) => isPlayingTab(t))) {
+          navigate({ kind: "scene", sceneId: id, title: "" });
+        }
+      }),
+    );
   });
 
   // Debug builds: open a scene straight away (`SSV_DEBUG_OPEN`), to check the video surface.

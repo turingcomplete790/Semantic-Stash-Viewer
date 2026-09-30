@@ -8,6 +8,10 @@ query ConnectProbe {
   systemStatus {
     appSchema
     status
+    # Tells two Stash instances at the same address apart (003 research R2). Only a hash of
+    # these is kept; the paths themselves are never stored.
+    databasePath
+    configPath
   }
   stats {
     scene_count

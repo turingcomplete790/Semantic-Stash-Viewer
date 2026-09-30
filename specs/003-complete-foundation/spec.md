@@ -45,6 +45,9 @@ manual "clear cache" control is a viewer-only capability that Principle IV requi
   told? → A: Cached screens stay usable with no cache wording. "Server unreachable" is shown by
   the connection indicator and the notification centre (constitution Principle IX). Actions
   that need the server, such as playback, explain why they're unavailable.
+- Q: How big may the cache get? → A: A share of free disk space: 5% of the free space on the disk
+  that holds the cache, never below 64 MB and never above 10 GB. It's re-checked as the disk
+  fills, so the cache shrinks when space runs low.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -205,8 +208,10 @@ the formatting step. Push the fix: it passes. The README's status badge reflects
   Phase 0, so this capability MUST be proven by automated tests with simulated writes.
 - **FR-007**: Cached data MUST never be shown for a different server than the one it came from.
   This includes after a profile's address changes or the server at an address is replaced.
-- **FR-008**: The cache MUST stay under a size limit, 512 MB per profile by default. It evicts
-  the least recently used entries first.
+- **FR-008**: The cache MUST stay under a size limit of 5% of the free space on the disk that holds
+  it, never below 64 MB and never above 10 GB, per profile. The limit MUST be re-checked when the
+  cache opens and as it grows, so a filling disk shrinks it. It evicts the least recently used
+  entries first.
 - **FR-009**: Deleting a server profile MUST delete its cached data.
 - **FR-010**: A damaged, unreadable, or incompatible cache MUST be discarded and rebuilt
   automatically, without an error dialog.
@@ -312,8 +317,10 @@ the formatting step. Push the fix: it passes. The README's status badge reflects
   ("show cached, then refresh"). There is no time-based expiry that hides cached data, because
   showing something instantly and correcting it within one refresh matches Principle VI better
   than waiting.
-- **Size limit**: 512 MB per profile is ample for data responses, and changing it isn't exposed
-  in the UI yet. It can become a viewer preference in Phase 3.
+- **Size limit**: a share of free disk space (5%, 64 MB–10 GB) adapts to the machine. Data
+  responses need a few MB (about 50–70 MB even for every scene's details in a 35,000-scene
+  library); the headroom is for Phase 1's thumbnails and covers, which reuse this cache. The
+  share isn't exposed in the UI yet; it can become a viewer preference in Phase 3.
 - **Harness scope**: measurements run on the developer's machine against their Stash server, like
   the mpv spike's measurement mode, which the harness absorbs. Shared CI machines have no GPU and
   noisy timing, so CI doesn't run the harness or gate on performance.

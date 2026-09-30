@@ -142,5 +142,10 @@ pub(crate) fn server_info(data: &ProbeData) -> Result<ServerInfo, ConnectFailure
         version_status,
         app_schema: i32::try_from(data.app_schema).unwrap_or(i32::MAX),
         counts: data.counts,
+        identity: crate::cache::identity::server_identity(
+            &data.final_base_url,
+            data.database_path.as_deref(),
+            data.config_path.as_deref(),
+        ),
     })
 }

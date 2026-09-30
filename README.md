@@ -1,5 +1,7 @@
 # Semantic Stash Viewer
 
+[![CI](https://github.com/turingcomplete790/Semantic-Stash-Viewer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/turingcomplete790/Semantic-Stash-Viewer/actions/workflows/ci.yml)
+
 A fast, native desktop client for [Stash](https://github.com/stashapp/stash), built in Rust with
 [Tauri](https://tauri.app/). Point it at your Stash server, add an API key if your server uses
 one, and browse and play your library the way Jellyfin desktop clients work with a Jellyfin
@@ -8,8 +10,10 @@ server.
 > **Status:** pre-alpha. Connecting to Stash servers works: saved server profiles, automatic
 > reconnection, and a connection-security indicator. Scenes play in mpv inside the app window,
 > with full playback controls. The app shell is in place: a Stash-style navigation bar, tabs,
-> a notification centre (connection alerts and live Stash jobs), and Settings. Browsing the
-> library comes next (see the [roadmap](ROADMAP.md)). The project is specified with
+> a notification centre (connection alerts and live Stash jobs), and Settings. Phase 0 (the
+> foundation) is complete: screens open instantly from a local cache and stay usable offline,
+> and every performance budget is measured by one command. Browsing the library comes next
+> (see the [roadmap](ROADMAP.md)). The project is specified with
 > [Spec Kit](https://github.com/github/spec-kit), and its governing rules live in the
 > [constitution](.specify/memory/constitution.md).
 
@@ -102,6 +106,26 @@ STASH_TEST_URL=http://localhost:9998 cargo test -p stash-core --test live_stash 
 # Regenerate ui/src/bindings.ts after changing a command or DTO (CI fails on drift)
 cargo run -p semantic-stash-viewer --bin export-bindings
 ```
+
+### Performance harness
+
+Measures every performance budget from the constitution (cold start, navigation, input,
+scrolling, playback open, seeking, and dropped frames) against one of your saved servers:
+
+```bash
+cargo run --bin perf-harness -- --profile "<server name>"   # add --quick for fewer repetitions
+```
+
+It builds the debug app, launches it several times (keep the window visible), and takes about
+2 minutes. It only reads from Stash. Reports go to
+`~/.local/share/semantic-stash-viewer/perf/<timestamp>.{md,json}`, each with the change since the
+previous run; anything more than 20% slower is flagged, and it exits non-zero if a budget fails.
+
+### Cache
+
+Screens open from a local cache in `~/.cache/semantic-stash-viewer/` (one folder per server).
+It's safe to delete at any time: the app just reads from the server again. Settings →
+Troubleshooting → Clear cache does the same from inside the app.
 
 ### Workflow
 

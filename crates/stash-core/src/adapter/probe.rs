@@ -29,6 +29,9 @@ pub struct ProbeData {
     /// `systemStatus.status` as a string (`OK`, `NEEDS_MIGRATION`, `SETUP`, …).
     pub status: String,
     pub counts: LibraryCounts,
+    /// `systemStatus.databasePath` / `configPath`, for the server identity (003 R2).
+    pub database_path: Option<String>,
+    pub config_path: Option<String>,
 }
 
 /// Probe one candidate base URL.
@@ -126,6 +129,8 @@ async fn parse_stash(
             galleries: count(data.stats.gallery_count),
             performers: count(data.stats.performer_count),
         },
+        database_path: data.system_status.database_path.clone(),
+        config_path: data.system_status.config_path.clone(),
     })
 }
 

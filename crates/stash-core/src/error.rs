@@ -50,6 +50,10 @@ pub enum AppError {
     #[error("couldn't open: {detail}")]
     OpenFailed { detail: String },
 
+    /// There's no connection to a server right now (not connected yet, or it's unreachable).
+    #[error("not connected to a server")]
+    NotConnected,
+
     /// The request was cancelled by the user.
     #[error("cancelled")]
     Cancelled,
