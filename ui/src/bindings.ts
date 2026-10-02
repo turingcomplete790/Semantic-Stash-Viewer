@@ -145,13 +145,23 @@ export const commands = {
 	cacheSize: () => __TAURI_INVOKE<number | null>("cache_size"),
 	/**  Clear the cache (FR-005). Returns the bytes freed; open views reload from the server. */
 	clearCache: () => typedError<number | null, AppError>(__TAURI_INVOKE("clear_cache")),
+	/**
+	 *  One page of scenes for a query at a page size (20…1000; default 50): the cached copy at once
+	 *  when there is one, refreshed quietly after 5 s (003). One request per page (constitution IV).
+	 */
+	scenesPage: (query: SceneQuery, page: number, pageSize: number) => typedError<Cached<ScenePage>, AppError>(__TAURI_INVOKE("scenes_page", { query, page, pageSize })),
+	/**  The sort menu, in the web UI's order. */
+	sceneSorts: () => __TAURI_INVOKE<SortOption[]>("scene_sorts"),
 	appInfo: () => __TAURI_INVOKE<AppInfo>("app_info"),
+	/**  Quit, once the UI has saved what it needed to after `app-closing`. */
+	appQuit: () => __TAURI_INVOKE<void>("app_quit"),
 	/**  Measurements for the decision record. Debug builds only. */
 	playerStats: () => typedError<PlayerStats, AppError>(__TAURI_INVOKE("player_stats")),
 };
 
 /** Events */
 export const events = {
+	appClosing: makeEvent<AppClosingEvent>("app-closing"),
 	connectionState: makeEvent<ConnectionStateEvent>("connection-state"),
 	notificationsChanged: makeEvent<NotificationsChangedEvent>("notifications-changed"),
 	playerState: makeEvent<PlayerStateEvent>("player-state"),
@@ -160,6 +170,12 @@ export const events = {
 };
 
 /* Types */
+/**
+ *  The window is closing: the UI writes anything it hasn't saved yet (tab state is saved half a
+ *  second after changes), then calls `app_quit`. The app quits anyway after a short wait.
+ */
+export type AppClosingEvent = null;
+
 /**
  *  Every fallible command returns this. Connection problems are wrapped as `Connect` so the UI
  *  can show the matching plain-language message; the rest are app-level problems.
@@ -376,6 +392,27 @@ export type ProfileSummary = {
 /**  Emitted after every profile create, update, delete, or reorder, with the full list. */
 export type ProfilesChangedEvent = ProfileSummary[];
 
+/**
+ *  One card in the Scenes grid or row in the list (005 data-model "SceneCard"). Text stays on
+ *  one line each for title and details (research R3).
+ */
+export type SceneCard = {
+	id: string,
+	/**  The scene title, or the primary file's base name when the title is empty. */
+	title: string,
+	/**  `YYYY-MM-DD`. */
+	date: string | null,
+	/**  The primary file's duration. */
+	durationSeconds: number | null,
+	/**  `width×height` of the primary file. */
+	resolution: string | null,
+	studio: string | null,
+	/**  `ssv-thumb://localhost/scene/<id>?v=<version>`: served by the core, never carrying a key. */
+	thumb: string | null,
+	/**  A generated animated preview exists (US5; previews are images, constitution Principle V). */
+	hasPreview: boolean,
+};
+
 /**  A labelled group of scenes (the spike's test set: 4K, WMV, …). */
 export type SceneGroup = {
 	label: string,
@@ -393,6 +430,34 @@ export type SceneListItem = {
 	videoCodec: string | null,
 	container: string | null,
 };
+
+/**  One page of cards with the total number of matching scenes. */
+export type ScenePage = {
+	count: number,
+	/**  1-based: the page actually returned (the last page when the request was past the end). */
+	page: number,
+	pageSize: number,
+	items: SceneCard[],
+};
+
+/**  What a Scenes tab is showing. Kept in the tab's view state (004) and used as the cache key. */
+export type SceneQuery = {
+	/**  Search text; empty means none. */
+	search?: string,
+	sort?: SceneSort,
+	direction?: SortDirection,
+	/**
+	 *  Required when `sort` is `random`; 32-bit because the bindings have no 64-bit integers
+	 *  (Stash accepts any u64).
+	 */
+	seed?: number | null,
+};
+
+/**
+ *  Every scene sort the Stash web UI offers (`ui/v2.5/src/models/list-filter/scenes.ts` plus the
+ *  media and common options), serialized as Stash's sort names.
+ */
+export type SceneSort = "title" | "path" | "rating" | "file_mod_time" | "tag_count" | "performer_count" | "random" | "organized" | "date" | "production_date" | "file_count" | "filesize" | "duration" | "framerate" | "resolution" | "bitrate" | "last_played_at" | "resume_time" | "play_duration" | "play_count" | "interactive" | "interactive_speed" | "perceptual_similarity" | "performer_age" | "studio" | "created_at" | "updated_at";
 
 /**  How secure the current connection is, shown in the connection indicator at all times. */
 export type SecurityState = 
@@ -423,6 +488,14 @@ export type SessionState = { kind: "idle" } | { kind: "connecting"; attemptUrl: 
 
 /**  Ordered: `Info < Warning < Error`. */
 export type Severity = "info" | "warning" | "error";
+
+export type SortDirection = "asc" | "desc";
+
+/**  A sort the user can pick, with the web UI's label. */
+export type SortOption = {
+	value: SceneSort,
+	label: string,
+};
 
 export type Tab = {
 	id: string,

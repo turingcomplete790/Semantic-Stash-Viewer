@@ -11,9 +11,10 @@ import { isTyping } from "../player/keyboard";
  * - single keys: `?`.
  *
  * Sequences and single keys are ignored while a text field has focus; chords still work.
- * `scene` bindings only fire while a scene view is active.
+ * `scene` bindings only fire while a scene view is active. `scenes-grid` entries are listings
+ * only: the scene grid handles its own keys while it has focus (005 research R8).
  */
-export type Scope = "shell" | "scene";
+export type Scope = "shell" | "scene" | "scenes-grid";
 
 export type Binding = {
   id: string;
@@ -31,7 +32,7 @@ export type RawHandler = (event: KeyboardEvent) => boolean;
 const SEQUENCE_TIMEOUT_MS = 1000;
 
 const [registered, setRegistered] = createSignal<Binding[]>([]);
-const rawHandlers: Record<Scope, RawHandler[]> = { shell: [], scene: [] };
+const rawHandlers: Record<Scope, RawHandler[]> = { shell: [], scene: [], "scenes-grid": [] };
 let sceneActive: () => boolean = () => false;
 let pendingPrefix: { key: string; at: number } | null = null;
 
@@ -59,7 +60,7 @@ export function setSceneActive(check: () => boolean): void {
 }
 
 function active(scope: Scope): boolean {
-  return scope === "shell" || sceneActive();
+  return scope === "shell" || (scope === "scene" && sceneActive());
 }
 
 function keyName(event: KeyboardEvent): string {
@@ -137,6 +138,7 @@ export function resetKeymap(): void {
   setRegistered([]);
   rawHandlers.shell = [];
   rawHandlers.scene = [];
+  rawHandlers["scenes-grid"] = [];
   sceneActive = () => false;
   pendingPrefix = null;
 }

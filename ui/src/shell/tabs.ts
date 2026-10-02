@@ -105,9 +105,16 @@ function saveSoon(): void {
   saveTimer = setTimeout(saveNow, VIEW_STATE_SAVE_DELAY_MS);
 }
 
-/** Write any pending view-state save right away (before switching servers or quitting). */
+/** Write any pending view-state save right away (before switching servers). */
 export function flushSave(): void {
   if (saveTimer !== undefined) saveNow();
+}
+
+/** Write the tabs now and wait until they're saved (the window is closing). */
+export async function saveBeforeQuit(): Promise<void> {
+  clearTimeout(saveTimer);
+  saveTimer = undefined;
+  if (profileId && !savingSuspended) await commands.shellSaveTabs(profileId, toTabSet());
 }
 
 /** Switch to a profile's tabs: save the current profile's first, then load (FR-014). */
@@ -191,11 +198,35 @@ export function navigateIn(tabId: string, route: Route): void {
   if (!tab || sameView(routeOf(tab), route)) return;
   restoredIds.delete(tabId);
   updateTab(tabId, (t) => {
-    let history = [...t.history.slice(0, t.index + 1), { route, viewState: null }];
+    // Returning to a view this tab has shown before carries its state forward (page, mode,
+    // scroll…), so leaving and coming back never resets it (005 research R13; constitution IX).
+    const earlier = t.history
+      .slice(0, t.index + 1)
+      .reverse()
+      .find((e) => sameView(e.route, route));
+    const viewState = earlier?.viewState ? { ...earlier.viewState } : null;
+    let history = [...t.history.slice(0, t.index + 1), { route, viewState }];
     if (history.length > MAX_HISTORY) history = history.slice(history.length - MAX_HISTORY);
     return { ...t, history, index: history.length - 1 };
   });
   saveNow();
+}
+
+/**
+ * Leave the current view for `fallback`: go back when the previous entry is that view (the usual
+ * case, e.g. Scenes → scene → Done), so its state is exactly as left; otherwise navigate to it
+ * (005 research R13).
+ */
+export function leave(tabId: string, fallback: Route): void {
+  const t = tabById(tabId);
+  if (!t) return;
+  const previous = t.index > 0 ? t.history[t.index - 1] : undefined;
+  if (previous && sameView(previous.route, fallback)) {
+    updateTab(tabId, (x) => ({ ...x, index: x.index - 1 }));
+    saveNow();
+    return;
+  }
+  navigateIn(tabId, fallback);
 }
 
 export function back(): void {

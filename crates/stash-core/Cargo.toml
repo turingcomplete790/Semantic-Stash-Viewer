@@ -40,6 +40,13 @@ rustix = { version = "1", features = ["fs"] }
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
 rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "std"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+# Scene thumbnails (005 research R5): libjpeg-turbo DCT-scaled decode and encode, linked from the
+# system library (WebKitGTK and ffmpeg already depend on it; CI installs libturbojpeg0-dev).
+turbojpeg = { version = "1", default-features = false, features = ["pkg-config"] }
+# SIMD resizing to the thumbnail width.
+fast_image_resize = "5"
+# Non-JPEG covers (uploaded or scraped PNG/WebP) only.
+image = { version = "0.25", default-features = false, features = ["png", "webp"] }
 
 [dev-dependencies]
 wiremock = "0.6"

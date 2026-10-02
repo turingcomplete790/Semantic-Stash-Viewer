@@ -140,6 +140,7 @@ fn run(options: &Options) -> Result<Report, String> {
     measurements.push(cold_start("cold-start-warm", Some(2000.0), &warm));
     measurements.push(cold_start("cold-start-cleared", None, &cleared));
     measurements.extend(bench_measurements(&bench));
+    measurements.extend(scenes_measurements(&bench));
     measurements.extend(playback_measurements(&playback));
 
     let dir = perf_dir();
@@ -391,6 +392,7 @@ fn from_bench(
 fn bench_measurements(launch: &Launch) -> Vec<Measurement> {
     let scroll = bench_line(launch, "scroll-frame-time");
     let missed = scroll.and_then(|l| number(l, "missedPercent"));
+    let fps = scroll.and_then(|l| number(l, "fps"));
     let scroll_invalid = scroll
         .and_then(|l| l.get("invalid").and_then(Value::as_str).map(str::to_owned))
         .or_else(|| launch.invalid())
@@ -416,7 +418,7 @@ fn bench_measurements(launch: &Launch) -> Vec<Measurement> {
             Unit::Percent,
             Some(1.0),
             &missed.into_iter().collect::<Vec<_>>(),
-            scroll_invalid,
+            scroll_invalid.clone(),
         ),
         from_bench(
             launch,
@@ -424,6 +426,14 @@ fn bench_measurements(launch: &Launch) -> Vec<Measurement> {
             "scroll-frame-time",
             None,
             Check::P95,
+        ),
+        // Frames drawn per second while scrolling (the display's rate when nothing is missed).
+        Measurement::from_samples(
+            "scroll-fps",
+            Unit::Fps,
+            None,
+            &fps.into_iter().collect::<Vec<_>>(),
+            scroll_invalid.clone(),
         ),
         from_bench(
             launch,
@@ -447,6 +457,43 @@ fn bench_measurements(launch: &Launch) -> Vec<Measurement> {
             Check::Median,
         ),
     ]
+}
+
+/// The paged Scenes view (005 R10): page change (< 150 ms at p95, 50 per page), page jump
+/// (< 1 s at p95), and scrolling a 1000-card page (< 1% missed frames in each mode).
+fn scenes_measurements(launch: &Launch) -> Vec<Measurement> {
+    let mut out = vec![
+        from_bench(
+            launch,
+            "scenes-page-change",
+            "scenes-page-change",
+            Some(150.0),
+            Check::P95,
+        ),
+        from_bench(
+            launch,
+            "scenes-page-jump",
+            "scenes-page-jump",
+            Some(1000.0),
+            Check::P95,
+        ),
+    ];
+    for mode in ["grid", "list"] {
+        let line = bench_line(launch, &format!("scenes-scroll-1000-{mode}"));
+        let invalid = line
+            .and_then(|l| l.get("invalid").and_then(Value::as_str).map(str::to_owned))
+            .or_else(|| launch.invalid())
+            .or_else(|| line.is_none().then(|| "not measured".to_owned()));
+        let missed = line.and_then(|l| number(l, "missedPercent"));
+        out.push(Measurement::from_samples(
+            &format!("scenes-scroll-1000-{mode}-missed-frames"),
+            Unit::Percent,
+            Some(1.0),
+            &missed.into_iter().collect::<Vec<_>>(),
+            invalid,
+        ));
+    }
+    out
 }
 
 fn playback_measurements(launch: &Launch) -> Vec<Measurement> {

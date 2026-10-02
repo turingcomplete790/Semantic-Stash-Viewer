@@ -1,131 +1,253 @@
-import { createResource, createSignal, For, Show } from "solid-js";
-import { commands } from "../bindings";
-import type { SceneGroup, SceneListItem } from "../bindings";
-import { formatDuration } from "../player/format";
-import { navigate } from "../shell/tabs";
-import { onViewDataChanged } from "../state/viewData";
-import "../components/ConnectionForm.css";
-import "../components/ProfileManager.css";
-import "../player/player.css";
+import {
+  batch,
+  createEffect,
+  createSignal,
+  Match,
+  onCleanup,
+  Show,
+  Switch,
+  untrack,
+} from "solid-js";
+import type { SceneQuery } from "../bindings";
+import { DEFAULT_PAGE_SIZE, PAGE_SIZES } from "../scenes/PageControls";
+import PageControls from "../scenes/PageControls";
+import { createScenePage } from "../scenes/pages";
+import SceneGrid from "../scenes/SceneGrid";
+import type { FocusRequest, GridMode } from "../scenes/SceneGrid";
+import type { PageDirection } from "../scenes/keyboard";
+import SortMenu from "../scenes/SortMenu";
+import { registerRawHandler } from "../shell/keymap";
+import { navigate, setViewState } from "../shell/tabs";
+import { useTab, useViewState } from "../shell/viewState";
+import "../scenes/scenes.css";
+
+const DEFAULT_QUERY: SceneQuery = { search: "", sort: "date", direction: "desc", seed: null };
 
 /**
- * Scenes: the spike's scene picker (recently added, open by ID, and the test set). Phase 1
- * replaces it with the real scene grid. Choosing a scene opens it in the Scene view.
+ * Scenes: the whole library, a page at a time (005 US1; constitution IV). Each history entry keeps
+ * its query, page, page size, display mode, and scroll position (research R6), and the shell
+ * returns to that entry when the user comes back (R13), so leaving and returning never resets it.
  */
 export default function ScenesView() {
-  // Shown from the cache when there is one; a refresh that changes it updates in place (003).
-  const [recent, { refetch: reloadRecent }] = createResource(async () => {
-    const res = await commands.listRecentScenes();
-    if (res.status === "error") throw res.error;
-    return res.data.data;
-  });
-  onViewDataChanged("scenes:recent", () => void reloadRecent());
-  // Spike test set: random 4K / WMV / VP9 / AV1 / MPEG-4 / FLV scenes (002 research R7). It
-  // stays the same until Shuffle.
-  const [testSets, { refetch: reloadTestSets }] = createResource<SceneGroup[], string>(
-    async (_, info) => {
-      const res = await commands.listTestScenes(info.refetching === "shuffle");
-      if (res.status === "error") throw res.error;
-      return res.data.data;
-    },
-  );
-  onViewDataChanged("scenes:test-set", () => void reloadTestSets());
-  const [sceneId, setSceneId] = createSignal("");
+  const [savedQuery] = useViewState<SceneQuery>("query", DEFAULT_QUERY);
+  const [savedPage] = useViewState<number>("page", 1);
+  const [savedSize] = useViewState<number>("pageSize", DEFAULT_PAGE_SIZE);
+  const [savedMode] = useViewState<GridMode>("mode", "grid");
+  const [savedScroll, saveScroll] = useViewState<number>("scroll", 0);
 
-  function open(id: string, title = "", newTab = false) {
-    const trimmed = id.trim();
-    if (trimmed) navigate({ kind: "scene", sceneId: trimmed, title }, { newTab });
+  // Read once on mount; afterwards local signals drive the view and write back on change.
+  const [query, setQuery] = createSignal<SceneQuery>({ ...DEFAULT_QUERY, ...savedQuery() });
+  const [page, setPage] = createSignal(Math.max(1, savedPage()));
+  const [pageSize, setPageSize] = createSignal(
+    (PAGE_SIZES as readonly number[]).includes(savedSize()) ? savedSize() : DEFAULT_PAGE_SIZE,
+  );
+  const [mode, setMode] = createSignal<GridMode>(savedMode());
+  const [focus, setFocus] = createSignal<FocusRequest | undefined>();
+  let pendingScroll: number | null = savedScroll() || null;
+  let scroller!: HTMLDivElement;
+
+  const { tabId } = useTab();
+
+  /**
+   * Record the view's state in this tab's history entry. Only from event handlers and effects,
+   * never while rendering: a write to the tab store during rendering makes the tab panes rebuild
+   * themselves inside their own rebuild (on a restart, recursively until the stack overflows).
+   */
+  function persist() {
+    if (!tabId) return;
+    setViewState(tabId, {
+      query: query(),
+      page: page(),
+      pageSize: pageSize(),
+      mode: mode(),
+    });
   }
 
+  const scenes = createScenePage(query, page, pageSize);
+  const pages = () => Math.max(1, Math.ceil((scenes.count() ?? 0) / pageSize()));
+
+  // Restore the scroll position once the restored page has rendered.
+  createEffect(() => {
+    if (scenes.state() !== "ready" || pendingScroll === null) return;
+    const top = pendingScroll;
+    pendingScroll = null;
+    queueMicrotask(() => {
+      scroller.scrollTop = top;
+    });
+  });
+
+  // A page past the end came back as the last page: show that number. Only for the answer to the
+  // page currently asked for (older answers may still be on screen while a new page loads).
+  createEffect(() => {
+    if (scenes.state() !== "ready" || scenes.requested() !== page()) return;
+    if (scenes.shown() !== page()) {
+      setPage(scenes.shown());
+      persist();
+    }
+  });
+
+  // Save the scroll position, at most once per frame.
+  let scrollFrame: number | undefined;
+  function onScroll() {
+    if (scrollFrame !== undefined) return;
+    const schedule = globalThis.requestAnimationFrame ?? ((f: () => void) => setTimeout(f, 16));
+    scrollFrame = schedule(() => {
+      scrollFrame = undefined;
+      saveScroll(scroller.scrollTop);
+    }) as number;
+  }
+  onCleanup(() => {
+    if (scrollFrame !== undefined) globalThis.cancelAnimationFrame?.(scrollFrame);
+  });
+
+  function toTop() {
+    pendingScroll = null;
+    scroller.scrollTop = 0;
+    saveScroll(0);
+  }
+
+  function goTo(next: number, focusWhich?: number | "last") {
+    const clamped = Math.min(Math.max(1, next), pages());
+    if (clamped === page()) return;
+    setPage(clamped);
+    persist();
+    toTop();
+    if (focusWhich !== undefined) requestFocus(focusWhich);
+  }
+
+  function step(direction: PageDirection) {
+    if (direction === "next") goTo(page() + 1, 0);
+    else goTo(page() - 1, "last");
+  }
+
+  function changeQuery(next: SceneQuery) {
+    // One update, so only the new query's page 1 is requested.
+    batch(() => {
+      setQuery(next);
+      setPage(1);
+    });
+    persist();
+    toTop();
+  }
+
+  /** The first scene in view, as a position in the whole result set. */
+  function firstVisibleIndex(): number {
+    const top = scroller.scrollTop;
+    const cards = scroller.querySelectorAll<HTMLElement>(".scene-card[data-index]");
+    let local = 0;
+    for (const card of cards) {
+      if (card.offsetTop + card.offsetHeight > top) {
+        local = Number(card.dataset.index);
+        break;
+      }
+    }
+    return (scenes.shown() - 1) * pageSize() + local;
+  }
+
+  function changePageSize(size: number) {
+    const target = Math.floor(firstVisibleIndex() / size) + 1;
+    batch(() => {
+      setPageSize(size);
+      setPage(target);
+    });
+    persist();
+    toTop();
+  }
+
+  function requestFocus(which: number | "last") {
+    setFocus({ which, seq: (focus()?.seq ?? 0) + 1 });
+  }
+
+  // The page keys work whenever this Scenes tab is showing, not only while a card has focus (the
+  // grid handles them itself when one does). Nothing fires while typing in a field: the keymap
+  // skips its handlers then.
+  const tab = useTab();
+  onCleanup(
+    registerRawHandler("shell", (e) =>
+      untrack(() => {
+        if (!tab.isActive() || e.defaultPrevented) return false;
+        switch (e.key) {
+          case "]":
+            step("next");
+            break;
+          case "[":
+            step("previous");
+            break;
+          case "Home":
+            requestFocus(0);
+            break;
+          case "End":
+            requestFocus("last");
+            break;
+          case "ArrowUp":
+          case "ArrowDown":
+          case "ArrowLeft":
+          case "ArrowRight":
+            requestFocus(0);
+            break;
+          default:
+            return false;
+        }
+        e.preventDefault();
+        return true;
+      }),
+    ),
+  );
+
+  function changeMode(next: GridMode) {
+    setMode(next);
+    persist();
+  }
+
+  const controls = () => (
+    <PageControls
+      page={page()}
+      pageSize={pageSize()}
+      count={scenes.count() ?? 0}
+      onPage={(p) => goTo(p)}
+      onPageSize={changePageSize}
+    />
+  );
+
   return (
-    <div class="view-page">
-      <section class="connect-card player-picker" aria-labelledby="scenes-title">
-        <h1 id="scenes-title">Scenes</h1>
-
-        <form
-          class="player-id-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            open(sceneId());
-          }}
-        >
-          <div class="field">
-            <label for="player-scene-id">Scene ID</label>
-            <input
-              id="player-scene-id"
-              type="text"
-              inputmode="numeric"
-              value={sceneId()}
-              onInput={(e) => setSceneId(e.currentTarget.value)}
-            />
-          </div>
-          <button type="submit" class="primary" disabled={!sceneId().trim()}>
-            Play
+    <div class="scenes-view">
+      <div class="scenes-toolbar">
+        <SortMenu query={query()} onChange={changeQuery} />
+        <div class="scenes-mode" role="group" aria-label="Display">
+          <button type="button" aria-pressed={mode() === "grid"} onClick={() => changeMode("grid")}>
+            Grid
           </button>
-        </form>
-
-        <h2 class="player-subtitle">Recently added</h2>
-        <Show when={!recent.error} fallback={<p class="lede">Couldn't load recent scenes.</p>}>
-          <Show when={recent.latest} fallback={<p class="lede">Loading…</p>}>
-            {(items) => <SceneList scenes={items()} onPlay={open} />}
-          </Show>
-        </Show>
-
-        <div class="player-subtitle-row">
-          <h2 class="player-subtitle">Test scenes</h2>
-          <button type="button" onClick={() => void reloadTestSets("shuffle")}>
-            Shuffle
+          <button type="button" aria-pressed={mode() === "list"} onClick={() => changeMode("list")}>
+            List
           </button>
         </div>
-        <p class="lede">
-          Random picks of hard-to-play formats: 4K, WMV, VP9, AV1, and older codecs.
-        </p>
-        <Show when={!testSets.error} fallback={<p class="lede">Couldn't load test scenes.</p>}>
-          <Show when={testSets.latest} fallback={<p class="lede">Loading…</p>}>
-            {(groups) => (
-              <For each={groups()}>
-                {(group) => (
-                  <section class="player-group" aria-label={group.label}>
-                    <h3 class="player-group-title">{group.label}</h3>
-                    <SceneList scenes={group.scenes} onPlay={open} />
-                  </section>
-                )}
-              </For>
-            )}
-          </Show>
-        </Show>
-      </section>
+        <span class="spacer" />
+        <Show when={(scenes.count() ?? 0) > 0}>{controls()}</Show>
+      </div>
+      <div ref={scroller} class="scenes-scroller" onScroll={onScroll}>
+        <Switch>
+          <Match when={scenes.state() === "ready" && scenes.count() === 0}>
+            <p class="scenes-empty">No scenes in this library yet</p>
+          </Match>
+          <Match when={true}>
+            <SceneGrid
+              cards={scenes.cards()}
+              state={scenes.state()}
+              placeholders={pageSize()}
+              mode={mode()}
+              focus={focus}
+              onOpen={(card, newTab) =>
+                navigate({ kind: "scene", sceneId: card.id, title: card.title }, { newTab })
+              }
+              onEdge={step}
+              onPageKey={step}
+            />
+            <Show when={(scenes.count() ?? 0) > 0}>
+              <div class="scenes-bottom">{controls()}</div>
+            </Show>
+          </Match>
+        </Switch>
+      </div>
     </div>
-  );
-}
-
-function SceneList(props: {
-  scenes: SceneListItem[];
-  onPlay: (id: string, title: string, newTab: boolean) => void;
-}) {
-  return (
-    <ul class="player-list">
-      <For each={props.scenes}>
-        {(scene) => (
-          <li>
-            <button
-              type="button"
-              class="player-row"
-              aria-label={`Play ${scene.title}`}
-              onClick={(e) => props.onPlay(scene.id, scene.title, e.ctrlKey || e.metaKey)}
-              onAuxClick={(e) => {
-                if (e.button === 1) props.onPlay(scene.id, scene.title, true);
-              }}
-            >
-              <span class="player-row-title">{scene.title}</span>
-              <span class="player-row-meta">
-                {[scene.resolution, scene.videoCodec, scene.container].filter(Boolean).join(" · ")}
-              </span>
-              <span class="player-row-duration">{formatDuration(scene.durationSeconds ?? 0)}</span>
-            </button>
-          </li>
-        )}
-      </For>
-    </ul>
   );
 }

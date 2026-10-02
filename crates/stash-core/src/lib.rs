@@ -11,5 +11,6 @@ pub mod jobs;
 pub mod profiles;
 pub mod scenes;
 pub mod shell;
+pub mod thumbs;
 
 pub use error::AppError;

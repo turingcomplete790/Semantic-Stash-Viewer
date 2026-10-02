@@ -6,6 +6,9 @@
 //! profile's base URL, never taken from Stash's `paths.stream` (which embeds the API key when
 //! authentication is on).
 
+pub mod paging;
+pub mod query;
+
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -24,6 +27,59 @@ pub struct SceneListItem {
     pub resolution: Option<String>,
     pub video_codec: Option<String>,
     pub container: Option<String>,
+}
+
+/// One card in the Scenes grid or row in the list (005 data-model "SceneCard"). Text stays on
+/// one line each for title and details (research R3).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct SceneCard {
+    pub id: String,
+    /// The scene title, or the primary file's base name when the title is empty.
+    pub title: String,
+    /// `YYYY-MM-DD`.
+    pub date: Option<String>,
+    /// The primary file's duration.
+    pub duration_seconds: Option<f64>,
+    /// `width×height` of the primary file.
+    pub resolution: Option<String>,
+    pub studio: Option<String>,
+    /// `ssv-thumb://localhost/scene/<id>?v=<version>`: served by the core, never carrying a key.
+    pub thumb: Option<String>,
+    /// A generated animated preview exists (US5; previews are images, constitution Principle V).
+    pub has_preview: bool,
+}
+
+/// One page of cards with the total number of matching scenes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct ScenePage {
+    pub count: u32,
+    /// 1-based: the page actually returned (the last page when the request was past the end).
+    pub page: u32,
+    pub page_size: u32,
+    pub items: Vec<SceneCard>,
+}
+
+/// A thumbnail URL for the `ssv-thumb://` scheme (005 contract "URI scheme").
+pub fn thumb_url(kind: &str, id: &str, version: &str) -> String {
+    format!("ssv-thumb://localhost/{kind}/{id}?v={version}")
+}
+
+/// The `t` parameter of a Stash media path (it changes when the image does), or `"0"`. Only `t`
+/// is kept, so nothing else from the URL (such as an `apikey`) can leak into ours.
+pub fn screenshot_version(path: &str) -> String {
+    Url::parse(path)
+        .ok()
+        .and_then(|u| {
+            u.query_pairs()
+                .find(|(k, _)| k == "t")
+                .map(|(_, v)| v.into_owned())
+        })
+        .filter(|v| !v.is_empty() && v.chars().all(|c| c.is_ascii_alphanumeric()))
+        .unwrap_or_else(|| "0".to_owned())
 }
 
 /// A labelled group of scenes (the spike's test set: 4K, WMV, …).

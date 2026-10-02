@@ -4,8 +4,11 @@ use graphql_client::GraphQLQuery;
 
 use super::{endpoint, StashClient};
 use crate::error::AppError;
+use crate::scenes::paging::{last_page, validate_page_size};
+use crate::scenes::query::{SceneQuery, SortDirection};
 use crate::scenes::{
-    self, direct_stream_url, display_title, resolution, SceneFile, SceneGroup, SceneListItem,
+    self, direct_stream_url, display_title, resolution, screenshot_version, thumb_url, SceneCard,
+    SceneFile, SceneGroup, SceneListItem, ScenePage,
 };
 
 /// Stash's custom `Int64` scalar (file sizes).
@@ -34,6 +37,99 @@ pub struct PlayableScene;
     response_derives = "Debug"
 )]
 pub struct TestScenes;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "graphql/schema.json",
+    query_path = "graphql/find_scenes_page.graphql",
+    response_derives = "Debug"
+)]
+pub struct FindScenesPage;
+
+/// One page of scene cards (005 research R1): `page_size` cards (one of `PAGE_SIZES`) in the
+/// query's search and sort, with the total count. One request per page, card fields only
+/// (constitution Principle IV). A page past the end (the library shrank, or the size grew) is
+/// answered with the last page that exists.
+pub async fn find_scenes_page(
+    client: &StashClient,
+    query: &SceneQuery,
+    page: u32,
+    page_size: u32,
+) -> Result<ScenePage, AppError> {
+    validate_page_size(page_size)?;
+    let page = page.max(1);
+    let (count, scenes) = fetch_scenes_page(client, query, page, page_size).await?;
+    if scenes.is_empty() && count > 0 && page > last_page(count, page_size) {
+        let last = last_page(count, page_size);
+        let (count, scenes) = fetch_scenes_page(client, query, last, page_size).await?;
+        return Ok(scene_page(count, last, page_size, scenes));
+    }
+    Ok(scene_page(count, page, page_size, scenes))
+}
+
+type PageScene = find_scenes_page::FindScenesPageFindScenesScenes;
+
+async fn fetch_scenes_page(
+    client: &StashClient,
+    query: &SceneQuery,
+    page: u32,
+    page_size: u32,
+) -> Result<(u32, Vec<PageScene>), AppError> {
+    use find_scenes_page::{FindFilterType, SortDirectionEnum};
+    let q = query.normalized();
+    let filter = FindFilterType {
+        q: (!q.search.is_empty()).then(|| q.search.clone()),
+        page: Some(i64::from(page)),
+        per_page: Some(i64::from(page_size)),
+        sort: Some(q.stash_sort()?),
+        direction: Some(match q.direction {
+            SortDirection::Asc => SortDirectionEnum::ASC,
+            SortDirection::Desc => SortDirectionEnum::DESC,
+        }),
+    };
+    let body = FindScenesPage::build_query(find_scenes_page::Variables {
+        filter: Some(filter),
+    });
+    let data: find_scenes_page::ResponseData = client.graphql(&body).await?;
+    let found = data.find_scenes;
+    Ok((u32::try_from(found.count).unwrap_or(u32::MAX), found.scenes))
+}
+
+fn scene_page(count: u32, page: u32, page_size: u32, scenes: Vec<PageScene>) -> ScenePage {
+    ScenePage {
+        count,
+        page,
+        page_size,
+        items: scenes
+            .into_iter()
+            .map(|s| {
+                let file = s.files.into_iter().next();
+                SceneCard {
+                    title: display_title(
+                        s.title.as_deref(),
+                        file.as_ref().map(|f| f.basename.as_str()),
+                    ),
+                    date: s.date.filter(|d| !d.is_empty()),
+                    duration_seconds: file.as_ref().map(|f| f.duration),
+                    resolution: file
+                        .as_ref()
+                        .and_then(|f| resolution(Some(f.width), Some(f.height))),
+                    studio: s.studio.map(|st| st.name),
+                    thumb: Some(thumb_url(
+                        "scene",
+                        &s.id,
+                        &s.paths
+                            .screenshot
+                            .as_deref()
+                            .map_or_else(|| "0".to_owned(), screenshot_version),
+                    )),
+                    has_preview: false,
+                    id: s.id,
+                }
+            })
+            .collect(),
+    }
+}
 
 /// Build a list row from a scene's id, title, and primary file fields.
 fn list_item(
@@ -168,6 +264,8 @@ pub async fn playable_scene(
 /// Largest screenshot passed to the UI; bigger ones are skipped (they cross the IPC bridge as
 /// base64).
 const MAX_SCREENSHOT_BYTES: usize = 2 * 1024 * 1024;
+/// Thumbnail sources are resized right away, so large uploaded covers are fine (005 R5).
+const MAX_THUMB_SOURCE_BYTES: usize = 16 * 1024 * 1024;
 
 /// The scene's screenshot as a `data:` URL, or `None` if Stash has none (or it's too big).
 ///
@@ -175,6 +273,28 @@ const MAX_SCREENSHOT_BYTES: usize = 2 * 1024 * 1024;
 /// (constitution Principle III) and an `<img>` can't send the `ApiKey` header. Read-only.
 pub async fn scene_screenshot(client: &StashClient, id: &str) -> Result<Option<String>, AppError> {
     use base64::Engine as _;
+    let Some((bytes, content_type)) = screenshot_bytes(client, id, MAX_SCREENSHOT_BYTES).await?
+    else {
+        return Ok(None);
+    };
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(Some(format!("data:{content_type};base64,{encoded}")))
+}
+
+/// A scene's screenshot (or uploaded cover) as bytes and content type, for thumbnails (005
+/// research R5). The key goes in a header; `None` when the scene has none.
+pub async fn scene_screenshot_bytes(
+    client: &StashClient,
+    id: &str,
+) -> Result<Option<(Vec<u8>, String)>, AppError> {
+    screenshot_bytes(client, id, MAX_THUMB_SOURCE_BYTES).await
+}
+
+async fn screenshot_bytes(
+    client: &StashClient,
+    id: &str,
+    max_bytes: usize,
+) -> Result<Option<(Vec<u8>, String)>, AppError> {
     let mut url = endpoint(&endpoint(client.base_url(), "scene"), id);
     if let Ok(mut segments) = url.path_segments_mut() {
         segments.push("screenshot");
@@ -196,16 +316,15 @@ pub async fn scene_screenshot(client: &StashClient, id: &str) -> Result<Option<S
         .to_owned();
     if response
         .content_length()
-        .is_some_and(|len| len > MAX_SCREENSHOT_BYTES as u64)
+        .is_some_and(|len| len > max_bytes as u64)
     {
         return Ok(None);
     }
     let bytes = response.bytes().await.map_err(|e| AppError::Internal {
         message: format!("couldn't read the screenshot: {e}"),
     })?;
-    if bytes.len() > MAX_SCREENSHOT_BYTES {
+    if bytes.len() > max_bytes {
         return Ok(None);
     }
-    let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
-    Ok(Some(format!("data:{content_type};base64,{encoded}")))
+    Ok(Some((bytes.to_vec(), content_type)))
 }

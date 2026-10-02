@@ -19,6 +19,7 @@ export function listedBindings(): { scope: string; items: Binding[] }[] {
   return [
     { scope: "App", items: listed.filter((b) => b.scope === "shell") },
     { scope: "Playing a scene", items: listed.filter((b) => b.scope === "scene") },
+    { scope: "Scene lists", items: listed.filter((b) => b.scope === "scenes-grid") },
   ].filter((g) => g.items.length > 0);
 }
 

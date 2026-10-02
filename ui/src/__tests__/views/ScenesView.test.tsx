@@ -1,184 +1,302 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PlayerSnapshot, SceneListItem } from "../../bindings";
+import type { SceneCard, SceneQuery } from "../../bindings";
 
 const mocks = vi.hoisted(() => {
-  let handler: ((e: { payload: unknown }) => void) | undefined;
   const viewData = new Set<(e: { payload: unknown }) => void>();
+  let connectionHandler: ((e: { payload: unknown }) => void) | undefined;
+  const listen = () => vi.fn(() => Promise.resolve(() => {}));
   return {
-    emit: (payload: unknown) => handler?.({ payload }),
     changed: (key: string) => viewData.forEach((h) => h({ payload: { profileId: "p1", key } })),
-    commands: {
-      playerSnapshot: vi.fn(),
-      listRecentScenes: vi.fn(),
-      listTestScenes: vi.fn(),
-      playerOpen: vi.fn(),
-      playerClose: vi.fn(),
-    },
+    connection: (payload: unknown) => connectionHandler?.({ payload }),
+    commands: { scenesPage: vi.fn(), sceneSorts: vi.fn(), getConnectionSnapshot: vi.fn() },
     events: {
-      playerState: {
-        listen: vi.fn((h: (e: { payload: unknown }) => void) => {
-          handler = h;
-          return Promise.resolve(() => {});
-        }),
-      },
       viewDataChanged: {
         listen: vi.fn((h: (e: { payload: unknown }) => void) => {
           viewData.add(h);
           return Promise.resolve(() => viewData.delete(h));
         }),
       },
+      connectionState: {
+        listen: vi.fn((h: (e: { payload: unknown }) => void) => {
+          connectionHandler = h;
+          return Promise.resolve(() => {});
+        }),
+      },
+      profilesChanged: { listen: listen() },
     },
   };
 });
 vi.mock("../../bindings", () => ({ commands: mocks.commands, events: mocks.events }));
 
-import { initPlayer } from "../../player/state";
-import { currentRoute, resetTabs } from "../../shell/tabs";
+import { initConnection } from "../../state/connection";
+import { dispatch, resetKeymap } from "../../shell/keymap";
+import { resetTabs, selectedId, setViewState, tabs, viewStateOf } from "../../shell/tabs";
+import { TabContext } from "../../shell/viewState";
 import ScenesView from "../../views/ScenesView";
 
-const idle: PlayerSnapshot = {
-  sceneId: null,
-  title: null,
-  state: "idle",
-  positionSeconds: 0,
-  durationSeconds: null,
-  paused: false,
-  speed: 1,
-  volume: 100,
-  muted: false,
-  fullscreen: false,
-  hwdec: null,
-  tracks: [],
-  error: null,
-};
+let total = 36_350;
+let failing = false;
+const warmed: string[] = [];
 
-/** A command result as the cache serves it. */
-function cached<T>(data: T, fromCache = false) {
-  return { status: "ok", data: { data, fromCache, fetchedAt: "2026-09-29T12:00:00Z" } };
-}
-
-function scenes(n: number): SceneListItem[] {
-  return Array.from({ length: n }, (_, i) => ({
+function card(i: number): SceneCard {
+  return {
     id: String(i + 1),
     title: `Scene ${i + 1}`,
-    durationSeconds: 3725 + i,
+    date: "2024-05-17",
+    durationSeconds: 3725,
     resolution: "1920×1080",
-    videoCodec: "h264",
-    container: "mp4",
-  }));
+    studio: "Studio One",
+    thumb: `ssv-thumb://localhost/scene/${i + 1}?v=1`,
+    hasPreview: false,
+  };
 }
 
-beforeEach(async () => {
-  vi.clearAllMocks();
-  resetTabs();
-  mocks.commands.playerSnapshot.mockResolvedValue({ status: "ok", data: idle });
-  mocks.commands.listRecentScenes.mockResolvedValue(cached(scenes(20), true));
-  mocks.commands.listTestScenes.mockResolvedValue(
-    cached([
-      {
-        label: "4K HEVC",
-        scenes: [
-          {
-            id: "401",
-            title: "Big file",
-            durationSeconds: 600,
-            resolution: "3840×2160",
-            videoCodec: "hevc",
-            container: "mp4",
-          },
-        ],
-      },
-      {
-        label: "WMV above 720p",
-        scenes: [
-          {
-            id: "501",
-            title: "Old file",
-            durationSeconds: 60,
-            resolution: "1920×1080",
-            videoCodec: "wmv3",
-            container: "wmv",
-          },
-        ],
-      },
-    ]),
+function answer(_query: SceneQuery, page: number, pageSize: number) {
+  if (failing) return Promise.resolve({ status: "error", error: { kind: "notConnected" } });
+  const last = Math.max(1, Math.ceil(total / pageSize));
+  const p = Math.min(page, last);
+  const start = (p - 1) * pageSize;
+  const items = Array.from({ length: Math.max(0, Math.min(pageSize, total - start)) }, (_, k) =>
+    card(start + k),
   );
-  mocks.commands.playerOpen.mockResolvedValue({
+  return Promise.resolve({
     status: "ok",
-    data: { ...idle, state: "loading" },
+    data: { data: { count: total, page: p, pageSize, items }, fromCache: false, fetchedAt: "" },
   });
-  mocks.commands.playerClose.mockResolvedValue({ status: "ok", data: null });
-  await initPlayer();
-  mocks.emit(idle);
+}
+
+const calls = () =>
+  mocks.commands.scenesPage.mock.calls.map((c) => ({
+    query: c[0] as SceneQuery,
+    page: c[1] as number,
+    size: c[2] as number,
+  }));
+const scroller = () => document.querySelector(".scenes-scroller") as HTMLDivElement;
+const state = () => viewStateOf(selectedId());
+
+function view() {
+  const tabId = selectedId();
+  return render(() => (
+    <TabContext.Provider value={{ tabId, isActive: () => true }}>
+      <ScenesView />
+    </TabContext.Provider>
+  ));
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  total = 36_350;
+  failing = false;
+  warmed.length = 0;
+  resetTabs();
+  vi.stubGlobal(
+    "Image",
+    class {
+      decoding = "";
+      set src(v: string) {
+        warmed.push(v);
+      }
+    },
+  );
+  mocks.commands.scenesPage.mockImplementation(answer);
+  mocks.commands.sceneSorts.mockResolvedValue([
+    { value: "date", label: "Date" },
+    { value: "duration", label: "Duration" },
+    { value: "random", label: "Random" },
+    { value: "title", label: "Title" },
+  ]);
 });
 afterEach(() => {
   cleanup();
-  document.documentElement.classList.remove("player-open");
+  resetKeymap();
+  vi.unstubAllGlobals();
 });
 
-describe("ScenesView", () => {
-  it("lists up to 20 recent scenes with title and duration", async () => {
-    render(() => <ScenesView />);
-    expect(await screen.findByText("Scene 1")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /^Play Scene/ })).toHaveLength(20);
-    // 3725 s → 1:02:05
-    expect(screen.getByText("1:02:05")).toBeInTheDocument();
+/** A key pressed with nothing focused, as the app's keymap sees it. */
+function press(key: string) {
+  (document.activeElement as HTMLElement | null)?.blur?.();
+  dispatch(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+}
+
+describe("ScenesView (paged)", () => {
+  it("shows page 1 of 50 with controls above and below the grid", async () => {
+    view();
+    expect(await screen.findByRole("button", { name: "Scene 1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Scene 50" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Scene 51" })).not.toBeInTheDocument();
+    expect(calls()[0]).toMatchObject({ page: 1, size: 50 });
+    expect(calls()[0].query).toMatchObject({ sort: "date", direction: "desc" });
+    expect(screen.getAllByRole("button", { name: "Next page" })).toHaveLength(2);
+    expect(screen.getAllByTestId("page-position")[0]).toHaveTextContent(
+      "Page 1 of 727 · 1–50 of 36,350",
+    );
   });
 
-  it("shows the test set grouped by format and opens a scene from it", async () => {
-    render(() => <ScenesView />);
-    const wmv = await screen.findByRole("region", { name: "WMV above 720p" });
-    expect(wmv).toHaveTextContent("1920×1080 · wmv3 · wmv");
-    expect(screen.getByRole("region", { name: "4K HEVC" })).toHaveTextContent("3840×2160");
-    fireEvent.click(screen.getByRole("button", { name: "Play Old file" }));
-    expect(currentRoute()).toEqual({ kind: "scene", sceneId: "501", title: "Old file" });
+  it("loads the next page and warms its thumbnails ahead", async () => {
+    view();
+    await screen.findByRole("button", { name: "Scene 1" });
+    await waitFor(() => expect(calls().some((c) => c.page === 2)).toBe(true));
+    expect(calls().some((c) => c.page === 0)).toBe(false);
+    await waitFor(() => expect(warmed).toContain("ssv-thumb://localhost/scene/51?v=1"));
   });
 
-  it("Shuffle asks for a new test set; opening the view keeps the current one", async () => {
-    render(() => <ScenesView />);
-    await screen.findByRole("region", { name: "4K HEVC" });
-    expect(mocks.commands.listTestScenes).toHaveBeenCalledTimes(1);
-    expect(mocks.commands.listTestScenes).toHaveBeenLastCalledWith(false);
-    fireEvent.click(screen.getByRole("button", { name: "Shuffle" }));
-    await waitFor(() => expect(mocks.commands.listTestScenes).toHaveBeenCalledTimes(2));
-    expect(mocks.commands.listTestScenes).toHaveBeenLastCalledWith(true);
+  it("changes page with the buttons and with [ and ], scrolled to the top", async () => {
+    view();
+    await screen.findByRole("button", { name: "Scene 1" });
+    scroller().scrollTop = 300;
+    fireEvent.click(screen.getAllByRole("button", { name: "Next page" })[0]);
+    expect(await screen.findByRole("button", { name: "Scene 51" })).toBeInTheDocument();
+    expect(scroller().scrollTop).toBe(0);
+    fireEvent.keyDown(screen.getByRole("button", { name: "Scene 51" }), { key: "]" });
+    expect(await screen.findByRole("button", { name: "Scene 101" })).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("button", { name: "Scene 101" }), { key: "[" });
+    expect(await screen.findByRole("button", { name: "Scene 51" })).toBeInTheDocument();
   });
 
-  it("updates the list in place when a refresh brings new data", async () => {
-    render(() => <ScenesView />);
-    expect(await screen.findByText("Scene 20")).toBeInTheDocument();
-    let resolve: (v: unknown) => void = () => {};
-    mocks.commands.listRecentScenes.mockReturnValueOnce(new Promise((r) => (resolve = r)));
-    mocks.changed("scenes:recent");
-    await waitFor(() => expect(mocks.commands.listRecentScenes).toHaveBeenCalledTimes(2));
-    // While re-reading, the current list stays up.
-    expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
-    expect(screen.getByText("Scene 20")).toBeInTheDocument();
-    resolve(cached(scenes(21)));
-    expect(await screen.findByText("Scene 21")).toBeInTheDocument();
-    expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
+  it("saves page, mode, size, and scroll, and a view on that entry restores them all", async () => {
+    view();
+    await screen.findByRole("button", { name: "Scene 1" });
+    const go = screen.getAllByLabelText("Go to page")[0];
+    fireEvent.input(go, { target: { value: "37" } });
+    fireEvent.submit(go.closest("form") as HTMLFormElement);
+    await screen.findByRole("button", { name: "Scene 1801" });
+    fireEvent.click(screen.getByRole("button", { name: "List" }));
+    scroller().scrollTop = 420;
+    fireEvent.scroll(scroller());
+    await waitFor(() =>
+      expect(state()).toMatchObject({ page: 37, pageSize: 50, mode: "list", scroll: 420 }),
+    );
+    cleanup();
+    view();
+    expect(await screen.findByRole("button", { name: "Scene 1801" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "List" })).toHaveAttribute("aria-pressed", "true");
+    await waitFor(() => expect(scroller().scrollTop).toBe(420));
   });
 
-  it("ignores changes to other data", async () => {
-    render(() => <ScenesView />);
-    await screen.findByText("Scene 1");
-    mocks.changed("scene:7");
-    await Promise.resolve();
-    expect(mocks.commands.listRecentScenes).toHaveBeenCalledTimes(1);
+  it("keeps your place when the page size changes", async () => {
+    setViewState(selectedId(), { page: 37 });
+    view();
+    await screen.findByRole("button", { name: "Scene 1801" });
+    fireEvent.change(screen.getAllByLabelText("Per page")[0], { target: { value: "120" } });
+    // The first scene shown (#1,801) is on page 16 at 120 per page.
+    expect(await screen.findByRole("button", { name: "Scene 1801" })).toBeInTheDocument();
+    expect(state()).toMatchObject({ page: 16, pageSize: 120 });
+    expect(calls().at(-1)?.size).toBe(120);
   });
 
-  it("opens a scene from the list", async () => {
-    render(() => <ScenesView />);
-    fireEvent.click(await screen.findByRole("button", { name: "Play Scene 3" }));
-    expect(currentRoute()).toEqual({ kind: "scene", sceneId: "3", title: "Scene 3" });
+  it("starts a new sort on page 1, and Random keeps its seed until Reshuffle", async () => {
+    setViewState(selectedId(), { page: 5 });
+    view();
+    await screen.findByRole("button", { name: "Scene 201" });
+    fireEvent.change(await screen.findByLabelText("Sort by"), { target: { value: "random" } });
+    await waitFor(() => expect(state()).toMatchObject({ page: 1 }));
+    const seed = (state().query as SceneQuery).seed;
+    expect(typeof seed).toBe("number");
+    fireEvent.click(screen.getAllByRole("button", { name: "Next page" })[0]);
+    await waitFor(() =>
+      expect(calls().some((c) => c.page === 2 && c.query.seed === seed)).toBe(true),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Reshuffle" }));
+    await waitFor(() => expect((state().query as SceneQuery).seed).not.toBe(seed));
   });
 
-  it("opens a scene by ID with Enter or the Play button", async () => {
-    render(() => <ScenesView />);
-    const field = screen.getByLabelText("Scene ID");
-    fireEvent.input(field, { target: { value: " 42 " } });
-    fireEvent.submit(field.closest("form") as HTMLFormElement);
-    expect(currentRoute()).toEqual({ kind: "scene", sceneId: "42", title: "" });
+  it("re-reads the page in place when a refresh changes it", async () => {
+    setViewState(selectedId(), { page: 37, scroll: 200 });
+    view();
+    await screen.findByRole("button", { name: "Scene 1801" });
+    const before = calls().filter((c) => c.page === 37).length;
+    mocks.changed("scenes:q:0123456789abcdef:s:50:p:37");
+    await waitFor(() => expect(calls().filter((c) => c.page === 37).length).toBe(before + 1));
+    expect(scroller().scrollTop).toBe(200);
+  });
+
+  it("says when the library is empty", async () => {
+    total = 0;
+    view();
+    expect(await screen.findByText("No scenes in this library yet")).toBeInTheDocument();
+  });
+
+  it("says when the server can't be reached, keeping the controls", async () => {
+    mocks.commands.getConnectionSnapshot.mockResolvedValue({
+      profileId: "p1",
+      state: { kind: "offline", attempt: 2, nextRetryAt: "2026-10-02T12:00:00Z" },
+      security: null,
+      finalUrl: null,
+      server: null,
+      lastContactAt: null,
+    });
+    await initConnection();
+    failing = true;
+    view();
+    expect(await screen.findByText("Can't reach the server")).toBeInTheDocument();
+  });
+
+  it("opens a scene in a new tab with Ctrl+click", async () => {
+    view();
+    const count = tabs().length;
+    fireEvent.click(await screen.findByRole("button", { name: "Scene 4" }), { ctrlKey: true });
+    expect(tabs().length).toBe(count + 1);
+  });
+
+  it("changes page with [ and ] even when no card has focus", async () => {
+    view();
+    await screen.findByRole("button", { name: "Scene 1" });
+    press("]");
+    expect(await screen.findByRole("button", { name: "Scene 51" })).toBeInTheDocument();
+    press("[");
+    expect(await screen.findByRole("button", { name: "Scene 1" })).toBeInTheDocument();
+  });
+
+  it("Home, End, and the arrows reach the cards when no card has focus", async () => {
+    view();
+    await screen.findByRole("button", { name: "Scene 1" });
+    press("End");
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Scene 50" })),
+    );
+    press("Home");
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Scene 1" })),
+    );
+    press("ArrowDown");
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Scene 1" })),
+    );
+  });
+
+  it("leaves the keys alone while typing in a field", async () => {
+    view();
+    await screen.findByRole("button", { name: "Scene 1" });
+    const go = screen.getAllByLabelText("Go to page")[0];
+    go.focus();
+    // As the app's document listener sees it: the key comes from the focused field.
+    const event = new KeyboardEvent("keydown", { key: "]", bubbles: true, cancelable: true });
+    go.dispatchEvent(event);
+    dispatch(event);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getByRole("button", { name: "Scene 1" })).toBeInTheDocument();
+  });
+
+  it("on a cold start, waits for the connection instead of giving up (restored tabs)", async () => {
+    const snapshot = (kind: string) => ({
+      profileId: "p1",
+      state: { kind },
+      security: null,
+      finalUrl: null,
+      server: null,
+      lastContactAt: null,
+    });
+    mocks.commands.getConnectionSnapshot.mockResolvedValue(snapshot("connecting"));
+    await initConnection();
+    failing = true; // nothing cached, and the session isn't connected yet
+    view();
+    await waitFor(() => expect(calls().length).toBeGreaterThan(0));
+    // Still connecting: a loading page, not "Can't reach the server".
+    expect(screen.queryByText("Can't reach the server")).not.toBeInTheDocument();
+    expect(document.querySelectorAll(".scene-card.placeholder").length).toBeGreaterThan(0);
+    failing = false;
+    mocks.connection(snapshot("connected"));
+    expect(await screen.findByRole("button", { name: "Scene 1" })).toBeInTheDocument();
   });
 });

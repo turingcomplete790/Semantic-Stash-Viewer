@@ -19,6 +19,62 @@ function nextFrame(): Promise<void> {
   );
 }
 
+/**
+ * The display's frame time, from an idle animation-frame loop (median of 60 intervals). Missed
+ * frames are judged against this, not against the frames being measured: if every frame slows
+ * equally, comparing to their own median would report nothing missed (005 analysis M1).
+ */
+async function displayFrameTime(): Promise<number> {
+  const intervals: number[] = [];
+  let last = await new Promise<number>((r) => requestAnimationFrame(r));
+  for (let i = 0; i < 60; i += 1) {
+    const now = await new Promise<number>((r) => requestAnimationFrame(r));
+    intervals.push(now - last);
+    last = now;
+  }
+  intervals.sort((a, b) => a - b);
+  return intervals[Math.floor(intervals.length / 2)];
+}
+
+/** Scroll `el` by `pxPerFrame` every animation frame for `ms`; every frame's interval. */
+async function scrollFor(el: HTMLElement, pxPerFrame: number, ms: number): Promise<number[]> {
+  const intervals: number[] = [];
+  await new Promise<void>((resolve) => {
+    let last = performance.now();
+    const end = last + ms;
+    const step = (now: number) => {
+      intervals.push(now - last);
+      last = now;
+      const max = el.scrollHeight - el.clientHeight;
+      el.scrollTop = el.scrollTop + pxPerFrame >= max ? 0 : el.scrollTop + pxPerFrame;
+      if (now < end) requestAnimationFrame(step);
+      else resolve();
+    };
+    requestAnimationFrame(step);
+  });
+  return intervals.slice(1);
+}
+
+/** The page whose first card is `firstTitle` is on screen, its visible thumbnails loaded. */
+function pageShown(pane: HTMLElement, firstTitle: string): boolean {
+  const first = pane.querySelector<HTMLElement>('.scene-grid button.scene-card[data-index="0"]');
+  if (first?.getAttribute("aria-label") !== firstTitle) return false;
+  const scroller = pane.querySelector<HTMLElement>(".scenes-scroller");
+  const bottom = (scroller?.getBoundingClientRect().bottom ?? Infinity) + 1;
+  return Array.from(pane.querySelectorAll<HTMLImageElement>(".scene-grid img")).every(
+    (img) => img.getBoundingClientRect().top > bottom || img.complete,
+  );
+}
+
+/** The first card's title on the page currently shown. */
+function firstTitle(pane: HTMLElement): string | null {
+  return (
+    pane
+      .querySelector<HTMLElement>('.scene-grid button.scene-card[data-index="0"]')
+      ?.getAttribute("aria-label") ?? null
+  );
+}
+
 async function until(check: () => boolean, timeoutMs: number): Promise<boolean> {
   const end = performance.now() + timeoutMs;
   while (performance.now() < end) {
@@ -120,16 +176,112 @@ export async function runBench(): Promise<void> {
     report("control-press", summary(presses));
 
     // Scrolling a 10,000-row list. 60 fps means no missed frames: a frame counts as missed
-    // when it takes over 1.5 of the display's frame time (the median interval), so timer
-    // jitter around vsync doesn't count and any refresh rate works (003 research R8).
+    // when it takes over 1.5 of the display's frame time, measured idle beforehand, so timer
+    // jitter around vsync doesn't count, any refresh rate works, and a uniform slowdown still
+    // counts (003 research R8). Frames per second are reported too.
+    const baseline = await displayFrameTime();
     const { runScrollBench } = await import("./ScrollBench");
     const frames = await runScrollBench();
-    const frameTime = summary(frames, 1).median;
-    const missed = frames.filter((f) => f > frameTime * 1.5).length;
+    const missed = frames.filter((f) => f > baseline * 1.5).length;
+    const elapsed = frames.reduce((a, b) => a + b, 0);
     report("scroll-frame-time", {
       ...summary(frames, 1),
+      baselineMs: Math.round(baseline * 10) / 10,
+      fps: elapsed > 0 ? Math.round((frames.length / elapsed) * 10000) / 10 : null,
       missedPercent: frames.length ? Math.round((missed / frames.length) * 1000) / 10 : null,
     });
+
+    // The paged Scenes view (005 SC-002, SC-003; research R10): page changes at 50 per page until
+    // the new page and its visible thumbnails are shown, jumps to random pages, and scrolling a
+    // 1000-card page in grid and list mode against the idle baseline.
+    navigate({ kind: "scenes" }, { newTab: true });
+    const scenesTab = selectedId();
+    const pane = () => document.querySelector<HTMLElement>(".tab-pane:not([hidden])");
+    const ready = await until(
+      () => pane() != null && firstTitle(pane() as HTMLElement) !== null,
+      15_000,
+    );
+    const view = pane();
+    if (ready && view) {
+      const button = (name: string) =>
+        view.querySelector<HTMLButtonElement>(`.scenes-toolbar button[aria-label="${name}"]`);
+      const changes: number[] = [];
+      for (let i = 0; i < 20; i += 1) {
+        const before = firstTitle(view);
+        const target = button(i < 10 ? "Next page" : "Previous page");
+        if (!target || target.disabled) break;
+        const t0 = performance.now();
+        target.click();
+        const shown = await until(() => {
+          const now = firstTitle(view);
+          return now !== null && now !== before && pageShown(view, now);
+        }, 5000);
+        await nextFrame();
+        if (shown) changes.push(performance.now() - t0);
+      }
+      report("scenes-page-change", summary(changes.length ? changes : [NaN]));
+
+      const jumps: number[] = [];
+      const go = view.querySelector<HTMLInputElement>(
+        '.scenes-toolbar input[aria-label="Go to page"]',
+      );
+      const lastPage = Number(go?.max ?? 1);
+      let seed = 11;
+      for (let i = 0; i < 5 && go; i += 1) {
+        seed = (seed * 7919 + 13) % 10007;
+        const target = 1 + (seed % Math.max(1, lastPage));
+        const before = firstTitle(view);
+        const t0 = performance.now();
+        go.value = String(target);
+        go.dispatchEvent(new Event("input", { bubbles: true }));
+        go.form?.requestSubmit();
+        const shown = await until(() => {
+          const now = firstTitle(view);
+          return now !== null && now !== before && pageShown(view, now);
+        }, 5000);
+        await nextFrame();
+        if (shown) jumps.push(performance.now() - t0);
+      }
+      report("scenes-page-jump", summary(jumps.length ? jumps : [NaN]));
+
+      // A 1000-card page, scrolled in each mode.
+      const perPage = view.querySelector<HTMLSelectElement>(
+        '.scenes-toolbar select[aria-label="Per page"]',
+      );
+      const scroller = view.querySelector<HTMLDivElement>(".scenes-scroller");
+      if (perPage && scroller) {
+        perPage.value = "1000";
+        perPage.dispatchEvent(new Event("change", { bubbles: true }));
+        await until(
+          () => view.querySelectorAll(".scene-grid button.scene-card").length >= 1000,
+          15_000,
+        );
+        for (const mode of ["grid", "list"] as const) {
+          view
+            .querySelectorAll<HTMLButtonElement>(".scenes-mode button")
+            [mode === "grid" ? 0 : 1]?.click();
+          await nextFrame();
+          scroller.scrollTop = 0;
+          await nextFrame();
+          const base = await displayFrameTime();
+          const frames = await scrollFor(scroller, 64, 5000);
+          const missed = frames.filter((f) => f > base * 1.5).length;
+          const elapsed = frames.reduce((a, b) => a + b, 0);
+          report(`scenes-scroll-1000-${mode}`, {
+            ...summary(frames, 1),
+            baselineMs: Math.round(base * 10) / 10,
+            fps: elapsed > 0 ? Math.round((frames.length / elapsed) * 10000) / 10 : null,
+            missedPercent: frames.length ? Math.round((missed / frames.length) * 1000) / 10 : null,
+          });
+        }
+        view.querySelectorAll<HTMLButtonElement>(".scenes-mode button")[0]?.click();
+        perPage.value = "50";
+        perPage.dispatchEvent(new Event("change", { bubbles: true }));
+        await nextFrame();
+      }
+    }
+    close(scenesTab);
+    await nextFrame();
 
     // Now playing: switch away from a playing scene (the newest in the library) and back.
     void commands.playerSetMuted(true);

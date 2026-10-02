@@ -156,7 +156,11 @@ export default function SceneView(props: {
       </Show>
 
       <Show when={waiting() && !isThisScene()}>
-        <Show when={poster()}>{(src) => <img class="player-poster" src={src()} alt="" />}</Show>
+        {/* Only while the tab is showing: WebKit lays out an image that loads in a hidden tab at
+            zero size and keeps drawing it off-centre until the window is resized. */}
+        <Show when={tab.isActive() && poster()}>
+          {(src) => <img class="player-poster" src={src()} alt="" />}
+        </Show>
         <div class="player-center">
           <button type="button" class="primary player-play" onClick={open}>
             Play

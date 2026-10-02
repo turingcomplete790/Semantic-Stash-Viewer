@@ -102,3 +102,9 @@ pub fn forward_notifications(
         }
     });
 }
+
+/// The window is closing: the UI writes anything it hasn't saved yet (tab state is saved half a
+/// second after changes), then calls `app_quit`. The app quits anyway after a short wait.
+#[derive(Debug, Clone, serde::Serialize, specta::Type, tauri_specta::Event)]
+#[tauri_specta(event_name = "app-closing")]
+pub struct AppClosingEvent;

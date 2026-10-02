@@ -15,6 +15,7 @@ import {
   close,
   currentRoute,
   forward,
+  leave,
   loadTabsFor,
   navigate,
   reopenClosed,
@@ -23,6 +24,7 @@ import {
   selectedId,
   setViewState,
   tabs,
+  viewStateOf,
 } from "../../shell/tabs";
 
 const HOME = { kind: "home" } as const;
@@ -180,5 +182,48 @@ describe("tab store", () => {
     mocks.commands.shellSaveTabs.mockClear();
     await loadTabsFor("p2");
     expect(mocks.commands.shellSaveTabs).toHaveBeenCalledWith("p1", expect.anything());
+  });
+});
+
+describe("returning to a view never resets it (005 research R13)", () => {
+  const SCENE = { kind: "scene", sceneId: "7", title: "Seven" } as const;
+
+  it("leaving goes back to the previous entry when it's the fallback", () => {
+    navigate(SCENES);
+    setViewState(selectedId(), { page: 3, mode: "list" });
+    navigate(SCENE);
+    const depth = tabs()[0].history.length;
+    leave(selectedId(), SCENES);
+    expect(currentRoute()).toEqual(SCENES);
+    expect(viewStateOf(selectedId())).toMatchObject({ page: 3, mode: "list" });
+    expect(tabs()[0].index).toBe(depth - 2);
+  });
+
+  it("leaving navigates when the previous entry is something else", () => {
+    navigate(SCENE); // straight from Home
+    leave(selectedId(), SCENES);
+    expect(currentRoute()).toEqual(SCENES);
+    expect(viewStateOf(selectedId())).toEqual({});
+  });
+
+  it("navigating to a route visited before carries its state forward", () => {
+    navigate(SCENES);
+    setViewState(selectedId(), { page: 3, mode: "list", scroll: 400 });
+    navigate(HOME);
+    navigate(SCENES);
+    expect(viewStateOf(selectedId())).toEqual({ page: 3, mode: "list", scroll: 400 });
+    // A copy: changing the new entry leaves the old one alone.
+    setViewState(selectedId(), { page: 4 });
+    back();
+    back();
+    expect(viewStateOf(selectedId())).toMatchObject({ page: 3 });
+  });
+
+  it("a first visit, or another tab, starts fresh", () => {
+    navigate(SCENES);
+    expect(viewStateOf(selectedId())).toEqual({});
+    setViewState(selectedId(), { page: 3 });
+    navigate(SCENES, { newTab: true });
+    expect(viewStateOf(selectedId())).toEqual({});
   });
 });
