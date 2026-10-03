@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PlayerSnapshot } from "../../bindings";
 
@@ -35,6 +36,7 @@ vi.mock("../../bindings", () => ({ commands: mocks.commands, events: mocks.event
 import { initPlayer } from "../../player/state";
 import NowPlayingBar from "../../shell/NowPlayingBar";
 import { close, navigate, resetTabs, select, tabs } from "../../shell/tabs";
+import { TabContext } from "../../shell/viewState";
 import SceneView from "../../views/SceneView";
 
 const idle: PlayerSnapshot = {
@@ -123,6 +125,22 @@ describe("restored scene tabs", () => {
     expect(mocks.commands.sceneScreenshotUrl).toHaveBeenCalledWith("7");
     fireEvent.click(screen.getByRole("button", { name: "Play" }));
     expect(mocks.commands.playerOpen).toHaveBeenCalledWith("7");
+  });
+
+  it("add their still only while their tab is showing (WebKit lays out images loaded while hidden at zero size)", async () => {
+    const [active, setActive] = createSignal(false);
+    render(() => (
+      <TabContext.Provider value={{ tabId: "", isActive: active }}>
+        <SceneView sceneId="7" title="Beach day" restored onDone={() => {}} />
+      </TabContext.Provider>
+    ));
+    await waitFor(() => expect(mocks.commands.sceneScreenshotUrl).toHaveBeenCalledWith("7"));
+    await Promise.resolve();
+    expect(document.querySelector("img.player-poster")).toBeNull();
+    setActive(true);
+    await waitFor(() => expect(document.querySelector("img.player-poster")).not.toBeNull());
+    setActive(false);
+    expect(document.querySelector("img.player-poster")).toBeNull();
   });
 
   it("don't interrupt another scene that's playing", () => {

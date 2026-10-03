@@ -204,8 +204,20 @@ Findings marked **(observed)** were checked on the development machine, in the S
   start. This doesn't depend on the harness's own timing.
 - **Scroll**: the bench mounts a debug-only overlay with a windowed 10,000-row list, used only in
   harness runs (FR-018, no screens in user builds). It scrolls programmatically for 5 seconds.
-  Every animation frame's interval is recorded, and the bench reports the p95 frame time and the
-  share of frames over 16.7 ms.
+  Every animation frame's interval is recorded. A frame is **missed** when it takes more than 1.5×
+  the display's frame time (25 ms at 60 Hz), and the budget is under 1% missed. The p95 frame time
+  and frames per second (`scroll-fps`) are reported too, without a budget.
+  - *Amended 2026-09-29 after the first harness run:* the original "p95 ≤ 16.7 ms" failed on
+    timer jitter alone (300 frames in 5 s, exactly 60 fps, worst frame 23 ms, none missed),
+    because frames on a 60 Hz display land at 16.7 ms ± about 1 ms. The missed-frame rule counts
+    real stutters and works at any refresh rate.
+  - *Amended 2026-09-30 (005 analysis M1):* the display's frame time is measured from an idle
+    animation-frame loop **before** scrolling, not taken from the scrolled frames' own median.
+    Judged against their own median, frames that all slow down equally (for example a steady
+    44 fps) counted as 0% missed.
+- **Playback runs show the scene** in a scene tab (debug measure mode), because the shell hides
+  the video surface when no scene tab is on screen; otherwise frames aren't drawn and the run is
+  invalid.
 - **Invalid, not failed** (FR-016):
   - a UI measurement taken while `document.visibilityState !== "visible"` is marked invalid;
   - playback frame counts are marked invalid if the main-thread CPU sample drops to 0% (no

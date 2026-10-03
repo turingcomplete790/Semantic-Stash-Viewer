@@ -206,3 +206,51 @@ fn deleting_a_profile_removes_its_cache_directory() {
     delete_profile_cache(&profile_dir);
     assert!(!profile_dir.exists());
 }
+
+// ---- Blob entries (005 T004: thumbnails) ----
+
+#[test]
+fn blobs_round_trip_and_count_toward_the_size() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut c = open(&dir, Limit::Fixed(10 * MB));
+    assert!(c.get_bytes("thumb:scene:1:7").is_none());
+    let bytes: Vec<u8> = (0..4000u32).map(|i| (i % 251) as u8).collect();
+    c.put_bytes("thumb:scene:1:7", &bytes).expect("put");
+    assert_eq!(c.get_bytes("thumb:scene:1:7").expect("hit"), bytes);
+    assert!(c.size_bytes() >= 4000);
+    // A blob isn't JSON: reading it as typed data is a miss, not a crash.
+    assert!(c.get::<Item>("thumb:scene:1:7").is_none());
+}
+
+#[test]
+fn blobs_are_evicted_least_recently_used_with_everything_else() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut c = open(&dir, Limit::Fixed(3500));
+    c.put_bytes("thumb:scene:a:1", &[1u8; 1000]).expect("a");
+    c.put("scenes:q:x:p:1", &item("page", 1000)).expect("page");
+    c.put_bytes("thumb:scene:c:1", &[3u8; 1000]).expect("c");
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    assert!(c.get_bytes("thumb:scene:a:1").is_some());
+    c.put_bytes("thumb:scene:d:1", &[4u8; 1000]).expect("d");
+    assert!(c.size_bytes() <= 3500);
+    assert!(
+        c.get::<Item>("scenes:q:x:p:1").is_none(),
+        "least recently used goes first"
+    );
+    assert!(c.get_bytes("thumb:scene:a:1").is_some());
+    assert!(c.get_bytes("thumb:scene:d:1").is_some());
+}
+
+#[test]
+fn clearing_or_a_different_server_removes_blobs() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut c = open(&dir, Limit::Fixed(10 * MB));
+    c.check_identity("aaaaaaaaaaaaaaaa").expect("first");
+    c.put_bytes("thumb:scene:1:1", &[9u8; 100]).expect("put");
+    c.clear().expect("clear");
+    assert!(c.get_bytes("thumb:scene:1:1").is_none());
+    c.put_bytes("thumb:scene:1:1", &[9u8; 100])
+        .expect("put again");
+    assert!(c.check_identity("bbbbbbbbbbbbbbbb").expect("different"));
+    assert!(c.get_bytes("thumb:scene:1:1").is_none());
+}

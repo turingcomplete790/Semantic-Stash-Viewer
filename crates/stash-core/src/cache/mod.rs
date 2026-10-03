@@ -258,7 +258,7 @@ impl ViewCache {
             .flatten()
     }
 
-    /// The raw JSON stored for `key` (to compare refreshed data).
+    /// The raw bytes stored for `key` (JSON for data, so refreshes can compare it).
     pub fn raw(&self, key: &str) -> Option<Vec<u8>> {
         self.conn
             .query_row(
@@ -284,12 +284,33 @@ impl ViewCache {
         fetched_ms: i64,
     ) -> Result<(), AppError> {
         let json = serde_json::to_vec(value).map_err(storage)?;
-        let size = i64::try_from(json.len()).unwrap_or(i64::MAX);
+        self.put_raw(key, &json, fetched_ms)
+    }
+
+    /// Store raw bytes, such as a thumbnail (005 research R5). Blobs share the size limit and
+    /// least-recently-used eviction with everything else; their keys (`thumb:…`) keep them apart
+    /// from JSON entries, which `get` would not parse anyway.
+    pub fn put_bytes(&mut self, key: &str, bytes: &[u8]) -> Result<(), AppError> {
+        self.put_raw(key, bytes, now_ms())
+    }
+
+    /// Read raw bytes stored with `put_bytes`, marking the entry used.
+    pub fn get_bytes(&self, key: &str) -> Option<Vec<u8>> {
+        let bytes = self.raw(key)?;
+        let _ = self.conn.execute(
+            "UPDATE entries SET last_used = ?2 WHERE key = ?1",
+            params![key, now_ms()],
+        );
+        Some(bytes)
+    }
+
+    fn put_raw(&mut self, key: &str, bytes: &[u8], fetched_ms: i64) -> Result<(), AppError> {
+        let size = i64::try_from(bytes.len()).unwrap_or(i64::MAX);
         self.conn
             .execute(
                 "INSERT OR REPLACE INTO entries (key, value, fetched_at, last_used, size)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![key, json, fetched_ms, now_ms(), size],
+                params![key, bytes, fetched_ms, now_ms(), size],
             )
             .map_err(storage)?;
         self.writes_since_check += 1;

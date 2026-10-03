@@ -4,8 +4,8 @@ Semantic Stash Viewer is an opinionated, native desktop frontend for the
 [Stash](https://github.com/stashapp/stash) media server, built in Rust with Tauri. Its goals:
 (1) bring every feature of the evolving `semantic-tagging` Stash plugin
 (`~/Projects/Stash-Plugins/semantic-tagging/`) to a first-class client; (2) deliver a
-responsive, near-native browsing experience with optimized GraphQL usage and mpv-based playback
-that avoids the Stash web UI's expensive transcoding; and (3) cover every capability of the
+responsive, near-native browsing experience with optimized GraphQL usage and mpv as the one
+media player for video and images, avoiding the Stash web UI's expensive transcoding; and (3) cover every capability of the
 default Stash web UI, so the viewer can fully replace it. A user points it at any Stash endpoint
 (plus API key, if one is configured) and uses their library the way Jellyfin desktop clients let
 users use a Jellyfin server.
@@ -78,7 +78,13 @@ background indexing) without redesign.
 - Queries against semantic vocabulary MUST be narrowly scoped using tag flags / `custom_fields`
   filters; the viewer MUST NOT load the entire Stash tag universe when only the bounded semantic
   vocabulary is needed.
-- List views MUST paginate server-side and prefetch the next page ahead of the scroll position.
+- **Paged lists**: list and grid views of library items MUST be paged: one page of results at a
+  time, with page navigation (previous, next, first, last, and jump to a page), the total count,
+  and a page size the user can change, defaulting to **50** items per page. This applies in
+  particular to the Scenes and Galleries grids, and to the items inside a gallery (Principle X).
+  The viewer fetches only the page being shown (server-side pagination) and MAY prefetch the
+  adjacent pages so moving between pages is instant. Infinite (continuous) scrolling MUST NOT be
+  the default for library listings.
 - Responses SHOULD be cached with explicit invalidation: a mutation the viewer performs MUST
   invalidate or patch exactly the cache entries it affects; a manual "refresh / clear cache"
   control MUST exist.
@@ -88,23 +94,34 @@ background indexing) without redesign.
 **Rationale**: The Stash web UI and naïve plugins pay for chatty, over-fetching queries on every
 navigation. Batching and indexing locally is where a native client earns its speed.
 
-### V. Native Playback Over Transcoding
+### V. mpv Is the Media Player (Native Over Transcoding)
 
-- Video playback MUST use mpv (libmpv embedded, or a managed mpv process where embedding is not
-  viable on a platform) playing Stash's direct stream endpoint, so the original file is decoded
-  locally with hardware acceleration.
-- The viewer MUST NOT request Stash's transcoded streams (HLS/DASH/MP4 transcode endpoints) by
-  default. Transcoding MAY be used only as an explicit, user-visible fallback when mpv cannot play
-  a source, and the fallback MUST be logged.
-- Streams MUST authenticate with the profile's configured API key.
-- Playback features that depend on Stash data (resume position, play count, O-counter, markers,
+- **mpv is the one media player.** Video playback, full-resolution image viewing, slideshows, and
+  mixed sequences of images and videos (Principle X) MUST use mpv (libmpv embedded, or a managed
+  mpv process where embedding is not viable on a platform), decoding locally with hardware
+  acceleration where available.
+- **Video** MUST play Stash's direct stream endpoint. The viewer MUST NOT request Stash's
+  transcoded streams (HLS/DASH/MP4 transcode endpoints) by default. Transcoding MAY be used only as
+  an explicit, user-visible fallback when mpv cannot play a source, and the fallback MUST be
+  logged.
+- **Images** opened for viewing MUST display in mpv at full resolution, loaded on demand; the
+  viewer MAY prefetch the items next to the current one. Zoom, pan, rotation, fit, and animated
+  images (GIF, WebP, and the like) are handled by mpv.
+- **The webview plays no media.** It MUST NOT use `<video>`/`<audio>` or any other playback
+  pipeline, including for previews. Grids and lists MUST show appropriately sized thumbnails as
+  images; moving previews MUST be image formats (for example Stash's animated WebP previews), with
+  the still thumbnail as the fallback.
+- Streams and images MUST be fetched with the profile's configured API key, sent in a header and
+  never placed in URLs the webview or logs can see.
+- Features that depend on Stash data (resume position, play count, O-counter, markers,
   Timeline slots/Stages as chapters) MUST sync back to Stash per Principle I.
-- Images and image decks MAY render in the webview but MUST use appropriately sized
-  thumbnails/previews for grids and load full resolution only on demand.
 
 **Rationale**: Transcoding is the single most expensive thing the Stash web UI asks of a server.
-mpv handles virtually every codec natively; pushing decode to the client makes playback instant
-and makes low-power Stash hosts viable.
+mpv handles virtually every video and image format natively, fast and colour-accurately; pushing
+decode to the client makes playback instant and makes low-power Stash hosts viable. One player for
+both media types is what lets galleries mix images and scenes seamlessly (Principle X), and keeping
+the webview out of playback avoids a second, weaker pipeline with different formats and
+behaviour.
 
 ### VI. Responsive, Near-Native UI
 
@@ -112,7 +129,10 @@ and makes low-power Stash hosts viable.
   the Rust core asynchronously, with loading states rendered immediately.
 - Performance budgets (on a mid-range desktop against a LAN Stash with a warm cache):
   - Input acknowledgement (hover, press, focus) < 50 ms; view navigation first paint < 150 ms.
-  - Grid/list scrolling sustains 60 fps; large collections MUST use virtualization.
+  - Scrolling within a page sustains 60 fps, and moving to another page meets the navigation
+    budget. Paging (Principle IV) bounds what is rendered; virtualization is needed only where a
+    view renders more items at once than it can keep within budget (for example, a large page
+    size the user chose).
   - Local semantic queries over an already-indexed library return in < 200 ms.
   - Cold start to an interactive home view < 2 s (excluding first-run index build, which MUST
     show progress and remain cancellable).
@@ -166,6 +186,8 @@ and strict checking stays available per server.
     job progress.
 - Parity is judged by capability, not pixel layout. The viewer MAY present a feature differently,
   combine screens, or improve workflows, but a capability MUST NOT be silently dropped.
+- Parity never means imitation. Where the web UI's design is weak, the viewer SHOULD redesign it
+  rather than copy it; the gallery viewer is the prime example and follows Principle X.
 - Server administration settings (Stash's System/Settings pages) are in scope unless a feature
   spec explicitly defers them, stating why and linking them to the web UI instead.
 - Capabilities MUST be built on Stash's public GraphQL API, following Principles I and IV. Each
@@ -188,9 +210,10 @@ marker or run a scraper fails the "Jellyfin-style client" promise.
   added to it as their features land.
 - **Tabs**: users MUST be able to keep several views open at once inside the main window, e.g. a
   scene list, a gallery, and a performer, and switch between them. Each tab MUST keep its own
-  state (scroll position, filters, selection) while in the background, so switching back meets
-  Principle VI's navigation budget without reloading. Opening, closing, and switching tabs MUST
-  be keyboard-accessible.
+  state (page, page size, display mode, scroll position, filters, selection) while in the
+  background and across back/forward, so leaving a view and returning never resets it, and
+  switching back meets Principle VI's navigation budget without reloading. Opening, closing,
+  and switching tabs MUST be keyboard-accessible.
 - **Notification centre**: one place MUST collect events the user may need to know about:
   - connection alerts (server unreachable, reconnected, authentication failures);
   - failures from background work;
@@ -215,6 +238,32 @@ scenes, galleries, and performers instant and stateful, which fits a desktop cli
 browser-style back-and-forth. A single notification centre gives connection problems and
 long-running Stash jobs one predictable home, and keeps infrastructure out of the way.
 
+### X. Galleries Beyond Stash: Images and Scenes Together
+
+- Galleries MUST treat **scenes as first-class members** alongside images. A gallery's view shows
+  its images and the scenes related to it in one browsable sequence, and opening any item plays or
+  shows it in the same viewer (mpv, Principle V), moving between images and scenes without leaving
+  the viewer.
+- The gallery experience (the grid, the viewer, navigation, slideshows, chapters) MUST be designed
+  for this viewer from first principles. It MUST NOT copy the Stash web UI's gallery viewer's
+  layout or interaction model; Stash is consulted only for its data model and to confirm no
+  capability is lost (Principle VIII).
+- Every gallery capability Stash offers (browsing and filtering galleries, the images inside a
+  gallery, covers, chapters, zip and folder galleries, image details) MUST still be available.
+  An images-only way to view a gallery MUST remain available for users who want Stash's behaviour.
+- Which scenes belong with a gallery, and any user-defined ordering of a mixed sequence, MUST come
+  from or be persisted to Stash (relationships, tags, or `custom_fields`) per Principle I, never
+  kept only in a local database.
+- The gallery grid, and the images and scenes inside a gallery, are paged like every library
+  listing (Principle IV: default 50 per page, user-selectable).
+- The viewer MUST meet Principle VI's budgets: moving to the next or previous item acknowledges
+  input within 50 ms and shows the item within 150 ms on a LAN server with neighbours prefetched.
+
+**Rationale**: In Stash, galleries are image-only and the gallery viewer is weak, while real
+collections mix photo sets and videos of the same shoot or subject. A native client with one fast
+media player can present them together, which is a reason to choose this viewer over the web UI.
+Designing it fresh, instead of porting Stash's viewer, avoids inheriting its problems.
+
 ## Technology & Platform Constraints
 
 - **Application shell**: Tauri (v2 or later) with a Rust backend. Business logic lives in Rust
@@ -224,7 +273,9 @@ long-running Stash jobs one predictable home, and keeps infrastructure out of th
   network I/O.
 - **Stash API**: GraphQL only, via a single Rust adapter module. Typed operations (e.g. generated
   from Stash's schema) are preferred over hand-built query strings.
-- **Playback**: mpv/libmpv as the sole default video pipeline (Principle V).
+- **Media**: mpv/libmpv as the only media player: video, full-resolution images, and mixed
+  image/video sequences (Principles V and X). The webview renders thumbnails and animated image
+  previews only.
 - **Local persistence**: limited to caches, derived semantic indexes, preferences, and profile
   profiles, including their API keys (Principles I and VII).
 - **Target platforms**: Linux is the primary development and release platform; Windows and macOS
@@ -240,7 +291,7 @@ long-running Stash jobs one predictable home, and keeps infrastructure out of th
 
 - **Spec-driven flow**: features proceed through `/speckit-specify` → `/speckit-plan` →
   `/speckit-tasks` → `/speckit-implement`. Every plan MUST include a Constitution Check that
-  explicitly addresses Principles I–IX, and any deviation MUST be recorded in the plan's
+  explicitly addresses Principles I–X, and any deviation MUST be recorded in the plan's
   Complexity Tracking table with justification.
 - **Parity check**: specs touching semantic data MUST cite the semantic-tagging plugin modules
   they mirror and describe how compatibility with the plugin's data is verified (Principle II).
@@ -270,11 +321,11 @@ long-running Stash jobs one predictable home, and keeps infrastructure out of th
   - MINOR — a principle or section is added, or guidance is materially expanded.
   - PATCH — clarifications, wording, or typo fixes with no change in meaning.
 - **Compliance review**: every `/speckit-plan` Constitution Check and every code review MUST
-  verify compliance with Principles I–IX. Unjustified violations block merge. Justified
+  verify compliance with Principles I–X. Unjustified violations block merge. Justified
   exceptions are recorded in the plan's Complexity Tracking and revisited when the related
   feature is next touched.
 - **Periodic review**: when the semantic-tagging plugin gains a significant new feature or data
   structure, Principle II's parity expectations MUST be re-evaluated and parity work added to the
   backlog.
 
-**Version**: 3.1.0 | **Ratified**: 2026-09-23 | **Last Amended**: 2026-09-27
+**Version**: 3.3.0 | **Ratified**: 2026-09-23 | **Last Amended**: 2026-10-01

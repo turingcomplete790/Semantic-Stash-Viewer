@@ -21,6 +21,7 @@ import {
   registerTabShortcuts,
   resetTabs,
   selectedId,
+  setViewState,
   tabs,
 } from "../../shell/tabs";
 
@@ -142,5 +143,13 @@ describe("TabStrip", () => {
     expect(within(dialog).getByText("Play or pause")).toBeInTheDocument();
     fireEvent.keyDown(document.body, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "Keyboard shortcuts" })).not.toBeInTheDocument();
+  });
+
+  it("keeps a tab's element when its view state is saved (no rebuild per save, e.g. while scrolling)", () => {
+    render(() => <TabStrip />);
+    const before = screen.getAllByRole("tab")[0];
+    setViewState(selectedId(), { scroll: 120 });
+    setViewState(selectedId(), { scroll: 240 });
+    expect(screen.getAllByRole("tab")[0]).toBe(before);
   });
 });

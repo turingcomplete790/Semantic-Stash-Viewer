@@ -11,9 +11,17 @@ import {
   routeOf,
   select,
   selectedId,
+  tabById,
   tabs,
 } from "./tabs";
 import type { TabState } from "./tabs";
+
+/** Stands in for a tab between its removal and its element going away. */
+const EMPTY_TAB: TabState = {
+  id: "",
+  history: [{ route: { kind: "home" }, viewState: null }],
+  index: 0,
+};
 
 function title(tab: TabState): string {
   const route = routeOf(tab);
@@ -47,39 +55,42 @@ export default function TabStrip() {
       {/* The + sits right after the last tab, where users look for it. */}
       <div class="tab-row">
         <div class="tab-list" role="tablist" aria-label="Open tabs">
-          <For each={tabs()}>
-            {(tab) => {
-              const route = () => routeOf(tab);
+          {/* Keyed by id: saving a tab's view state replaces its object, and keying by object
+              would rebuild its element on every save (e.g. every scroll). */}
+          <For each={tabs().map((t) => t.id)}>
+            {(id) => {
+              const tab = () => tabById(id) ?? EMPTY_TAB;
+              const route = () => routeOf(tab());
               const Icon = () => {
                 const r = route();
                 const Glyph = isRoute(r) ? routeIcon(r) : null;
                 return Glyph ? <Glyph /> : null;
               };
               return (
-                <div class="tab" classList={{ selected: selectedId() === tab.id }}>
+                <div class="tab" classList={{ selected: selectedId() === id }}>
                   <button
                     type="button"
                     role="tab"
                     class="tab-label"
-                    aria-selected={selectedId() === tab.id}
-                    title={title(tab)}
-                    onClick={() => select(tab.id)}
+                    aria-selected={selectedId() === id}
+                    title={title(tab())}
+                    onClick={() => select(id)}
                     onAuxClick={(e) => {
                       if (e.button === 1) {
                         e.preventDefault();
-                        close(tab.id);
+                        close(id);
                       }
                     }}
                   >
                     <Icon />
-                    <span class="tab-title">{title(tab)}</span>
+                    <span class="tab-title">{title(tab())}</span>
                   </button>
                   <button
                     type="button"
                     class="tab-close"
-                    aria-label={`Close ${title(tab)}`}
+                    aria-label={`Close ${title(tab())}`}
                     title="Close tab (Ctrl+W)"
-                    onClick={() => close(tab.id)}
+                    onClick={() => close(id)}
                   >
                     <CloseIcon />
                   </button>

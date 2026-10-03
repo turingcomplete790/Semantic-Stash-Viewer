@@ -72,8 +72,11 @@ mpv.
 **Goal:** browse the whole library faster than the web UI, and play videos without transcoding.
 
 ### Scenes
-- [ ] Scene grid and list views: virtualized, server-side pagination, prefetch
-- [ ] Sorting, filtering (the web UI's filter criteria), and search
+- [x] Scene grid and list views: paged (default 50 per page, 20–1000 selectable, per tab),
+      server-side pagination, neighbouring pages prefetched (constitution IV)
+      ([specs/005-browse-scenes-and-play](specs/005-browse-scenes-and-play/), P1)
+- [ ] Sorting, filtering (the web UI's filter criteria), and search (sorting done in 005 P1,
+      including a stable random order; search and filters are 005 US2)
 - [ ] Loading and applying saved filters
 - [ ] Scene detail page: metadata, performers, studio, tags, groups, galleries, files
 - [ ] mpv playback: direct stream, hardware decode, resume position, markers as chapters
@@ -85,13 +88,26 @@ mpv.
 
 ### Images
 - [ ] Image grid (sized thumbnails), filters, and sorting
-- [ ] Full-screen image viewer: keyboard/mouse navigation, zoom, slideshow, full resolution
-      loaded on demand
+- [ ] Full-screen image viewer in mpv (Principle V): keyboard/mouse navigation, zoom, pan,
+      rotation, fit/actual size, animated GIF/WebP, slideshow, and full resolution loaded on
+      demand with the neighbouring items prefetched (next/previous shown within 150 ms)
 
-### Galleries
-- [ ] Gallery grid, filters, and sorting
-- [ ] Gallery view: the images inside a gallery, opening in the image viewer
-- [ ] Gallery chapters
+### Galleries (Principle X: designed fresh, not copied from Stash)
+
+Stash's galleries are image-only and its gallery viewer is weak. Here galleries hold **images and
+scenes together**, in one mpv viewer. Stash is used for its data and to check no capability is
+lost, not as a design to copy.
+
+- [ ] Gallery grid, filters, and sorting (every Stash gallery filter and sort)
+- [ ] Mixed gallery view: the gallery's images and its related scenes in one browsable sequence,
+      with image and scene cards side by side
+- [ ] Unified viewer: opening any item shows the image or plays the scene in mpv, moving between
+      images and scenes (next/previous, slideshow) without leaving the viewer; playback history
+      still syncs for scenes (Principle V)
+- [ ] Which scenes belong with a gallery, and any custom ordering of the mixed sequence, come from
+      or are saved to Stash (relationships, tags, or `custom_fields`), never kept only locally
+- [ ] An images-only view of a gallery, for users who want Stash's behaviour
+- [ ] Gallery chapters, covers, zip and folder galleries, and image details (Stash parity)
 
 ### Other entities
 - [ ] Performers: grid, filters, and detail page (scenes, images, galleries, groups)
@@ -119,7 +135,8 @@ mpv.
 **Exit criteria:** every entity type can be browsed, filtered, and opened. Scenes play in mpv
 and resume state syncs back. Principle VI's budgets are met on a large library.
 
-**Suggested specs:** `app-shell` (done: [specs/004-app-shell](specs/004-app-shell/)), `browse-scenes-and-play`, `browse-images-and-galleries`,
+**Suggested specs:** `app-shell` (done: [specs/004-app-shell](specs/004-app-shell/)), `browse-scenes-and-play` (in progress: [specs/005-browse-scenes-and-play](specs/005-browse-scenes-and-play/)), `browse-images-and-galleries` (mpv image viewer and mixed image/scene galleries, Principles V
+and X),
 `browse-performers-studios-tags-groups`, `markers-wall`, `home-and-global-search`
 
 ---

@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@solidjs/testing-library";
+import { cleanup, render, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConnectionSnapshot, ProfileSummary } from "../bindings";
 
@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => {
       connect: vi.fn(),
       shellLoadTabs: vi.fn(() => Promise.resolve(null)),
       shellSaveTabs: vi.fn(() => Promise.resolve({ status: "ok", data: null })),
+      appQuit: vi.fn(() => Promise.resolve(null)),
       playerSetVideoVisible: vi.fn(() => Promise.resolve(null)),
       notificationsList: vi.fn(() => Promise.resolve([])),
       debugBenchEnabled: vi.fn(() => Promise.resolve(false)),
@@ -34,12 +35,14 @@ const mocks = vi.hoisted(() => {
       playerState: { listen: listen("playerState") },
       notificationsChanged: { listen: listen("notificationsChanged") },
       viewDataChanged: { listen: listen("viewDataChanged") },
+      appClosing: { listen: listen("appClosing") },
     },
   };
 });
 vi.mock("../bindings", () => ({ commands: mocks.commands, events: mocks.events }));
 
 import App from "../App";
+import { navigate, selectedId, setViewState } from "../shell/tabs";
 
 const idle: ConnectionSnapshot = {
   profileId: null,
@@ -97,5 +100,29 @@ describe("App routing", () => {
       await screen.findByRole("heading", { name: "Choose a Stash server" }),
     ).toBeInTheDocument();
     expect(screen.getByText("Other")).toBeInTheDocument();
+  });
+
+  it("saves the tabs, including a change made a moment ago, before quitting", async () => {
+    mocks.commands.listProfiles.mockResolvedValue({ status: "ok", data: [home] });
+    mocks.commands.getConnectionSnapshot.mockResolvedValue({
+      ...idle,
+      profileId: "home",
+      state: { kind: "connecting", attemptUrl: "http://localhost:9999" },
+    });
+    render(() => <App />);
+    await screen.findByText("Connecting to Home…");
+    await waitFor(() => expect(mocks.commands.shellLoadTabs).toHaveBeenCalled());
+    navigate({ kind: "settings", page: "keyboard" });
+    setViewState(selectedId(), { scroll: 321 }); // normally saved half a second later
+    mocks.commands.shellSaveTabs.mockClear();
+    mocks.emit("appClosing", null);
+    await waitFor(() => expect(mocks.commands.appQuit).toHaveBeenCalled());
+    expect(mocks.commands.shellSaveTabs).toHaveBeenCalled();
+    const saved = JSON.stringify(mocks.commands.shellSaveTabs.mock.lastCall);
+    expect(saved).toContain("321");
+    // Saved first, then quit.
+    expect(mocks.commands.shellSaveTabs.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.commands.appQuit.mock.invocationCallOrder[0],
+    );
   });
 });

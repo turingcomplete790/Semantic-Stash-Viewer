@@ -8,7 +8,7 @@ import {
   Show,
   Switch,
 } from "solid-js";
-import { commands } from "./bindings";
+import { commands, events } from "./bindings";
 import ConnectionForm from "./components/ConnectionForm";
 import KeyPrompt from "./components/KeyPrompt";
 import ProfilePicker from "./components/ProfilePicker";
@@ -26,11 +26,13 @@ import {
   currentRoute,
   installMouseNavigation,
   isPlayingTab,
+  leave,
   loadTabsFor,
   navigate,
   navigateIn,
   registerTabShortcuts,
   resetTabs,
+  saveBeforeQuit,
   suspendSaving,
   tabs,
   wasRestored,
@@ -43,6 +45,7 @@ import SettingsView from "./settings/SettingsView";
 import RouteView from "./views/RouteView";
 import "./App.css";
 import { markInteractive } from "./debug/interactive";
+import { registerSceneGridKeys } from "./scenes/keyboard";
 
 /**
  * Hosts the app shell (constitution Principle IX) and routes on the core's connection state:
@@ -78,6 +81,18 @@ export default function App() {
     onCleanup(registerTabShortcuts());
     onCleanup(installMouseNavigation());
     onCleanup(registerPlayerKeyListing());
+    onCleanup(registerSceneGridKeys());
+    // Closing the window: save the tabs (changes are written half a second later normally), then
+    // quit. The app quits on its own after a short wait if this never answers.
+    let stopClosing: (() => void) | undefined;
+    void events.appClosing
+      .listen(() => {
+        void saveBeforeQuit()
+          .catch(() => {})
+          .finally(() => void commands.appQuit());
+      })
+      .then((stop) => (stopClosing = stop));
+    onCleanup(() => stopClosing?.());
   });
 
   // Cold start ends at the first frame with server info (003 research R8). Home also marks it
@@ -227,7 +242,7 @@ export default function App() {
                   onUpdateKey: () => setKeyPromptOpen(true),
                   onAddServer: startAdding,
                   onSettingsPage: (page) => navigateIn(tabId, { kind: "settings", page }),
-                  onLeave: (fallback) => navigateIn(tabId, fallback),
+                  onLeave: (fallback) => leave(tabId, fallback),
                   onClose: () => close(tabId),
                 }}
               />

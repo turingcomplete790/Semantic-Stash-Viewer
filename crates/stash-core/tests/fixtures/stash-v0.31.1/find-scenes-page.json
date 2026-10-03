@@ -1,0 +1,38 @@
+{
+ "data": {
+  "findScenes": {
+   "count": 36350,
+   "scenes": [
+    {
+     "id": "501",
+     "title": "Scene A",
+     "date": "2024-05-17",
+     "files": [
+      { "basename": "scene-a.mp4", "duration": 3725.4, "width": 1920, "height": 1080 },
+      { "basename": "scene-a-copy.mp4", "duration": 3725.4, "width": 1280, "height": 720 }
+     ],
+     "studio": { "name": "Studio One" },
+     "paths": { "screenshot": "http://stash.invalid/scene/501/screenshot?t=1715900000" }
+    },
+    {
+     "id": "502",
+     "title": "",
+     "date": null,
+     "files": [
+      { "basename": "untitled-clip.mkv", "duration": 95.0, "width": 3840, "height": 2160 }
+     ],
+     "studio": null,
+     "paths": { "screenshot": "http://stash.invalid/scene/502/screenshot?t=1716000000" }
+    },
+    {
+     "id": "503",
+     "title": "No Files",
+     "date": null,
+     "files": [],
+     "studio": null,
+     "paths": { "screenshot": "http://stash.invalid/scene/503/screenshot" }
+    }
+   ]
+  }
+ }
+}

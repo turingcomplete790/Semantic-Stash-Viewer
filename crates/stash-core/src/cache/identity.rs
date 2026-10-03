@@ -18,6 +18,11 @@ fn fnv1a(bytes: &[u8], mut hash: u64) -> u64 {
     hash
 }
 
+/// 64-bit FNV-1a of `bytes` as 16 lower-case hex digits (also used for cache keys, 005 R7).
+pub(crate) fn hash_hex(bytes: &[u8]) -> String {
+    format!("{:016x}", fnv1a(bytes, FNV_OFFSET))
+}
+
 /// 16 lower-case hex digits identifying one Stash instance at one address.
 pub fn server_identity(
     url: &Url,

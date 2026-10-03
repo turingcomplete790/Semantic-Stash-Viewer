@@ -12,8 +12,9 @@ server.
 > with full playback controls. The app shell is in place: a Stash-style navigation bar, tabs,
 > a notification centre (connection alerts and live Stash jobs), and Settings. Phase 0 (the
 > foundation) is complete: screens open instantly from a local cache and stay usable offline,
-> and every performance budget is measured by one command. Browsing the library comes next
-> (see the [roadmap](ROADMAP.md)). The project is specified with
+> and every performance budget is measured by one command. The whole scene library can be
+> browsed as a paged grid or list, in every web UI sort; search, filters, and the scene page
+> come next (see the [roadmap](ROADMAP.md)). The project is specified with
 > [Spec Kit](https://github.com/github/spec-kit), and its governing rules live in the
 > [constitution](.specify/memory/constitution.md).
 
@@ -124,7 +125,8 @@ previous run; anything more than 20% slower is flagged, and it exits non-zero if
 ### Cache
 
 Screens open from a local cache in `~/.cache/semantic-stash-viewer/` (one folder per server).
-It's safe to delete at any time: the app just reads from the server again. Settings →
+Scene thumbnails (resized to 480 px) are kept there too. It's safe to delete at any time: the
+app just reads from the server again. Settings →
 Troubleshooting → Clear cache does the same from inside the app.
 
 ### Workflow

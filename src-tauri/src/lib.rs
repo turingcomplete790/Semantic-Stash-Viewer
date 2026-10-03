@@ -9,8 +9,10 @@ mod logging;
 #[cfg(debug_assertions)]
 mod measure;
 mod player_commands;
+mod scenes_commands;
 mod shell_commands;
 mod state;
+mod thumb_scheme;
 #[cfg(target_os = "linux")]
 mod video_surface;
 
@@ -87,7 +89,10 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             cache_commands::cached_server_info,
             cache_commands::cache_size,
             cache_commands::clear_cache,
+            scenes_commands::scenes_page,
+            scenes_commands::scene_sorts,
             shell_commands::app_info,
+            shell_commands::app_quit,
             player_commands::player_stats,
         ])
         .events(collect_events![
@@ -95,7 +100,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             events::ProfilesChangedEvent,
             player_commands::PlayerStateEvent,
             events::NotificationsChangedEvent,
-            cache_commands::ViewDataChangedEvent
+            cache_commands::ViewDataChangedEvent,
+            events::AppClosingEvent
         ])
 }
 
@@ -119,6 +125,8 @@ pub fn run() {
     }
 
     tauri::Builder::default()
+        .register_asynchronous_uri_scheme_protocol(thumb_scheme::SCHEME, thumb_scheme::handle)
+        .manage(thumb_scheme::ThumbServices::default())
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);
@@ -154,6 +162,7 @@ pub fn run() {
                 std::sync::Arc::clone(&state.profiles),
             );
             events::forward_notifications(app.handle().clone(), &state.notifications);
+            save_before_closing(app);
             harness::install(app.handle());
             auto_connect(&state);
             app.manage(state);
@@ -163,6 +172,32 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running Semantic Stash Viewer");
+}
+
+/// Give the UI a moment to save before the window closes: the first close request is held, the UI
+/// is told (`app-closing`) and calls `app_quit` once its tab state is written; if it doesn't answer
+/// within 1.5 s the app quits anyway. A second close request goes through at once.
+fn save_before_closing(app: &tauri::App) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let closing = Arc::new(AtomicBool::new(false));
+    let handle = app.handle().clone();
+    window.on_window_event(move |event| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            if closing.swap(true, Ordering::SeqCst) {
+                return;
+            }
+            api.prevent_close();
+            let _ = events::AppClosingEvent.emit(&handle);
+            let fallback = handle.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(1500));
+                fallback.exit(0);
+            });
+        }
+    });
 }
 
 /// Reconnect to the last-used profile at launch without blocking window creation (FR-014).

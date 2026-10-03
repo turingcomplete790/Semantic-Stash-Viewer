@@ -131,3 +131,10 @@ mod tests {
         );
     }
 }
+
+/// Quit, once the UI has saved what it needed to after `app-closing`.
+#[tauri::command]
+#[specta::specta]
+pub fn app_quit(app: tauri::AppHandle) {
+    app.exit(0);
+}

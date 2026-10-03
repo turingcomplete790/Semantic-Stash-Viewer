@@ -179,9 +179,19 @@ where
     Fut: Future<Output = Result<T, AppError>> + Send + 'static,
 {
     let client = crate::player_commands::active_client(state).map(|(client, _, _)| client);
-    let Some(r) = current_profile(state).and_then(|id| state.caches.for_profile(id)) else {
+    let Some((profile, r)) =
+        current_profile(state).and_then(|id| state.caches.for_profile(id).map(|r| (id, r)))
+    else {
         return Ok(Cached::fresh(fetch(client?).await?));
     };
+    // The connection is the authority on whether we're online. The task that follows it updates
+    // the cache's flag too, but after opening the cache and checking the server's identity, so a
+    // read made right after "connected" (restored tabs on a cold start) could still see "offline"
+    // and fail with nothing cached.
+    let snapshot = state.manager.snapshot();
+    r.set_online(
+        matches!(snapshot.state, SessionState::Connected) && snapshot.profile_id == Some(profile),
+    );
     let client = client.ok();
     let fetcher = move || {
         let pending = client.clone().map(&fetch);
