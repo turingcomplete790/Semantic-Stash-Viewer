@@ -1,6 +1,7 @@
 //! One command for every Phase 0 performance budget (003 US2, research R8).
 //!
-//! `cargo run --bin perf-harness -- --profile "<name>" [--quick]` builds the debug app, starts
+//! `cargo run --bin perf-harness -- --profile "<name>" [--app web|native] [--quick]` builds the
+//! debug app (`web`, the default, or the native spike build, 006 contracts/measurements.md), starts
 //! the UI dev server if it isn't running, launches the app several times with the harness
 //! switches, collects its `MEASURE` lines, and writes a report to
 //! `~/.local/share/semantic-stash-viewer/perf/`. Exits non-zero if a budget failed.
@@ -25,19 +26,51 @@ const DEV_PORT: u16 = 5173;
 const LAUNCH_TIMEOUT: Duration = Duration::from_secs(300);
 const LONG_PLAYBACK_SECS: u32 = 60;
 
+/// Which build to measure (006): the Tauri web build, or the native spike build.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum App {
+    Web,
+    Native,
+}
+
+impl App {
+    fn package(self) -> &'static str {
+        match self {
+            App::Web => "semantic-stash-viewer",
+            App::Native => "semantic-stash-viewer-native",
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            App::Web => "web",
+            App::Native => "native",
+        }
+    }
+}
+
 struct Options {
     profile: String,
     quick: bool,
+    app: App,
 }
 
 fn parse_args() -> Result<Options, String> {
     let mut profile = None;
     let mut quick = false;
+    let mut app = App::Web;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--profile" => profile = args.next(),
             "--quick" => quick = true,
+            "--app" => {
+                app = match args.next().as_deref() {
+                    Some("web") => App::Web,
+                    Some("native") => App::Native,
+                    _ => return Err("--app takes web or native".into()),
+                }
+            }
             "-h" | "--help" => return Err(String::new()),
             other => return Err(format!("unknown argument: {other}")),
         }
@@ -45,6 +78,7 @@ fn parse_args() -> Result<Options, String> {
     Ok(Options {
         profile: profile.ok_or("--profile <display name> is required")?,
         quick,
+        app,
     })
 }
 
@@ -55,7 +89,9 @@ fn main() -> ExitCode {
             if !message.is_empty() {
                 eprintln!("{message}");
             }
-            eprintln!("usage: perf-harness --profile \"<display name>\" [--quick]");
+            eprintln!(
+                "usage: perf-harness --profile \"<display name>\" [--app web|native] [--quick]"
+            );
             return ExitCode::from(2);
         }
     };
@@ -85,10 +121,10 @@ fn run(options: &Options) -> Result<Report, String> {
     let started = Instant::now();
     let root = workspace_root();
 
-    step("Building the debug app");
+    step(&format!("Building the debug app ({})", options.app.name()));
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
     let status = Command::new(cargo)
-        .args(["build", "-p", "semantic-stash-viewer"])
+        .args(["build", "-p", options.app.package()])
         .current_dir(&root)
         .status()
         .map_err(|e| format!("couldn't run cargo: {e}"))?;
@@ -97,9 +133,13 @@ fn run(options: &Options) -> Result<Report, String> {
     }
     let target =
         std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| root.join("target"), PathBuf::from);
-    let app = target.join("debug").join("semantic-stash-viewer");
+    let app = target.join("debug").join(options.app.package());
 
-    let _dev_server = DevServer::start(&root)?;
+    // Only the web build loads its UI from the dev server.
+    let _dev_server = match options.app {
+        App::Web => Some(DevServer::start(&root)?),
+        App::Native => None,
+    };
 
     let base = [
         ("SSV_HARNESS_PROFILE", options.profile.clone()),
@@ -144,12 +184,13 @@ fn run(options: &Options) -> Result<Report, String> {
     measurements.extend(playback_measurements(&playback));
 
     let dir = perf_dir();
-    let previous = newest_report(&dir);
+    let previous = newest_report(&dir, options.app.name());
     let mut report = Report {
         created_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         app_version: env!("CARGO_PKG_VERSION").to_owned(),
         machine: machine(),
         profile: options.profile.clone(),
+        app: options.app.name().to_owned(),
         measurements,
     };
     report.compare(previous.as_ref());
@@ -521,10 +562,13 @@ fn playback_measurements(launch: &Launch) -> Vec<Measurement> {
 
     let long = launch.lines.iter().find(|l| l.get("long").is_some());
     let per_minute = long.and_then(|l| {
-        let dropped = number(l, "dropped")?;
+        let dropped = number(l, "dropped")? + not_shown(l);
         let seconds = number(l, "seconds")?;
         (seconds > 0.0).then(|| (dropped / (seconds / 60.0) * 100.0).round() / 100.0)
     });
+    // The native build also reports the rate the UI put frames on screen (006): mpv's own counter
+    // can't see a frame that was rendered but never shown.
+    let displayed = long.and_then(|l| number(l, "displayed_fps"));
     let cpu = long.and_then(|l| number(l, "main_thread_cpu_percent"));
     let long_invalid = run_invalid
         .or_else(|| long.and_then(|l| l.get("invalid").and_then(Value::as_str).map(str::to_owned)))
@@ -555,6 +599,13 @@ fn playback_measurements(launch: &Launch) -> Vec<Measurement> {
             long_invalid.clone(),
         ),
         Measurement::from_samples(
+            "playback-displayed-fps",
+            Unit::Fps,
+            None,
+            &displayed.into_iter().collect::<Vec<_>>(),
+            long_invalid.clone(),
+        ),
+        Measurement::from_samples(
             "playback-main-thread-cpu",
             Unit::Percent,
             None,
@@ -562,6 +613,21 @@ fn playback_measurements(launch: &Launch) -> Vec<Measurement> {
             long_invalid,
         ),
     ]
+}
+
+/// Frames mpv rendered that the UI never showed, over the long run (native build lines only; the
+/// web build presents every frame mpv renders, so it has no such fields).
+fn not_shown(long: &Value) -> f64 {
+    match (
+        number(long, "rendered_fps"),
+        number(long, "displayed_fps"),
+        number(long, "seconds"),
+    ) {
+        (Some(rendered), Some(displayed), Some(seconds)) => {
+            ((rendered - displayed) * seconds).max(0.0).round()
+        }
+        _ => 0.0,
+    }
 }
 
 // ---- Reports on disk and the machine -----------------------------------------------------
@@ -575,7 +641,8 @@ fn perf_dir() -> PathBuf {
 }
 
 /// The newest earlier report (names are timestamps, so they sort in time order).
-fn newest_report(dir: &Path) -> Option<Report> {
+/// The newest earlier report for the same app (reports from before 006 are the web build's).
+fn newest_report(dir: &Path, app: &str) -> Option<Report> {
     let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
         .ok()?
         .filter_map(|e| e.ok().map(|e| e.path()))
@@ -585,7 +652,8 @@ fn newest_report(dir: &Path) -> Option<Report> {
     files
         .iter()
         .rev()
-        .find_map(|p| serde_json::from_str(&std::fs::read_to_string(p).ok()?).ok())
+        .filter_map(|p| serde_json::from_str::<Report>(&std::fs::read_to_string(p).ok()?).ok())
+        .find(|r| r.app == app)
 }
 
 /// OS, CPU, and GPU, from what the system reports.
@@ -616,4 +684,23 @@ fn machine() -> String {
         .flatten()
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::not_shown;
+    use serde_json::json;
+
+    #[test]
+    fn frames_rendered_but_never_shown_count_as_dropped() {
+        // The native build's first video path: mpv rendered 30 fps, the UI showed 0.1 fps.
+        let slideshow =
+            json!({"long": "1", "seconds": 20.0, "rendered_fps": 29.9, "displayed_fps": 0.1});
+        assert_eq!(not_shown(&slideshow), 596.0);
+        let smooth =
+            json!({"long": "1", "seconds": 20.0, "rendered_fps": 29.9, "displayed_fps": 29.9});
+        assert_eq!(not_shown(&smooth), 0.0);
+        // The web build's lines have no frame rates.
+        assert_eq!(not_shown(&json!({"long": "1", "seconds": 20.0})), 0.0);
+    }
 }

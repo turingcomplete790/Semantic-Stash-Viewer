@@ -172,7 +172,14 @@ pub struct Report {
     pub machine: String,
     /// The profile's display name only: never an address or key.
     pub profile: String,
+    /// `web` or `native` (006); reports written before 006 are the web build's.
+    #[serde(default = "web_app")]
+    pub app: String,
     pub measurements: Vec<Measurement>,
+}
+
+fn web_app() -> String {
+    "web".into()
 }
 
 impl Report {
@@ -209,8 +216,8 @@ impl Report {
 
     pub fn to_markdown(&self) -> String {
         let mut out = format!(
-            "# Performance report\n\n- **Profile**: {}\n- **When**: {}\n- **Version**: {}\n- **Machine**: {}\n\n",
-            self.profile, self.created_at, self.app_version, self.machine
+            "# Performance report\n\n- **App**: {}\n- **Profile**: {}\n- **When**: {}\n- **Version**: {}\n- **Machine**: {}\n\n",
+            self.app, self.profile, self.created_at, self.app_version, self.machine
         );
         out.push_str("| Measurement | Result | Median | p95 | Max | Budget | Samples | Change |\n");
         out.push_str("|---|---|---|---|---|---|---|---|\n");
@@ -269,6 +276,7 @@ mod tests {
             app_version: "0.1.0".into(),
             machine: "Linux, test CPU".into(),
             profile: "Home server".into(),
+            app: "web".into(),
             measurements,
         }
     }
@@ -400,5 +408,12 @@ mod tests {
         let json = serde_json::to_string(&r).expect("json");
         let back: Report = serde_json::from_str(&json).expect("round trip");
         assert_eq!(back, r);
+    }
+
+    #[test]
+    fn reports_from_before_the_native_build_are_the_web_builds() {
+        let old = r#"{"createdAt":"2026-09-29T12:00:00Z","appVersion":"0.1.0","machine":"m","profile":"p","measurements":[]}"#;
+        let r: Report = serde_json::from_str(old).expect("old report");
+        assert_eq!(r.app, "web");
     }
 }
