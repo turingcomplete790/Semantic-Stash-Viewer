@@ -65,8 +65,8 @@ Stash on the same LAN, and in WebKitGTK 2.52 (the app's engine).
     minmax(240px, 1fr))`) or list, with no virtualization: every size up to 1000 scrolls at
     60 fps, as Principle VI now allows (virtualization only where a view can't stay in budget).
   - Cards keep `contain: layout paint style`, one-line text (title, details), and
-    `decoding="async"` thumbnails with `loading="lazy"` (cheaper builds at large sizes, and
-    off-screen thumbnails of a 1000-card page aren't fetched until they're near).
+    `decoding="async"` thumbnails, loaded **eagerly** (amended below: `loading="lazy"` was the
+    first choice and failed in the app).
   - `content-visibility` is not used (it makes scrolling worse here).
   - The velocity-aware thumbnail hold-back of the first version is **removed**: it existed for
     flinging through an endless grid, and its grey placeholders are the "black thumbnails" seen
@@ -78,6 +78,23 @@ Stash on the same LAN, and in WebKitGTK 2.52 (the app's engine).
   math, nothing to restore but a page number and a scroll offset.
 - **Alternatives rejected**: keeping the virtual grid inside a page (unneeded per the table, and
   it carried the demo's bugs); `content-visibility` (worse scrolling).
+- **Amendment (2026-10-03, T024): thumbnails load eagerly, not lazily.** The harness, scrolling a
+  1000-card page of real thumbnails in the app at 64 px/frame, missed **56% of frames in the grid
+  and 23% in the list** with `loading="lazy"`; the table above was measured with synthetic images
+  that are far cheaper to decode (flat-colour JPEGs: 21% missed in the app; noise JPEGs at 480,
+  320, and 240 px: 64%, 28%, 15%). Isolated in the app (Production, WebKitGTK 2.52, RX 9060 XT):
+  - Thumbnails hidden: 0% missed. All thumbnails loaded before scrolling: **0–1.7% missed**.
+    The cost is each thumbnail arriving and decoding while the page scrolls.
+  - No effect: card border radius, `contain` on the card or the thumbnail box (`strict`),
+    `will-change` layers (100% missed), `image-rendering: optimizeSpeed`, Skia CPU rendering,
+    the shared-memory renderer, `blob:` URLs instead of `ssv-thumb://`, optimised Rust
+    dependencies, and waiting for background prefetching to finish.
+  - Pre-decoding with `img.decode()` a few at a time blocked the main thread (~100 ms frames) for
+    as long as it ran.
+  - **Eager loading** (no `loading` attribute) passes everything: page change 81 ms median /
+    97 ms p95, page jump 138 / 152 ms (lazily, cold thumbnails had kept jumps past 5 s), scrolling
+    1000 cards 0% missed in grid and list. A 1000-card page holds ≈ 1000 decoded thumbnails
+    (≈ 500 MB at 480 px) in the webview, which WebKit's caches manage; the default page is 50.
 
 ## R4. Moving between pages: prefetch the neighbours
 

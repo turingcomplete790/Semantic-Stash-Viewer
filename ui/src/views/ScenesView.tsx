@@ -21,6 +21,9 @@ import { navigate, setViewState } from "../shell/tabs";
 import { useTab, useViewState } from "../shell/viewState";
 import "../scenes/scenes.css";
 
+/** Save the scroll position this long after scrolling stops. */
+const SCROLL_SAVE_DELAY_MS = 200;
+
 const DEFAULT_QUERY: SceneQuery = { search: "", sort: "date", direction: "desc", seed: null };
 
 /**
@@ -86,21 +89,18 @@ export default function ScenesView() {
     }
   });
 
-  // Save the scroll position, at most once per frame.
-  let scrollFrame: number | undefined;
+  // Save the scroll position once scrolling pauses: it's only needed when the user leaves and
+  // comes back, and saving replaces the tab's state, which isn't free (005 harness: per-frame
+  // saves cost most of the frame budget while scrolling).
+  let scrollTimer: ReturnType<typeof setTimeout> | undefined;
   function onScroll() {
-    if (scrollFrame !== undefined) return;
-    const schedule = globalThis.requestAnimationFrame ?? ((f: () => void) => setTimeout(f, 16));
-    scrollFrame = schedule(() => {
-      scrollFrame = undefined;
-      saveScroll(scroller.scrollTop);
-    }) as number;
+    clearTimeout(scrollTimer);
+    scrollTimer = setTimeout(() => saveScroll(scroller.scrollTop), SCROLL_SAVE_DELAY_MS);
   }
-  onCleanup(() => {
-    if (scrollFrame !== undefined) globalThis.cancelAnimationFrame?.(scrollFrame);
-  });
+  onCleanup(() => clearTimeout(scrollTimer));
 
   function toTop() {
+    clearTimeout(scrollTimer);
     pendingScroll = null;
     scroller.scrollTop = 0;
     saveScroll(0);

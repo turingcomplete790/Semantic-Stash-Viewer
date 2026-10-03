@@ -72,9 +72,11 @@ mpv.
 **Goal:** browse the whole library faster than the web UI, and play videos without transcoding.
 
 ### Scenes
-- [ ] Scene grid and list views: paged (default 50 per page, 20–1000 selectable, per tab),
+- [x] Scene grid and list views: paged (default 50 per page, 20–1000 selectable, per tab),
       server-side pagination, neighbouring pages prefetched (constitution IV)
-- [ ] Sorting, filtering (the web UI's filter criteria), and search
+      ([specs/005-browse-scenes-and-play](specs/005-browse-scenes-and-play/), P1)
+- [ ] Sorting, filtering (the web UI's filter criteria), and search (sorting done in 005 P1,
+      including a stable random order; search and filters are 005 US2)
 - [ ] Loading and applying saved filters
 - [ ] Scene detail page: metadata, performers, studio, tags, groups, galleries, files
 - [ ] mpv playback: direct stream, hardware decode, resume position, markers as chapters

@@ -125,7 +125,7 @@ sizes, every web UI sort, keyboard navigation across pages, and per-tab state th
 - [X] T021 [P] [US1] `ui/src/scenes/PageControls.tsx` (FR-004): "Page N of M · first–last of total" (en-US number formatting), first/previous/next/last buttons, "Go to page" (clamped to 1…M), and the page-size menu (20, 40, 50, 60, 120, 250, 500, 1000)
 - [X] T022 [US1] Rework `ui/src/views/ScenesView.tsx` (research R6): toolbar (SortMenu, grid/list, PageControls), SceneGrid in its own scroller, PageControls again below the grid; view state `{ query, page, pageSize, mode, scroll }` read once on mount and written on change (scroll coalesced to one write per animation frame, restored after the page renders); page size change → `floor(firstVisibleIndex / newSize) + 1`; query change → page 1; `[` / `]` and `onEdge` change page (focus the first/last card of the new page); empty and unreachable states. Update `ui/src/scenes/keyboard.ts` for `edge` and `page` actions and the "Next page" / "Previous page" listings. Remove `ui/src/scenes/VirtualGrid.tsx`, `ui/src/scenes/PositionBar.tsx`, and `ui/src/__tests__/scenes/VirtualGrid.test.tsx`
 - [X] T023 [US1] Harness (research R10): in `ui/src/debug/bench.ts` replace the continuous-scroll measurements (`scenes-grid-*`, `scenes-list-*`, `scenes-jump`) with `scenes-page-change` (20 next/previous moves at 50 per page, each until its cards and thumbnails are painted), `scenes-page-jump` (5 random pages), and `scenes-scroll-1000` (a 1000-card page scrolled 5 s at 64 px per frame, missed frames against the idle baseline, in grid and list); map them in `src-tauri/src/bin/perf_harness.rs` (budgets: page change 150 ms at p95, jump 1000 ms at p95, scroll < 1% missed in each mode)
-- [ ] T024 [US1] Run the full gate, then manual checks V1–V8 with the user on the Production profile (read-only), V6 (never resets) in both modes, and one harness run. Record the numbers in `specs/005-browse-scenes-and-play/quickstart.md`
+- [X] T024 [US1] Run the full gate, then manual checks V1–V8 with the user on the Production profile (read-only), V6 (never resets) in both modes, and one harness run. Record the numbers in `specs/005-browse-scenes-and-play/quickstart.md`
 
 **Checkpoint**: the whole library can be paged, jumped through, resized, sorted, and restored
 exactly, within the budgets; the demo's resets and blank thumbnails are gone.
@@ -134,8 +134,8 @@ exactly, within the budgets; the demo's resets and blank thumbnails are gone.
 
 ## Phase 4: Polish & Cross-Cutting Concerns
 
-- [ ] T025 [P] Update `ROADMAP.md` Phase 1 "Scenes" (paged grid and list views and sorting done for P1; filters, saved filters, and the scene page still open) and `README.md` (the status line; thumbnails are cached with the rest of the cache)
-- [ ] T026 Run the full gate: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, the bindings drift check, `npm --prefix ui run lint`, `npm --prefix ui run typecheck`, and `npm --prefix ui test`
+- [X] T025 [P] Update `ROADMAP.md` Phase 1 "Scenes" (paged grid and list views and sorting done for P1; filters, saved filters, and the scene page still open) and `README.md` (the status line; thumbnails are cached with the rest of the cache)
+- [X] T026 Run the full gate: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, the bindings drift check, `npm --prefix ui run lint`, `npm --prefix ui run typecheck`, and `npm --prefix ui test`
 
 ---
 

@@ -108,7 +108,7 @@ src-tauri/src/
 ui/src/
 ├── scenes/
 │   ├── SceneGrid.tsx                     # NEW: a page of cards as a plain CSS grid or list (R3); roving focus (R8)
-│   ├── SceneCard.tsx                     # kept; loading="lazy", no deferred-thumbnail logic (R3)
+│   ├── SceneCard.tsx                     # kept; thumbnails load eagerly, no deferred-thumbnail logic (R3 amendment)
 │   ├── PageControls.tsx                  # NEW: first/prev/next/last, "Page 25 of 727 · 1,201–1,250 of 36,350", go to page, page size (FR-004)
 │   ├── pages.ts                          # REWORKED: current page + neighbours, thumbnail warm-up, refresh on view-data-changed (R4, R7)
 │   ├── keyboard.ts                       # reworked for page crossing and [ / ] (R8)
@@ -157,7 +157,7 @@ navigation fix for the demo's resets. No open questions remain.
 | Risk | Mitigation |
 |---|---|
 | Thumbnail warm-up for neighbours competes with the current page's thumbnails | Warm-up starts only after the current page's cards render; the core prepares at most 6 at a time and serves cached ones instantly |
-| 1000-card pages take ≈ 390 ms to build | Budgeted separately (Notes); `loading="lazy"` keeps off-screen thumbnails from loading |
+| 1000-card pages take ≈ 390 ms to build | Budgeted separately (Notes); thumbnails load eagerly, since lazy loading cost frames mid-scroll (R3 amendment) |
 | Restoring the scroll offset before the page has its full height | Restore after the page's cards render (the height follows from the card count and columns) |
 | The navigation fix changes shell behaviour other views rely on | Only "leave" and same-route navigation change; tests cover Home, Settings, and scene flows |
 

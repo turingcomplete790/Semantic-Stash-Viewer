@@ -6,8 +6,8 @@ export type CardState = "loading" | "ready" | "unreachable";
 
 /**
  * One card in a page of scenes, or a row in the list (005 FR-001). Text stays on one line each for
- * the title and the details. Thumbnails load at once (lazily for cards far down a large page) and
- * decode off the main thread.
+ * the title and the details. Every thumbnail on the page loads at once, never lazily: in WebKitGTK
+ * each thumbnail that arrives mid-scroll costs frames (005 T024, research R3).
  */
 export default function SceneCard(props: {
   index: number;
@@ -66,9 +66,7 @@ export default function SceneCard(props: {
         >
           <div class="scene-card-thumb">
             <Show when={card().thumb}>
-              {(thumb) => (
-                <img src={thumb()} alt="" loading="lazy" decoding="async" draggable={false} />
-              )}
+              {(thumb) => <img src={thumb()} alt="" decoding="async" draggable={false} />}
             </Show>
           </div>
           <div class="scene-card-title" title={card().title}>

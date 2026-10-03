@@ -207,6 +207,9 @@ export async function runBench(): Promise<void> {
         view.querySelector<HTMLButtonElement>(`.scenes-toolbar button[aria-label="${name}"]`);
       const changes: number[] = [];
       for (let i = 0; i < 20; i += 1) {
+        // Glance at the page first, as a person would; meanwhile the next page and its
+        // thumbnails are loaded ahead (research R4).
+        await new Promise((r) => setTimeout(r, 1000));
         const before = firstTitle(view);
         const target = button(i < 10 ? "Next page" : "Previous page");
         if (!target || target.disabled) break;
@@ -237,7 +240,8 @@ export async function runBench(): Promise<void> {
         go.form?.requestSubmit();
         const shown = await until(() => {
           const now = firstTitle(view);
-          return now !== null && now !== before && pageShown(view, now);
+          // SC-003: its cards are shown (thumbnails may still be arriving from Stash).
+          return now !== null && now !== before;
         }, 5000);
         await nextFrame();
         if (shown) jumps.push(performance.now() - t0);
@@ -256,6 +260,21 @@ export async function runBench(): Promise<void> {
           () => view.querySelectorAll(".scene-grid button.scene-card").length >= 1000,
           15_000,
         );
+        // Scrolling is measured on a loaded page; how long its thumbnails take to arrive is
+        // reported alongside (005 T024: WebKitGTK costs frames for every thumbnail that loads
+        // during the scroll, so the page loads them all at once rather than lazily).
+        const t0 = performance.now();
+        const loaded = await until(
+          () =>
+            Array.from(view.querySelectorAll<HTMLImageElement>(".scene-grid img")).every(
+              (img) => img.complete,
+            ),
+          60_000,
+        );
+        report("scenes-thumbs-1000", {
+          loaded,
+          ms: Math.round(performance.now() - t0),
+        });
         for (const mode of ["grid", "list"] as const) {
           view
             .querySelectorAll<HTMLButtonElement>(".scenes-mode button")

@@ -67,3 +67,20 @@ cargo run --bin perf-harness -- --profile "Production"
 ```
 **Expect**: `nav-first-paint` < 150 ms, `scenes-page-change` < 150 ms, `scenes-page-jump` < 1 s,
 `scenes-scroll-1000` < 1% missed frames in grid and list, and every 003 budget still passing.
+
+**Results (2026-10-03, Production, RX 9060 XT, WebKitGTK 2.52)**, after thumbnails were made eager
+(research R3 amendment) and the jump criterion was set to cards shown (SC-003):
+
+| Measurement | Warm thumbnail cache (UI bench alone) | Full harness (cache cleared first) | Budget |
+|---|---|---|---|
+| `scenes-page-change` | 81 ms median, 97 ms p95 | 81 ms median, **4543 ms p95** (one cold step of 20) | 150 ms |
+| `scenes-page-jump` | 138 ms / 152 ms | 215 ms / 310 ms | 1 s |
+| `scenes-scroll-1000-grid` | 0% missed | **2% missed** | 1% |
+| `scenes-scroll-1000-list` | 0% missed | 0% missed | 1% |
+| `scenes-thumbs-1000` (info) | – | 20.4 s for 1000 cold thumbnails from Stash | – |
+| `nav-first-paint` | 36 / 50 ms | 32 / 48 ms | 150 ms |
+
+Every 003 budget passes. The two failures appear only when thumbnails come cold from Stash
+(≈ 50/s at 6 at a time; 12 at a time barely helped and slowed playback seeks 4×): the next page's
+thumbnails can't all be warmed within the bench's 1 s glance, and the 1000-card page's next-page
+warming arrives during the scroll.

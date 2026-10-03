@@ -50,11 +50,12 @@ describe("SceneGrid", () => {
     expect(l.container.querySelector(".scene-grid")).toHaveClass("list");
   });
 
-  it("loads thumbnails at once, lazily and decoded off the main thread", () => {
+  it("loads the whole page's thumbnails at once, not lazily (005 T024)", () => {
     const g = setup();
     const img = g.button("Scene 50").querySelector("img") as HTMLImageElement;
     expect(img.getAttribute("src")).toBe("ssv-thumb://localhost/scene/50?v=1");
-    expect(img.getAttribute("loading")).toBe("lazy");
+    // Lazy loading in WebKitGTK costs frames for every thumbnail that arrives mid-scroll.
+    expect(img.getAttribute("loading")).toBeNull();
     expect(img.getAttribute("decoding")).toBe("async");
   });
 
