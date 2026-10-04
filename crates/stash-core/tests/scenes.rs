@@ -161,9 +161,9 @@ async fn test_scenes_come_back_as_labelled_groups_in_order() {
 #[tokio::test]
 async fn empty_test_groups_are_dropped() {
     let body = r#"{"data":{
-        "fourKH264":{"scenes":[]},"fourKHevc":{"scenes":[]},"aboveFourK":{"scenes":[]},
-        "wmvHd":{"scenes":[{"id":"9","title":"","files":[{"basename":"x.wmv","duration":60.0,"width":1920,"height":1080,"video_codec":"wmv3","format":"wmv"}]}]},
-        "vp9Hd":{"scenes":[]},"av1":{"scenes":[]},"mpeg4":{"scenes":[]},"flv":{"scenes":[]}}}"#;
+        "four_k_h264":{"scenes":[]},"four_k_hevc":{"scenes":[]},"above_four_k":{"scenes":[]},
+        "wmv_hd":{"scenes":[{"id":"9","title":"","files":[{"basename":"x.wmv","duration":60.0,"width":1920,"height":1080,"video_codec":"wmv3","format":"wmv"}]}]},
+        "vp9_hd":{"scenes":[]},"av1":{"scenes":[]},"mpeg4":{"scenes":[]},"flv":{"scenes":[]}}}"#;
     let server = stash_answering(body).await;
     let groups = test_scenes(&client(&server)).await.expect("test set");
     assert_eq!(groups.len(), 1);

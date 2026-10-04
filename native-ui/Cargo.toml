@@ -11,8 +11,9 @@ publish = false
 [dependencies]
 stash-core = { path = "../crates/stash-core" }
 player = { path = "../crates/player" }
-iced = { version = "0.14", features = ["wgpu", "image", "tokio", "advanced"] }
+iced = { version = "0.14", features = ["wgpu", "image", "svg", "tokio", "advanced"] }
 tokio = { workspace = true }
+tokio-util = "0.7"
 serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
@@ -32,6 +33,7 @@ libloading = "0.8"
 [dev-dependencies]
 iced_test = "0.14"
 tempfile = "3"
+chrono = { workspace = true }
 
 [lints]
 workspace = true

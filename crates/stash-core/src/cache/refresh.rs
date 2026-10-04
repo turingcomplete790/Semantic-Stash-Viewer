@@ -168,7 +168,7 @@ impl Refresher {
             (cache.get::<T>(key), cache.fetched_at_ms(key))
         };
         if let Some(hit) = hit {
-            let stale = fetched_ms.map_or(true, |t| (self.clock)() - t >= REFRESH_FLOOR_MS);
+            let stale = fetched_ms.is_none_or(|t| (self.clock)() - t >= REFRESH_FLOOR_MS);
             if policy == RefreshPolicy::Auto && stale && self.is_online() {
                 self.spawn_refresh::<T, F, Fut>(key.to_owned(), fetch);
             }

@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/stash-core", "crates/player", "src-tauri", "native-ui"]
+members = ["crates/stash-core", "crates/player", "crates/perf-harness", "src-tauri", "native-ui"]
 resolver = "2"
 
 [workspace.package]

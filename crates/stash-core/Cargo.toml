@@ -3,7 +3,7 @@ name = "stash-core"
 description = "Headless core for Semantic Stash Viewer: Stash adapter, connection logic, profiles"
 version.workspace = true
 edition.workspace = true
-rust-version.workspace = true
+rust-version = "1.85"
 license.workspace = true
 
 # This crate MUST NOT depend on tauri (constitution Principle III).
@@ -26,7 +26,9 @@ specta = { workspace = true, optional = true }
 # TypeScript `unknown` instead of serde_json::Value's i64-based model.
 specta-typescript = { version = "0.0.12", optional = true }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "http2"] }
-graphql_client = "0.16"
+# Typed GraphQL (007 research R5): queries and fragments as Rust structs checked against Stash
+# v0.31.1's schema at build time. MPL-2.0, used unmodified.
+cynic = "3.14"
 tokio-util = "0.7"
 semver = "1"
 # Scene screenshots cross the UI bridge as data URLs (004 restored scene tabs).
@@ -47,6 +49,9 @@ turbojpeg = { version = "1", default-features = false, features = ["pkg-config"]
 fast_image_resize = "5"
 # Non-JPEG covers (uploaded or scraped PNG/WebP) only.
 image = { version = "0.25", default-features = false, features = ["png", "webp"] }
+
+[build-dependencies]
+cynic-codegen = "3.14"
 
 [dev-dependencies]
 wiremock = "0.6"

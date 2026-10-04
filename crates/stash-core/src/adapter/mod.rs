@@ -1,6 +1,7 @@
 //! The Stash adapter: the **only** module in the workspace allowed to make network calls
 //! (constitution Principle III). Everything else reaches Stash through `StashClient`.
 
+pub mod gql;
 pub mod health;
 pub mod jobs;
 pub mod probe;
@@ -118,17 +119,21 @@ impl StashClient {
         self.http.get(self.endpoint(path))
     }
 
-    /// Send a typed GraphQL operation (with the API key) and return its `data`.
+    /// Send a typed GraphQL operation (Cynic, with the API key) and return its `data`.
     ///
     /// Transport failures and 401s map to connection failures; GraphQL errors and missing
     /// `data` map to `AppError::Internal` with Stash's message.
-    pub(crate) async fn graphql<Q: Serialize, R: DeserializeOwned>(
+    pub(crate) async fn graphql<R, V>(
         &self,
-        body: &Q,
-    ) -> Result<R, AppError> {
+        operation: &cynic::Operation<R, V>,
+    ) -> Result<R, AppError>
+    where
+        R: DeserializeOwned,
+        V: Serialize,
+    {
         let response = self
             .graphql_request(true)
-            .json(body)
+            .json(operation)
             .send()
             .await
             .map_err(|e| AppError::from(self.classify_transport_error(&e)))?;
@@ -146,7 +151,7 @@ impl StashClient {
                 message: format!("Stash answered HTTP {}", status.as_u16()),
             });
         }
-        let parsed: graphql_client::Response<R> =
+        let parsed: cynic::GraphQlResponse<R> =
             response.json().await.map_err(|e| AppError::Internal {
                 message: format!("unexpected response from Stash: {e}"),
             })?;

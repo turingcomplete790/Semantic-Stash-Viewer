@@ -114,7 +114,7 @@ Measures every performance budget from the constitution (cold start, navigation,
 scrolling, playback open, seeking, and dropped frames) against one of your saved servers:
 
 ```bash
-cargo run --bin perf-harness -- --profile "<server name>"   # add --quick for fewer repetitions
+cargo run -p perf-harness -- --profile "<server name>"   # native app; --app web for the demo; --quick for fewer runs
 ```
 
 It builds the debug app, launches it several times (keep the window visible), and takes about

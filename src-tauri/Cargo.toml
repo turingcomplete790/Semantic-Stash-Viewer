@@ -10,11 +10,6 @@ default-run = "semantic-stash-viewer"
 [lib]
 name = "semantic_stash_viewer"
 
-# The performance harness (003 US2): `cargo run --bin perf-harness -- --profile "<name>"`.
-[[bin]]
-name = "perf-harness"
-path = "src/bin/perf_harness.rs"
-
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

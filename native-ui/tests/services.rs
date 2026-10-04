@@ -1,50 +1,56 @@
-//! 006 T009: the native build finds the web build's files, keeps its own shell state, and never
-//! rewrites the saved profiles.
+//! 007 T004: the native app keeps every file under its own app-id directories and never opens the
+//! demo's `semantic-stash-viewer/` folders (spec FR-005, research R4).
 
 use std::path::Path;
 
-use semantic_stash_viewer_native::services::{Paths, Services};
+use semantic_stash_viewer_native::services::{Paths, Services, APP_ID};
 
 #[test]
-fn paths_match_the_web_builds_directories() {
+fn every_file_lives_under_the_app_id() {
+    assert_eq!(APP_ID, "dev.semantic-stash-viewer");
     let p = Paths::under(Path::new("/c"), Path::new("/d"), Path::new("/k"));
-    // src-tauri/src/lib.rs: config_dir()/APP_DIR/profiles.json, cache_dir()/APP_DIR.
     assert_eq!(
         p.profiles(),
-        Path::new("/c/semantic-stash-viewer/profiles.json")
+        Path::new("/c/dev.semantic-stash-viewer/profiles.json")
     );
-    assert_eq!(p.cache_root(), Path::new("/k/semantic-stash-viewer"));
-    assert_eq!(p.logs(), Path::new("/d/semantic-stash-viewer/logs"));
+    assert_eq!(
+        p.session(),
+        Path::new("/d/dev.semantic-stash-viewer/session.json")
+    );
+    assert_eq!(
+        p.notifications(),
+        Path::new("/d/dev.semantic-stash-viewer/notifications.json")
+    );
+    assert_eq!(p.logs(), Path::new("/d/dev.semantic-stash-viewer/logs"));
+    assert_eq!(p.cache_root(), Path::new("/k/dev.semantic-stash-viewer"));
 }
 
 #[test]
-fn shell_state_is_kept_apart_from_the_web_builds() {
-    let p = Paths::under(Path::new("/c"), Path::new("/d"), Path::new("/k"));
-    let web_tabs = Path::new("/d/semantic-stash-viewer/shell/tabs.json");
-    let web_notifications = Path::new("/d/semantic-stash-viewer/shell/notifications.json");
-    assert_ne!(p.tabs(), web_tabs);
-    assert_ne!(p.notifications(), web_notifications);
-    assert_eq!(p.tabs().parent(), web_tabs.parent());
-}
-
-#[test]
-fn opening_never_rewrites_the_saved_profiles() {
+fn the_demos_files_are_never_opened_or_created() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let p = Paths::under(
-        &dir.path().join("c"),
-        &dir.path().join("d"),
-        &dir.path().join("k"),
+    let (config, data, cache) = (
+        dir.path().join("c"),
+        dir.path().join("d"),
+        dir.path().join("k"),
     );
-    std::fs::create_dir_all(&p.config).expect("config dir");
-    let profiles = r#"{"version":1,"lastUsedProfileId":null,"profiles":[]}"#;
-    std::fs::write(p.profiles(), profiles).expect("write profiles");
-    let before = std::fs::read(p.profiles()).expect("read");
+    // The demo's folders, with a profile in them.
+    let demo = config.join("semantic-stash-viewer");
+    std::fs::create_dir_all(&demo).expect("demo dir");
+    let demo_profiles = r#"{"version":1,"lastUsedProfileId":null,"profiles":[]}"#;
+    std::fs::write(demo.join("profiles.json"), demo_profiles).expect("demo profiles");
 
+    let p = Paths::under(&config, &data, &cache);
     let runtime = tokio::runtime::Runtime::new().expect("runtime");
-    let services = Services::open(p.clone(), runtime.handle().clone()).expect("open");
+    let services = Services::open(p, runtime.handle().clone()).expect("open");
+    // A fresh start: the demo's profile file isn't read.
     assert!(services.profiles().is_empty());
-    assert!(services.last_used().is_none());
     drop(services);
 
-    assert_eq!(std::fs::read(p.profiles()).expect("read"), before);
+    assert_eq!(
+        std::fs::read_to_string(demo.join("profiles.json")).expect("read"),
+        demo_profiles
+    );
+    for root in [&data, &cache] {
+        assert!(!root.join("semantic-stash-viewer").exists());
+    }
 }

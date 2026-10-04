@@ -1,7 +1,12 @@
 //! Read-only scene queries for the player (contracts/player-commands.md, "Stash GraphQL").
 
-use graphql_client::GraphQLQuery;
+use cynic::QueryBuilder;
 
+use super::gql::{
+    schema, CriterionModifier, FindFilterType, PlayableSceneFields, ResolutionCriterionInput,
+    ResolutionEnum, SceneCardFields, SceneFilterType, SceneRowFields, SortDirectionEnum,
+    StringCriterionInput,
+};
 use super::{endpoint, StashClient};
 use crate::error::AppError;
 use crate::scenes::paging::{last_page, validate_page_size};
@@ -11,40 +16,104 @@ use crate::scenes::{
     SceneFile, SceneGroup, SceneListItem, ScenePage,
 };
 
-/// Stash's custom `Int64` scalar (file sizes).
-type Int64 = i64;
+// ---- Recent scenes: the 20 most recently added (002 FR-001) ------------------------------------
 
-#[derive(GraphQLQuery)]
-#[graphql(
-    schema_path = "graphql/schema.json",
-    query_path = "graphql/recent_scenes.graphql",
-    response_derives = "Debug"
-)]
-pub struct RecentScenes;
+#[derive(cynic::QueryVariables, Debug)]
+struct RecentScenesVariables {
+    filter: FindFilterType,
+}
 
-#[derive(GraphQLQuery)]
-#[graphql(
-    schema_path = "graphql/schema.json",
-    query_path = "graphql/playable_scene.graphql",
-    response_derives = "Debug"
-)]
-pub struct PlayableScene;
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(graphql_type = "FindScenesResultType")]
+struct SceneRows {
+    scenes: Vec<SceneRowFields>,
+}
 
-#[derive(GraphQLQuery)]
-#[graphql(
-    schema_path = "graphql/schema.json",
-    query_path = "graphql/test_scenes.graphql",
-    response_derives = "Debug"
-)]
-pub struct TestScenes;
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(graphql_type = "Query", variables = "RecentScenesVariables")]
+struct RecentScenes {
+    #[arguments(filter: $filter)]
+    find_scenes: SceneRows,
+}
 
-#[derive(GraphQLQuery)]
-#[graphql(
-    schema_path = "graphql/schema.json",
-    query_path = "graphql/find_scenes_page.graphql",
-    response_derives = "Debug"
-)]
-pub struct FindScenesPage;
+// ---- One scene for playback -----------------------------------------------------------------
+
+#[derive(cynic::QueryVariables, Debug)]
+struct PlayableSceneVariables {
+    id: cynic::Id,
+}
+
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(graphql_type = "Query", variables = "PlayableSceneVariables")]
+struct PlayableScene {
+    #[arguments(id: $id)]
+    find_scene: Option<PlayableSceneFields>,
+}
+
+// ---- One page of scene cards (card tier) ------------------------------------------------------
+
+#[derive(cynic::QueryVariables, Debug)]
+struct ScenesPageVariables {
+    filter: FindFilterType,
+}
+
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(graphql_type = "FindScenesResultType")]
+struct SceneCards {
+    count: i32,
+    scenes: Vec<SceneCardFields>,
+}
+
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(graphql_type = "Query", variables = "ScenesPageVariables")]
+struct FindScenesPage {
+    #[arguments(filter: $filter)]
+    find_scenes: SceneCards,
+}
+
+// ---- The 002 spike's test set: a few scenes from each hard-to-play group ---------------------
+
+#[derive(cynic::QueryVariables, Debug)]
+struct TestScenesVariables {
+    filter: FindFilterType,
+    four_k_h264: SceneFilterType,
+    four_k_hevc: SceneFilterType,
+    above_four_k: SceneFilterType,
+    wmv_hd: SceneFilterType,
+    vp9_hd: SceneFilterType,
+    av1: SceneFilterType,
+    mpeg4: SceneFilterType,
+    flv: SceneFilterType,
+}
+
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(graphql_type = "Query", variables = "TestScenesVariables")]
+struct TestScenes {
+    #[cynic(alias, rename = "findScenes")]
+    #[arguments(filter: $filter, scene_filter: $four_k_h264)]
+    four_k_h264: SceneRows,
+    #[cynic(alias, rename = "findScenes")]
+    #[arguments(filter: $filter, scene_filter: $four_k_hevc)]
+    four_k_hevc: SceneRows,
+    #[cynic(alias, rename = "findScenes")]
+    #[arguments(filter: $filter, scene_filter: $above_four_k)]
+    above_four_k: SceneRows,
+    #[cynic(alias, rename = "findScenes")]
+    #[arguments(filter: $filter, scene_filter: $wmv_hd)]
+    wmv_hd: SceneRows,
+    #[cynic(alias, rename = "findScenes")]
+    #[arguments(filter: $filter, scene_filter: $vp9_hd)]
+    vp9_hd: SceneRows,
+    #[cynic(alias, rename = "findScenes")]
+    #[arguments(filter: $filter, scene_filter: $av1)]
+    av1: SceneRows,
+    #[cynic(alias, rename = "findScenes")]
+    #[arguments(filter: $filter, scene_filter: $mpeg4)]
+    mpeg4: SceneRows,
+    #[cynic(alias, rename = "findScenes")]
+    #[arguments(filter: $filter, scene_filter: $flv)]
+    flv: SceneRows,
+}
 
 /// One page of scene cards (005 research R1): `page_size` cards (one of `PAGE_SIZES`) in the
 /// query's search and sort, with the total count. One request per page, card fields only
@@ -67,7 +136,7 @@ pub async fn find_scenes_page(
     Ok(scene_page(count, page, page_size, scenes))
 }
 
-type PageScene = find_scenes_page::FindScenesPageFindScenesScenes;
+type PageScene = SceneCardFields;
 
 async fn fetch_scenes_page(
     client: &StashClient,
@@ -75,22 +144,20 @@ async fn fetch_scenes_page(
     page: u32,
     page_size: u32,
 ) -> Result<(u32, Vec<PageScene>), AppError> {
-    use find_scenes_page::{FindFilterType, SortDirectionEnum};
     let q = query.normalized();
     let filter = FindFilterType {
         q: (!q.search.is_empty()).then(|| q.search.clone()),
-        page: Some(i64::from(page)),
-        per_page: Some(i64::from(page_size)),
+        page: Some(i32::try_from(page).unwrap_or(i32::MAX)),
+        per_page: Some(i32::try_from(page_size).unwrap_or(i32::MAX)),
         sort: Some(q.stash_sort()?),
         direction: Some(match q.direction {
-            SortDirection::Asc => SortDirectionEnum::ASC,
-            SortDirection::Desc => SortDirectionEnum::DESC,
+            SortDirection::Asc => SortDirectionEnum::Asc,
+            SortDirection::Desc => SortDirectionEnum::Desc,
         }),
     };
-    let body = FindScenesPage::build_query(find_scenes_page::Variables {
-        filter: Some(filter),
-    });
-    let data: find_scenes_page::ResponseData = client.graphql(&body).await?;
+    let data = client
+        .graphql(&FindScenesPage::build(ScenesPageVariables { filter }))
+        .await?;
     let found = data.find_scenes;
     Ok((u32::try_from(found.count).unwrap_or(u32::MAX), found.scenes))
 }
@@ -111,20 +178,20 @@ fn scene_page(count: u32, page: u32, page_size: u32, scenes: Vec<PageScene>) -> 
                     ),
                     date: s.date.filter(|d| !d.is_empty()),
                     duration_seconds: file.as_ref().map(|f| f.duration),
-                    resolution: file
-                        .as_ref()
-                        .and_then(|f| resolution(Some(f.width), Some(f.height))),
+                    resolution: file.as_ref().and_then(|f| {
+                        resolution(Some(i64::from(f.width)), Some(i64::from(f.height)))
+                    }),
                     studio: s.studio.map(|st| st.name),
                     thumb: Some(thumb_url(
                         "scene",
-                        &s.id,
+                        s.id.inner(),
                         &s.paths
                             .screenshot
                             .as_deref()
                             .map_or_else(|| "0".to_owned(), screenshot_version),
                     )),
                     has_preview: false,
-                    id: s.id,
+                    id: s.id.into_inner(),
                 }
             })
             .collect(),
@@ -154,9 +221,66 @@ fn list_item(
 /// The spike's test set (002 research R7): up to 3 random scenes from each hard-to-play group,
 /// in one request. Groups keep a fixed order; empty groups are dropped.
 pub async fn test_scenes(client: &StashClient) -> Result<Vec<SceneGroup>, AppError> {
-    let body = TestScenes::build_query(test_scenes::Variables);
-    let data: test_scenes::ResponseData = client.graphql(&body).await?;
-    let rows = |scenes: Vec<test_scenes::TestSceneRow>| -> Vec<SceneListItem> {
+    // Codec-based filters (not path) so e.g. "*.wmv" in a folder name can't match an MP4.
+    let codec = |value: &str| StringCriterionInput {
+        value: value.to_owned(),
+        modifier: CriterionModifier::Equals,
+    };
+    let at = |value, modifier| ResolutionCriterionInput { value, modifier };
+    let variables = TestScenesVariables {
+        filter: FindFilterType {
+            per_page: Some(3),
+            sort: Some("random".into()),
+            ..FindFilterType::default()
+        },
+        four_k_h264: SceneFilterType {
+            resolution: Some(at(ResolutionEnum::FourK, CriterionModifier::Equals)),
+            video_codec: Some(codec("h264")),
+            ..SceneFilterType::default()
+        },
+        four_k_hevc: SceneFilterType {
+            resolution: Some(at(ResolutionEnum::FourK, CriterionModifier::Equals)),
+            video_codec: Some(codec("hevc")),
+            ..SceneFilterType::default()
+        },
+        above_four_k: SceneFilterType {
+            resolution: Some(at(ResolutionEnum::FourK, CriterionModifier::GreaterThan)),
+            ..SceneFilterType::default()
+        },
+        wmv_hd: SceneFilterType {
+            resolution: Some(at(
+                ResolutionEnum::StandardHd,
+                CriterionModifier::GreaterThan,
+            )),
+            video_codec: Some(codec("wmv3")),
+            ..SceneFilterType::default()
+        },
+        vp9_hd: SceneFilterType {
+            resolution: Some(at(
+                ResolutionEnum::StandardHd,
+                CriterionModifier::GreaterThan,
+            )),
+            video_codec: Some(codec("vp9")),
+            ..SceneFilterType::default()
+        },
+        av1: SceneFilterType {
+            video_codec: Some(codec("av1")),
+            ..SceneFilterType::default()
+        },
+        mpeg4: SceneFilterType {
+            video_codec: Some(codec("mpeg4")),
+            ..SceneFilterType::default()
+        },
+        flv: SceneFilterType {
+            path: Some(StringCriterionInput {
+                value: ".flv".into(),
+                modifier: CriterionModifier::Includes,
+            }),
+            ..SceneFilterType::default()
+        },
+    };
+    let data = client.graphql(&TestScenes::build(variables)).await?;
+    let rows = |scenes: Vec<SceneRowFields>| -> Vec<SceneListItem> {
         scenes
             .into_iter()
             .map(|s| {
@@ -164,18 +288,18 @@ pub async fn test_scenes(client: &StashClient) -> Result<Vec<SceneGroup>, AppErr
                     (
                         f.basename.as_str(),
                         f.duration,
-                        f.width,
-                        f.height,
+                        i64::from(f.width),
+                        i64::from(f.height),
                         f.video_codec.as_str(),
                         f.format.as_str(),
                     )
                 });
-                list_item(s.id.clone(), s.title.as_deref(), file)
+                list_item(s.id.inner().to_owned(), s.title.as_deref(), file)
             })
             .collect()
     };
     let groups = [
-        ("4K H.264", rows(data.four_kh264.scenes)),
+        ("4K H.264", rows(data.four_k_h264.scenes)),
         ("4K HEVC", rows(data.four_k_hevc.scenes)),
         ("Above 4K", rows(data.above_four_k.scenes)),
         ("WMV above 720p", rows(data.wmv_hd.scenes)),
@@ -196,8 +320,15 @@ pub async fn test_scenes(client: &StashClient) -> Result<Vec<SceneGroup>, AppErr
 
 /// The 20 most recently added scenes (FR-001).
 pub async fn recent_scenes(client: &StashClient) -> Result<Vec<SceneListItem>, AppError> {
-    let body = RecentScenes::build_query(recent_scenes::Variables);
-    let data: recent_scenes::ResponseData = client.graphql(&body).await?;
+    let filter = FindFilterType {
+        per_page: Some(20),
+        sort: Some("created_at".into()),
+        direction: Some(SortDirectionEnum::Desc),
+        ..FindFilterType::default()
+    };
+    let data = client
+        .graphql(&RecentScenes::build(RecentScenesVariables { filter }))
+        .await?;
     Ok(data
         .find_scenes
         .scenes
@@ -212,7 +343,7 @@ pub async fn recent_scenes(client: &StashClient) -> Result<Vec<SceneListItem>, A
                 duration_seconds: file.as_ref().map_or(0.0, |f| f.duration),
                 resolution: file
                     .as_ref()
-                    .and_then(|f| resolution(Some(f.width), Some(f.height))),
+                    .and_then(|f| resolution(Some(i64::from(f.width)), Some(i64::from(f.height)))),
                 video_codec: file
                     .as_ref()
                     .map(|f| f.video_codec.clone())
@@ -221,7 +352,7 @@ pub async fn recent_scenes(client: &StashClient) -> Result<Vec<SceneListItem>, A
                     .as_ref()
                     .map(|f| f.format.clone())
                     .filter(|c| !c.is_empty()),
-                id: s.id,
+                id: s.id.into_inner(),
             }
         })
         .collect())
@@ -232,8 +363,11 @@ pub async fn playable_scene(
     client: &StashClient,
     id: &str,
 ) -> Result<scenes::PlayableScene, AppError> {
-    let body = PlayableScene::build_query(playable_scene::Variables { id: id.to_owned() });
-    let data: playable_scene::ResponseData = client.graphql(&body).await?;
+    let data = client
+        .graphql(&PlayableScene::build(PlayableSceneVariables {
+            id: cynic::Id::new(id),
+        }))
+        .await?;
     let scene = data
         .find_scene
         .ok_or_else(|| AppError::SceneNotFound { id: id.to_owned() })?;
@@ -245,7 +379,7 @@ pub async fn playable_scene(
 
     Ok(scenes::PlayableScene {
         title: display_title(scene.title.as_deref(), Some(&file.basename)),
-        stream_url: direct_stream_url(client.base_url(), &scene.id),
+        stream_url: direct_stream_url(client.base_url(), scene.id.inner()),
         duration_seconds: file.duration,
         file: SceneFile {
             container: Some(file.format).filter(|s| !s.is_empty()),
@@ -255,9 +389,9 @@ pub async fn playable_scene(
             height: u32::try_from(file.height).ok().filter(|h| *h > 0),
             frame_rate: Some(file.frame_rate).filter(|f| *f > 0.0),
             bit_rate: u64::try_from(file.bit_rate).ok().filter(|b| *b > 0),
-            size: u64::try_from(file.size).ok(),
+            size: u64::try_from(file.size.0).ok(),
         },
-        id: scene.id,
+        id: scene.id.into_inner(),
     })
 }
 

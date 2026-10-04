@@ -1,17 +1,11 @@
-//! The native build's glue to the core (006 research R5).
-//!
-//! **A copy, on purpose.** These pieces mirror the web build's app glue in `src-tauri`
-//! (`state.rs`, `cache_commands.rs`'s `CacheRegistry` and `read_cached`, `player_commands.rs`'s
-//! `active_client` and `open_scene`, `thumb_scheme.rs`'s per-profile thumbnail service) so the web
-//! build stays untouched (FR-001). The decision record lists what a port would move into a shared
-//! crate. Views call these directly as tasks and get typed results back: no commands, no JSON.
-//!
-//! Read-only (FR-003): no writes to Stash, `profiles.json` is never saved (not even "last used"),
-//! and the jobs watcher isn't started.
+//! The native app's service layer (007 research R1): profiles, the connection, view caches,
+//! thumbnails, notifications, Stash jobs, and the player. The state machine never calls these
+//! directly; its effects do (`effects.rs`), off the UI thread, returning typed results.
 
-use std::collections::HashMap;
+pub mod cache;
+pub mod paths;
+
 use std::future::Future;
-use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use player::{CacheLimits, OpenRequest, Player, PlayerConfig};
@@ -19,172 +13,39 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use stash_core::adapter::scenes::{playable_scene, scene_screenshot_bytes};
 use stash_core::adapter::StashClient;
-use stash_core::cache::refresh::{RefreshPolicy, Refresher};
-use stash_core::cache::{Cached, ViewCache};
+use stash_core::cache::refresh::RefreshPolicy;
+use stash_core::cache::Cached;
+use stash_core::connection::connect::ConnectOptions;
 use stash_core::connection::manager::{
     ConnectRequest, ConnectionManager, ManagerConfig, StashProber, Target,
 };
 use stash_core::connection::snapshot::{ConnectionSnapshot, SessionState};
-use stash_core::profiles::{ProfileStore, ServerProfile};
+use stash_core::jobs::watcher::JobsWatcher;
+use stash_core::profiles::{service, ProfileDraft, ProfileStore, ServerProfile};
 use stash_core::scenes::{is_direct_stream, PlayableScene};
 use stash_core::shell::notifications::NotificationCenter;
 use stash_core::thumbs::{SourceFetch, ThumbService};
 use stash_core::AppError;
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
+
+pub use cache::{CacheChange, CacheRegistry};
+pub use paths::{Paths, APP_ID};
 
 pub type Manager = ConnectionManager<StashProber>;
 
-/// The web build's directory name under each platform directory (`src-tauri/src/lib.rs`).
-pub const APP_DIR: &str = "semantic-stash-viewer";
-
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Where the native build reads and writes (T004). Same directories as the web build (Tauri's
-/// `config_dir()`, `local_data_dir()`, `cache_dir()` on Linux, plus [`APP_DIR`]); its own tab
-/// and notification files.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Paths {
-    pub config: PathBuf,
-    pub data: PathBuf,
-    pub cache: PathBuf,
-}
-
-impl Paths {
-    /// From the XDG variables, falling back to `$HOME` as the XDG spec says.
-    pub fn resolve() -> Option<Self> {
-        let home = std::env::var_os("HOME").map(PathBuf::from);
-        let xdg = |var: &str, fallback: &str| -> Option<PathBuf> {
-            std::env::var_os(var)
-                .map(PathBuf::from)
-                .filter(|p| p.is_absolute())
-                .or_else(|| home.as_ref().map(|h| h.join(fallback)))
-        };
-        Some(Self::under(
-            &xdg("XDG_CONFIG_HOME", ".config")?,
-            &xdg("XDG_DATA_HOME", ".local/share")?,
-            &xdg("XDG_CACHE_HOME", ".cache")?,
-        ))
-    }
-
-    /// The app's directories under the given platform directories.
-    pub fn under(config: &Path, data: &Path, cache: &Path) -> Self {
-        Self {
-            config: config.join(APP_DIR),
-            data: data.join(APP_DIR),
-            cache: cache.join(APP_DIR),
-        }
-    }
-
-    pub fn profiles(&self) -> PathBuf {
-        self.config.join("profiles.json")
-    }
-
-    /// The native build's tab sets (its view state differs from the web build's).
-    pub fn tabs(&self) -> PathBuf {
-        self.data.join("shell").join("tabs-native.json")
-    }
-
-    pub fn notifications(&self) -> PathBuf {
-        self.data.join("shell").join("notifications-native.json")
-    }
-
-    pub fn logs(&self) -> PathBuf {
-        self.data.join("logs")
-    }
-
-    /// Per-profile view caches, shared with the web build (used by one build at a time).
-    pub fn cache_root(&self) -> PathBuf {
-        self.cache.clone()
-    }
-}
-
-/// Copy of the web build's `CacheRegistry`: one refresher per profile, following the connection.
-pub struct CacheRegistry {
-    root: PathBuf,
-    center: Arc<NotificationCenter>,
-    open: Mutex<HashMap<Uuid, Arc<Refresher>>>,
-    online: Mutex<Option<Uuid>>,
-}
-
-impl CacheRegistry {
-    pub fn new(root: PathBuf, center: Arc<NotificationCenter>) -> Self {
-        Self {
-            root,
-            center,
-            open: Mutex::new(HashMap::new()),
-            online: Mutex::new(None),
-        }
-    }
-
-    pub fn for_profile(&self, profile: Uuid) -> Option<Arc<Refresher>> {
-        let mut open = lock(&self.open);
-        if let Some(r) = open.get(&profile) {
-            return Some(Arc::clone(r));
-        }
-        let path = self.root.join(profile.to_string()).join("cache.sqlite3");
-        let cache = match ViewCache::open(path) {
-            Ok(cache) => cache,
-            Err(e) => {
-                tracing::warn!(error = %e, "view cache unavailable; reading from the server");
-                return None;
-            }
-        };
-        let refresher = Refresher::new(
-            profile,
-            Arc::new(Mutex::new(cache)),
-            Arc::clone(&self.center),
-            Arc::new(|_key: &str| {}),
-        );
-        refresher.set_online(*lock(&self.online) == Some(profile));
-        open.insert(profile, Arc::clone(&refresher));
-        Some(refresher)
-    }
-
-    fn set_online(&self, active: Option<Uuid>, online: bool) {
-        *lock(&self.online) = active.filter(|_| online);
-        for (id, r) in lock(&self.open).iter() {
-            r.set_online(online && Some(*id) == active);
-        }
-    }
-
-    /// Follow the connection: online state, the identity check, and the server summary.
-    pub fn follow(self: &Arc<Self>, manager: &Manager, runtime: &tokio::runtime::Handle) {
-        let mut rx = manager.subscribe();
-        let this = Arc::clone(self);
-        runtime.spawn(async move {
-            loop {
-                let snapshot = match rx.recv().await {
-                    Ok(s) => s,
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                };
-                let connected = matches!(snapshot.state, SessionState::Connected);
-                if let (true, Some(id), Some(info)) =
-                    (connected, snapshot.profile_id, snapshot.server.as_ref())
-                {
-                    if let Some(r) = this.for_profile(id) {
-                        let mut cache = lock(r.cache());
-                        let _ = cache.check_identity(&info.identity);
-                        if let Err(e) = cache.put("server:info", info) {
-                            tracing::warn!(error = %e, "couldn't cache the server summary");
-                        }
-                    }
-                }
-                this.set_online(snapshot.profile_id, connected);
-            }
-        });
-    }
-}
-
-/// Everything the views need from the core.
+/// Everything the effects need from the core.
 pub struct Services {
     pub paths: Paths,
     pub runtime: tokio::runtime::Handle,
-    profiles: Mutex<ProfileStore>,
+    profiles: Arc<Mutex<ProfileStore>>,
     pub manager: Manager,
     pub caches: Arc<CacheRegistry>,
+    pub notifications: Arc<NotificationCenter>,
     pub player: Option<Arc<Player>>,
     thumbs: Mutex<Option<(Uuid, Arc<ThumbService>)>>,
 }
@@ -195,14 +56,36 @@ impl Services {
         if let Some(notice) = store.take_notice() {
             tracing::warn!(?notice, "profile store notice");
         }
+        let profiles = Arc::new(Mutex::new(store));
         let manager = ConnectionManager::new(
             StashProber::default(),
             ManagerConfig::default(),
             runtime.clone(),
         );
         let notifications = Arc::new(NotificationCenter::open(paths.notifications()));
-        let caches = Arc::new(CacheRegistry::new(paths.cache_root(), notifications));
+        // Connection alerts in the notification centre (004 US3).
+        stash_core::connection::watch::spawn(
+            manager.subscribe(),
+            Arc::clone(&notifications),
+            &runtime,
+        );
+        let caches = Arc::new(CacheRegistry::new(
+            paths.cache_root(),
+            Arc::clone(&notifications),
+        ));
         caches.follow(&manager, &runtime);
+        // "Last used" is what reconnects at the next launch (001 US2).
+        let for_hook = Arc::clone(&profiles);
+        manager.on_connected(move |id| {
+            if let Err(e) = service::mark_used(&for_hook, id) {
+                tracing::warn!(%id, error = %e, "could not record the last-used server");
+            }
+        });
+        let jobs = Arc::new(JobsWatcher::new(
+            Arc::clone(&notifications),
+            runtime.clone(),
+        ));
+        watch_jobs(&manager, Arc::clone(&profiles), jobs, &runtime);
         let player = match Player::new(PlayerConfig::render()) {
             Ok(p) => Some(Arc::new(p)),
             Err(e) => {
@@ -213,9 +96,10 @@ impl Services {
         Ok(Arc::new(Self {
             paths,
             runtime,
-            profiles: Mutex::new(store),
+            profiles,
             manager,
             caches,
+            notifications,
             player,
             thumbs: Mutex::new(None),
         }))
@@ -223,6 +107,10 @@ impl Services {
 
     pub fn profiles(&self) -> Vec<ServerProfile> {
         lock(&self.profiles).list().to_vec()
+    }
+
+    pub fn profile(&self, id: Uuid) -> Option<ServerProfile> {
+        lock(&self.profiles).get(id).cloned()
     }
 
     pub fn profile_named(&self, name: &str) -> Option<ServerProfile> {
@@ -239,14 +127,14 @@ impl Services {
         store.get(id).cloned()
     }
 
-    /// Connect (launch auto-connect). Unlike the web build, "last used" is not recorded.
-    pub fn connect(&self, profile: &ServerProfile) {
+    /// Make `profile` the active server and connect (at launch or on a switch).
+    pub fn connect(&self, profile: &ServerProfile, is_launch: bool) {
         if let Some(p) = &self.player {
             p.close();
         }
         self.manager.connect(ConnectRequest {
             target: Target::from(profile),
-            is_launch: true,
+            is_launch,
             has_connected_before: profile.last_used_at.is_some(),
         });
     }
@@ -262,13 +150,52 @@ impl Services {
             .or_else(|| lock(&self.profiles).last_used_profile_id())
     }
 
-    /// Clear the profile's view cache (thumbnails included), for harness runs.
-    pub fn clear_cache(&self, profile: Uuid) {
-        if let Some(r) = self.caches.for_profile(profile) {
-            if let Err(e) = lock(r.cache()).clear() {
-                tracing::warn!(error = %e, "couldn't clear the cache for the harness run");
-            }
+    /// Clear the profile's view cache (thumbnails included); returns the bytes freed.
+    pub fn clear_cache(&self, profile: Uuid) -> Result<u64, AppError> {
+        self.caches.clear(profile)
+    }
+
+    /// Test a new server and save it (001 US1, US4). The core checks the address, the key, and
+    /// the version before anything is saved.
+    pub async fn create_profile(&self, draft: ProfileDraft) -> Result<ServerProfile, AppError> {
+        let cancel = CancellationToken::new();
+        service::create_profile(&self.profiles, &draft, &cancel, ConnectOptions::default())
+            .await
+            .map(|(profile, _)| profile)
+    }
+
+    /// Change a saved server; `force` saves even when the check fails.
+    pub async fn update_profile(
+        &self,
+        id: Uuid,
+        draft: ProfileDraft,
+        force: bool,
+    ) -> Result<ServerProfile, AppError> {
+        let cancel = CancellationToken::new();
+        service::update_profile(
+            &self.profiles,
+            id,
+            &draft,
+            force,
+            &cancel,
+            ConnectOptions::default(),
+        )
+        .await
+    }
+
+    pub fn delete_profile(&self, id: Uuid) -> Result<ServerProfile, AppError> {
+        if self.manager.active_profile_id() == Some(id) {
+            self.manager.disconnect();
         }
+        let removed = service::delete_profile(&self.profiles, id)?;
+        if let Err(e) = self.caches.clear(id) {
+            tracing::warn!(error = %e, "couldn't clear a deleted server's cache");
+        }
+        Ok(removed)
+    }
+
+    pub fn reorder_profiles(&self, ids: &[Uuid]) -> Result<(), AppError> {
+        service::reorder_profiles(&self.profiles, ids)
     }
 
     /// A client for the active profile, its key, and its TLS setting.
@@ -289,7 +216,8 @@ impl Services {
         Ok((client, profile.api_key, profile.strict_tls))
     }
 
-    /// Copy of the web build's `read_cached`.
+    /// Read `key` through the current profile's cache: cached data shows even while offline, and
+    /// without a cache it reads the server. `force` fetches now.
     pub async fn read_cached<T, F, Fut>(
         &self,
         key: &str,
@@ -309,6 +237,7 @@ impl Services {
         else {
             return Ok(Cached::fresh(fetch(client?).await?));
         };
+        // The connection is the authority on whether we're online (003).
         let snapshot = self.manager.snapshot();
         r.set_online(
             matches!(snapshot.state, SessionState::Connected)
@@ -338,7 +267,7 @@ impl Services {
         })
     }
 
-    /// Copy of the web build's `open_scene`: look up the scene and play its direct stream.
+    /// Look up a scene and play its direct stream (never a transcode, Principle V).
     pub async fn open_scene(&self, scene_id: &str) -> Result<PlayableScene, AppError> {
         let player = Arc::clone(self.player()?);
         let (_, api_key, strict_tls) = self.active_client()?;
@@ -379,8 +308,8 @@ impl Services {
         Ok(scene)
     }
 
-    /// The current profile's thumbnail service (one per profile, so its limit covers every
-    /// request), as `src-tauri/src/thumb_scheme.rs`.
+    /// The current profile's thumbnail service (one per profile, so its concurrency limit covers
+    /// every request).
     pub fn thumbs(self: &Arc<Self>) -> Option<Arc<ThumbService>> {
         let profile = self.current_profile()?;
         let mut current = lock(&self.thumbs);
@@ -406,4 +335,35 @@ impl Services {
         *current = Some((profile, Arc::clone(&service)));
         Some(service)
     }
+}
+
+/// Watch the connected server's Stash jobs (004 US3), following the session.
+fn watch_jobs(
+    manager: &Manager,
+    profiles: Arc<Mutex<ProfileStore>>,
+    jobs: Arc<JobsWatcher>,
+    runtime: &tokio::runtime::Handle,
+) {
+    let mut rx = manager.subscribe();
+    runtime.spawn(async move {
+        loop {
+            let snapshot = match rx.recv().await {
+                Ok(s) => s,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            };
+            match (&snapshot.state, snapshot.profile_id) {
+                (SessionState::Connected, Some(id)) => {
+                    let profile = lock(&profiles).get(id).cloned();
+                    let Some(profile) = profile else { continue };
+                    match StashClient::new(profile.base_url, profile.strict_tls, profile.api_key) {
+                        Ok(client) => jobs.connected(id, client),
+                        Err(e) => tracing::warn!(error = %e, "couldn't build a client for jobs"),
+                    }
+                }
+                (SessionState::Connecting { .. }, _) => {}
+                _ => jobs.disconnected(),
+            }
+        }
+    });
 }

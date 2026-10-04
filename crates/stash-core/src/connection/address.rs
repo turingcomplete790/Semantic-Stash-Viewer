@@ -34,7 +34,7 @@ pub fn normalize(raw: &str) -> Result<Url, ConnectFailure> {
     if !matches!(url.scheme(), "http" | "https") {
         return Err(invalid("the address must start with http:// or https://"));
     }
-    if url.host_str().map_or(true, str::is_empty) {
+    if url.host_str().is_none_or(str::is_empty) {
         return Err(invalid("the address has no host"));
     }
 

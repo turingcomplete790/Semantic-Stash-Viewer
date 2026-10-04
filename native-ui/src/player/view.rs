@@ -9,7 +9,9 @@ use iced::widget::{
     space, stack, text,
 };
 use iced::{mouse, Alignment, Background, Color, Element, Length, Theme};
-use player::{Player, PlayerSnapshot, PlayerStateKind};
+use player::{PlayerSnapshot, PlayerStateKind};
+
+use crate::effects::{Effect, PlayerAction};
 
 use super::controls::{hover_time, next_speed, AutoHide, Direction, SeekBar, SKIP_SECONDS, SPEEDS};
 use super::video::primitive::Video;
@@ -73,47 +75,58 @@ impl PlayerScreen {
         self.snapshot.duration_seconds.unwrap_or(0.0)
     }
 
-    pub fn update(&mut self, msg: Msg, player: &Player) {
+    /// Apply a control and return what to send to mpv (no I/O here, 007 research R2).
+    pub fn update(&mut self, msg: Msg) -> Vec<Effect> {
         let now = Instant::now();
-        match msg {
+        let action = match msg {
             Msg::Snapshot(s) => {
                 self.snapshot = s;
-                return;
+                return Vec::new();
             }
-            Msg::Tick => return,
-            Msg::Activity => {}
-            Msg::TogglePause => player.toggle_pause(),
+            Msg::Tick => return Vec::new(),
+            Msg::Activity => None,
+            Msg::TogglePause => Some(PlayerAction::TogglePause),
             Msg::Skip(seconds) => {
                 let target = (self.seek.peek(self.snapshot.position_seconds, now) + seconds)
                     .clamp(0.0, self.duration().max(0.0));
                 self.seek.seek_to(target, now);
-                player.seek_relative(seconds);
+                Some(PlayerAction::SeekRelative(seconds))
             }
             Msg::SeekDrag(t) => {
                 self.dragging = Some(t);
-                // Keyframe-fast while dragging (as the web player).
-                player.seek(t, false);
+                // Keyframe-fast while dragging (as 002's player).
+                Some(PlayerAction::Seek {
+                    seconds: t,
+                    exact: false,
+                })
             }
-            Msg::SeekRelease => {
-                if let Some(t) = self.dragging.take() {
-                    self.seek.seek_to(t, now);
-                    player.seek(t, true);
+            Msg::SeekRelease => self.dragging.take().map(|t| {
+                self.seek.seek_to(t, now);
+                PlayerAction::Seek {
+                    seconds: t,
+                    exact: true,
                 }
-            }
+            }),
             Msg::Hover { x, width } => {
-                self.hover = Some((x, hover_time(x, width, self.duration())))
+                self.hover = Some((x, hover_time(x, width, self.duration())));
+                None
             }
-            Msg::HoverEnd => self.hover = None,
-            Msg::Volume(v) => player.set_volume(v.clamp(0.0, 100.0)),
-            Msg::VolumeBy(d) => player.set_volume((self.snapshot.volume + d).clamp(0.0, 100.0)),
-            Msg::ToggleMute => player.set_muted(!self.snapshot.muted),
-            Msg::Speed(s) => player.set_speed(s),
-            Msg::SpeedStep(d) => player.set_speed(next_speed(self.snapshot.speed, d)),
-            Msg::Frame(Direction::Forward) => player.frame_step_forward(),
-            Msg::Frame(Direction::Back) => player.frame_step_back(),
-            Msg::Replay => player.replay(),
-        }
+            Msg::HoverEnd => {
+                self.hover = None;
+                None
+            }
+            Msg::Volume(v) => Some(PlayerAction::SetVolume(v.clamp(0.0, 100.0))),
+            Msg::VolumeBy(d) => Some(PlayerAction::SetVolume(
+                (self.snapshot.volume + d).clamp(0.0, 100.0),
+            )),
+            Msg::ToggleMute => Some(PlayerAction::SetMuted(!self.snapshot.muted)),
+            Msg::Speed(s) => Some(PlayerAction::SetSpeed(s)),
+            Msg::SpeedStep(d) => Some(PlayerAction::SetSpeed(next_speed(self.snapshot.speed, d))),
+            Msg::Frame(d) => Some(PlayerAction::FrameStep(d)),
+            Msg::Replay => Some(PlayerAction::Replay),
+        };
         self.hide.activity(now);
+        action.map(Effect::Player).into_iter().collect()
     }
 
     /// The screen. `on` maps this screen's messages into the app's; `close` and `fullscreen` are

@@ -1,14 +1,14 @@
 //! One command for every Phase 0 performance budget (003 US2, research R8).
 //!
-//! `cargo run --bin perf-harness -- --profile "<name>" [--app web|native] [--quick]` builds the
-//! debug app (`web`, the default, or the native spike build, 006 contracts/measurements.md), starts
+//! `cargo run -p perf-harness -- --profile "<name>" [--app native|web] [--quick]` builds the
+//! debug app (`native`, the default, or the frozen web demo until it's removed; 007
+//! contracts/measurements.md), starts
 //! the UI dev server if it isn't running, launches the app several times with the harness
 //! switches, collects its `MEASURE` lines, and writes a report to
 //! `~/.local/share/semantic-stash-viewer/perf/`. Exits non-zero if a budget failed.
 //!
 //! The harness never talks to Stash and never sees an address: the app picks its own scenes.
 
-#[path = "perf_harness/report.rs"]
 mod report;
 
 use std::io::{BufRead, BufReader};
@@ -58,7 +58,7 @@ struct Options {
 fn parse_args() -> Result<Options, String> {
     let mut profile = None;
     let mut quick = false;
-    let mut app = App::Web;
+    let mut app = App::Native;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -90,7 +90,7 @@ fn main() -> ExitCode {
                 eprintln!("{message}");
             }
             eprintln!(
-                "usage: perf-harness --profile \"<display name>\" [--app web|native] [--quick]"
+                "usage: perf-harness --profile \"<display name>\" [--app native|web] [--quick]"
             );
             return ExitCode::from(2);
         }
@@ -111,9 +111,11 @@ fn main() -> ExitCode {
 }
 
 fn workspace_root() -> PathBuf {
+    // crates/perf-harness → the workspace root.
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("src-tauri has a parent")
+        .ancestors()
+        .nth(2)
+        .expect("crates/perf-harness sits two levels below the workspace root")
         .to_path_buf()
 }
 
