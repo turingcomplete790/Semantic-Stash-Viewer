@@ -1,14 +1,16 @@
 //! The Session state: one active server, as regions active at the same time (007 research R1):
-//! the connection, the shell (overlays now; tabs in US2), and playback.
+//! the connection, the shell (navigation bar, tabs, screens) with its overlays, and playback.
 
 pub mod connection;
 pub mod playback;
+pub mod snapshot;
 
 use std::sync::Arc;
 
-use iced::widget::{button, center, column, container, opaque, row, stack, text, Space};
-use iced::{Element, Length};
-use stash_core::connection::snapshot::ConnectionSnapshot;
+use iced::keyboard::{Key, Modifiers};
+use iced::widget::{button, center, column, container, opaque, stack, text};
+use iced::Element;
+use stash_core::connection::snapshot::{ConnectionSnapshot, SessionState};
 use stash_core::profiles::{ProfileDraft, ServerProfile};
 use stash_core::AppError;
 use uuid::Uuid;
@@ -17,7 +19,10 @@ use crate::effects::{Effect, Reply};
 use crate::machine::Step;
 use crate::onboarding;
 use crate::player::video::Shared;
+use crate::screens::Context;
+use crate::shell::keymap::{self, Action, Level};
 use crate::shell::overlays::{self, KeyPrompt, Overlay, KEY_PROMPT_ID};
+use crate::shell::{self as shell_mod, Shell, ShellMsg};
 use crate::widgets::theme;
 
 pub struct Session {
@@ -26,7 +31,12 @@ pub struct Session {
     pub connection: connection::Connection,
     pub playback: playback::Playback,
     pub overlay: Overlay,
+    pub shell: Shell,
     ever_connected: bool,
+    /// The saved session has been read (or there was none): saving can't overwrite it now.
+    restored: bool,
+    /// Bumped on every change to the shell; only the latest pending save is written.
+    save_generation: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -40,7 +50,10 @@ pub enum Msg {
     AddServer(onboarding::Msg),
     SceneOpened(Result<(), AppError>),
     Reply(Reply),
-    Key(iced::keyboard::Key),
+    Key(Key, Modifiers),
+    Shell(ShellMsg),
+    /// A debounced save came due.
+    SaveDue(u64),
 }
 
 /// Events for the app.
@@ -55,15 +68,21 @@ pub enum Up {
 }
 
 impl Session {
-    /// Enter the session for `profile`: connect, and load the saved servers for the menu.
+    /// Enter the session for `profile`: connect, load the saved servers for the menu, and restore
+    /// this server's tabs.
     pub fn enter(profile: ServerProfile, launch: bool) -> (Self, Vec<Effect>) {
-        let effects = vec![
+        let (shell, shell_effects) = Shell::new();
+        let mut effects = vec![
             Effect::Connect {
                 profile: profile.id,
                 launch,
             },
             Effect::LoadProfiles,
+            Effect::LoadSession {
+                profile: profile.id,
+            },
         ];
+        effects.extend(shell_effects);
         (
             Self {
                 servers: vec![profile.clone()],
@@ -71,30 +90,139 @@ impl Session {
                 connection: connection::Connection::default(),
                 playback: playback::Playback::default(),
                 overlay: Overlay::None,
+                shell,
                 ever_connected: false,
+                restored: false,
+                save_generation: 0,
             },
             effects,
         )
     }
 
+    /// Save now, before leaving (quit or a server switch); nothing until the saved session was
+    /// read, so a fresh shell never replaces it.
+    pub fn save_now(&self) -> Option<Effect> {
+        self.restored.then(|| Effect::SaveSessionNow {
+            profile: self.profile.id,
+            session: self.shell.capture(),
+        })
+    }
+
+    fn unreachable(&self) -> bool {
+        matches!(
+            self.connection.snapshot.state,
+            SessionState::Offline { .. }
+                | SessionState::Failed { .. }
+                | SessionState::AuthFailed { .. }
+        )
+    }
+
+    fn shell(&mut self, msg: ShellMsg) -> Step<Up> {
+        let Step { mut effects, up } = self.shell.update(msg);
+        if self.restored {
+            self.save_generation += 1;
+            effects.push(Effect::SaveSessionLater {
+                generation: self.save_generation,
+            });
+        }
+        let step = Step::effects(effects);
+        match up {
+            None => step,
+            Some(shell_mod::Up::Play(id)) => step.with(Effect::OpenScene(id)),
+            Some(shell_mod::Up::ServerMenu) => {
+                self.overlay = Overlay::ServerMenu;
+                step.with(Effect::LoadProfiles)
+            }
+            Some(shell_mod::Up::KeyboardHelp) => {
+                self.overlay = Overlay::KeyboardHelp;
+                step
+            }
+            // The notification centre arrives with US5.
+            Some(shell_mod::Up::Notifications) => step,
+        }
+    }
+
+    fn key(&mut self, key: &Key, mods: Modifiers) -> Step<Up> {
+        if self.overlay != Overlay::None {
+            if *key == Key::Named(iced::keyboard::key::Named::Escape) {
+                self.overlay = Overlay::None;
+            }
+            return Step::none();
+        }
+        if self.playback.active() {
+            // The player is the innermost level and owns the window while it's open.
+            let plain = !mods.control() && !mods.alt() && !mods.logo();
+            if plain {
+                if let Some(effects) = self.playback.key(key) {
+                    return Step::effects(effects);
+                }
+            }
+            return Step::none();
+        }
+        let msg = match keymap::resolve(key, mods, &[Level::Shell]) {
+            Some(Action::NewTab) => ShellMsg::NewTab,
+            Some(Action::CloseTab) => ShellMsg::CloseActive,
+            Some(Action::NextTab) => ShellMsg::NextTab,
+            Some(Action::PrevTab) => ShellMsg::PrevTab,
+            Some(Action::SelectTab(i)) => ShellMsg::SelectIndex(i),
+            Some(Action::MoveTabLeft) => ShellMsg::MoveLeft,
+            Some(Action::MoveTabRight) => ShellMsg::MoveRight,
+            Some(Action::Back) => ShellMsg::Back,
+            Some(Action::Forward) => ShellMsg::Forward,
+            Some(Action::KeyboardHelp) => ShellMsg::KeyboardHelp,
+            Some(Action::FocusNext) => return Step::effect(Effect::FocusNext),
+            Some(Action::FocusPrevious) => return Step::effect(Effect::FocusPrevious),
+            Some(Action::Player) | None => return Step::none(),
+        };
+        self.shell(msg)
+    }
+
     pub fn update(&mut self, msg: Msg) -> Step<Up> {
         match msg {
-            Msg::Connection(snapshot) => match self.connection.observe(snapshot) {
-                Some(connection::Up::BecameConnected) => {
-                    let first = !self.ever_connected;
-                    self.ever_connected = true;
-                    Step::up(if first {
-                        Up::FirstConnected
-                    } else {
-                        Up::Reconnected
+            Msg::Connection(snapshot) => {
+                if let Some(info) = &snapshot.server {
+                    self.shell.server_info(info);
+                }
+                let up = self.connection.observe(snapshot);
+                if self.unreachable() {
+                    self.shell.unreachable();
+                }
+                self.connection_event(up)
+            }
+            Msg::Shell(m) => self.shell(m),
+            Msg::SaveDue(generation) => {
+                if generation == self.save_generation && self.restored {
+                    Step::effect(Effect::SaveSession {
+                        profile: self.profile.id,
+                        session: self.shell.capture(),
                     })
+                } else {
+                    Step::none()
                 }
-                Some(connection::Up::KeyNeeded) => {
-                    self.overlay = Overlay::KeyPrompt(KeyPrompt::default());
-                    Step::effect(Effect::Focus(KEY_PROMPT_ID))
+            }
+            Msg::Reply(Reply::Summary { tab, info }) => {
+                let unreachable = self.unreachable();
+                self.shell.summary_loaded(tab, info, unreachable);
+                Step::none()
+            }
+            Msg::Reply(Reply::SessionLoaded { profile, saved }) => {
+                if profile != self.profile.id || self.restored {
+                    return Step::none();
                 }
-                None => Step::none(),
-            },
+                self.restored = true;
+                match saved.and_then(Shell::restore) {
+                    Some((shell, mut effects)) => {
+                        self.shell = shell;
+                        // Restored Home screens pick up a summary that's already here.
+                        if let Some(info) = self.connection.snapshot.server.clone() {
+                            self.shell.server_info(&info);
+                            effects.retain(|e| !matches!(e, Effect::LoadSummary { .. }));
+                        }
+                        Step::effects(effects)
+                    }
+                    None => Step::none(),
+                }
+            }
             Msg::Playback(m) => Step::effects(self.playback.update(m)),
             Msg::Overlay(m) => self.overlay(m),
             Msg::OpenServerMenu => {
@@ -155,20 +283,26 @@ impl Session {
                 Step::none()
             }
             Msg::Reply(_) => Step::none(),
-            Msg::Key(key) => {
-                if self.overlay != Overlay::None {
-                    if key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) {
-                        self.overlay = Overlay::None;
-                    }
-                    return Step::none();
-                }
-                if self.playback.active() {
-                    if let Some(effects) = self.playback.key(&key) {
-                        return Step::effects(effects);
-                    }
-                }
-                Step::none()
+            Msg::Key(key, mods) => self.key(&key, mods),
+        }
+    }
+
+    fn connection_event(&mut self, up: Option<connection::Up>) -> Step<Up> {
+        match up {
+            Some(connection::Up::BecameConnected) => {
+                let first = !self.ever_connected;
+                self.ever_connected = true;
+                Step::up(if first {
+                    Up::FirstConnected
+                } else {
+                    Up::Reconnected
+                })
             }
+            Some(connection::Up::KeyNeeded) => {
+                self.overlay = Overlay::KeyPrompt(KeyPrompt::default());
+                Step::effect(Effect::Focus(KEY_PROMPT_ID))
+            }
+            None => Step::none(),
         }
     }
 
@@ -228,41 +362,20 @@ impl Session {
                 Msg::Playback(playback::Msg::ToggleFullscreen),
             )
         } else {
-            // The navigation bar and tabs arrive in US2; until then, the indicator and a summary.
-            let bar = container(
-                row![
-                    self.connection
-                        .indicator(&self.profile.display_name, Msg::OpenServerMenu),
-                    Space::new().width(Length::Fill),
-                ]
-                .padding([4, 8]),
-            )
-            .style(theme::bar)
-            .width(Length::Fill);
-            let mut summary = column![
-                text(self.profile.display_name.clone()).size(26),
-                text(self.profile.base_url.to_string()).size(13),
-                text(self.connection.label()).size(15),
-            ]
-            .spacing(6)
-            .align_x(iced::Alignment::Center);
-            if let Some(info) = &self.connection.snapshot.server {
-                summary = summary.push(
-                    text(format!(
-                        "Stash {} · {} scenes · {} images · {} galleries · {} performers",
-                        info.version,
-                        info.counts.scenes,
-                        info.counts.images,
-                        info.counts.galleries,
-                        info.counts.performers
-                    ))
-                    .size(13),
-                );
-            }
-            column![bar, center(summary)].into()
+            let indicator = self
+                .connection
+                .indicator(&self.profile.display_name, ShellMsg::ServerMenu);
+            let ctx = Context {
+                profile: &self.profile,
+                connection: &self.connection,
+            };
+            let page: Element<'a, ShellMsg> =
+                column![self.shell.chrome(indicator), self.shell.content(&ctx)].into();
+            page.map(Msg::Shell)
         };
         let overlay: Option<Element<'a, Msg>> = match &self.overlay {
             Overlay::None => None,
+            Overlay::KeyboardHelp => Some(overlays::keyboard_help().map(Msg::Overlay)),
             Overlay::KeyPrompt(prompt) => {
                 Some(overlays::key_prompt(prompt, &self.profile).map(Msg::Overlay))
             }

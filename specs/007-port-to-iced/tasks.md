@@ -210,7 +210,7 @@ relaunch (spec US2, FR-006, FR-007).
 
 ### Tests for User Story 2
 
-- [ ] T023 [P] [US2] `native-ui/tests/tabs.rs` (transition tests):
+- [X] T023 [P] [US2] `native-ui/tests/tabs.rs` (transition tests):
   - opening a view pushes a `Screen` and drops entries after the cursor;
   - back and forward move the cursor and return the exact earlier state;
   - history keeps at most 50 entries, dropping the oldest;
@@ -219,44 +219,44 @@ relaunch (spec US2, FR-006, FR-007).
   - switching tabs exits and enters screens without resetting their state (entering a ready
     screen emits no load);
   - "open in new tab" from a screen bubbles to the shell.
-- [ ] T024 [P] [US2] `native-ui/tests/snapshot.rs` (contracts/session-snapshot.md):
+- [X] T024 [P] [US2] `native-ui/tests/snapshot.rs` (contracts/session-snapshot.md):
   - a session with several tabs, histories, scroll positions, and a selected tab round-trips
     exactly;
   - transient fields aren't written;
   - an unknown version or a broken file is renamed `session.json.bad` and a fresh Home tab opens;
   - writes are atomic;
   - each profile keeps its own tabs.
-- [ ] T025 [P] [US2] `native-ui/tests/keymap.rs`:
+- [X] T025 [P] [US2] `native-ui/tests/keymap.rs`:
   - key events captured by a field never reach the keymap;
   - the innermost active binding wins and unbound keys bubble up;
   - the table lists every binding once with a label;
   - the player's bindings are exactly 002's (space, ←/→, ↑/↓, `[` `]` `\`, `.` `,`, `f`, `m`,
     Escape).
-- [ ] T026 [P] [US2] `native-ui/tests/shell_flows.rs` (`iced_test`): the navigation bar opens each
+- [X] T026 [P] [US2] `native-ui/tests/shell_flows.rs` (`iced_test`): the navigation bar opens each
   section; the tab strip selects, closes, and middle-click closes; Ctrl+T / Ctrl+W / Ctrl+Tab /
   Ctrl+1–9 work; keyboard help opens and Escape closes it.
 
 ### Implementation for User Story 2
 
-- [ ] T027 [US2] `native-ui/src/shell/mod.rs` and `native-ui/src/shell/tab.rs`:
+- [X] T027 [US2] `native-ui/src/shell/mod.rs` and `native-ui/src/shell/tab.rs`:
   - the Shell (tabs: at most 50; selected; overlay `None | KeyboardHelp | Notifications |
     ServerMenu | KeyPrompt`);
   - the Tab (`history: Vec<Screen>`, at most 50, and `cursor`), with enter/exit on activation;
   - the `Screen` enum in `native-ui/src/screens/mod.rs`, with Home and stubs for the others.
-- [ ] T028 [US2] `native-ui/src/session/snapshot.rs` per contracts/session-snapshot.md:
+- [X] T028 [US2] `native-ui/src/session/snapshot.rs` per contracts/session-snapshot.md:
   - serde of persistent fields only (`#[serde(skip)]` on transient data), version, per profile;
   - limits of 50 tabs and 50 entries;
   - `SaveSession` debounced 500 ms after a persistent change and on quit;
   - atomic write; bad files set aside.
-- [ ] T029 [US2] Shell views in `native-ui/src/shell/`: the navigation bar (Home, Scenes, Settings,
+- [X] T029 [US2] Shell views in `native-ui/src/shell/`: the navigation bar (Home, Scenes, Settings,
   the notification bell placeholder for US5, the server menu, the connection indicator), the tab
   strip (select, close, middle-click close, reorder by drag or keys), and the keyboard help
   overlay.
-- [ ] T030 [US2] `native-ui/src/shell/keymap.rs`: the table `(chord, level, action, label)` and
+- [X] T030 [US2] `native-ui/src/shell/keymap.rs`: the table `(chord, level, action, label)` and
   dispatch down the active branch with bubbling (R6), plus Tab / Shift+Tab focus movement.
-- [ ] T031 [US2] `native-ui/src/screens/home.rs`: server summary `Loading | Ready(info) |
+- [X] T031 [US2] `native-ui/src/screens/home.rs`: server summary `Loading | Ready(info) |
   Unreachable`, cache first (entry effect `LoadSummary`), and connection details.
-- [ ] T032 [US2] Write US2's rows in `capabilities.md`, run quickstart V2 with the user (including
+- [X] T032 [US2] Write US2's rows in `capabilities.md`, run quickstart V2 with the user (including
   relaunch and a corrupted `session.json`), and pass the gate.
 
 **Checkpoint**: tabs never reset; relaunch restores every tab exactly.

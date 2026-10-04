@@ -70,7 +70,7 @@ fn an_auth_failure_asks_for_the_key() {
 #[test]
 fn entering_a_session_connects_and_loads_the_server_list() {
     let p = profile("Testing");
-    let (_session, effects) = Session::enter(p.clone(), true);
+    let (session, effects) = Session::enter(p.clone(), true);
     assert_eq!(
         effects,
         vec![
@@ -78,7 +78,12 @@ fn entering_a_session_connects_and_loads_the_server_list() {
                 profile: p.id,
                 launch: true
             },
-            Effect::LoadProfiles
+            Effect::LoadProfiles,
+            // 007 US2: this server's tabs, and the first Home tab's summary meanwhile.
+            Effect::LoadSession { profile: p.id },
+            Effect::LoadSummary {
+                tab: session.shell.tabs[0].id
+            },
         ]
     );
 }
@@ -122,7 +127,10 @@ fn escape_closes_an_overlay_before_anything_else() {
     let (mut session, _) = Session::enter(profile("Testing"), true);
     let _ = session.update(Msg::OpenServerMenu);
     assert_eq!(session.overlay, Overlay::ServerMenu);
-    let _ = session.update(Msg::Key(Key::Named(Named::Escape)));
+    let _ = session.update(Msg::Key(
+        Key::Named(Named::Escape),
+        iced::keyboard::Modifiers::empty(),
+    ));
     assert_eq!(session.overlay, Overlay::None);
 }
 

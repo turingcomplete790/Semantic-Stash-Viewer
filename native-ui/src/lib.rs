@@ -11,6 +11,7 @@ pub mod measure;
 pub mod messages;
 pub mod onboarding;
 pub mod player;
+pub mod screens;
 pub mod services;
 pub mod session;
 pub mod shell;

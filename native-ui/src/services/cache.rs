@@ -79,7 +79,6 @@ impl CacheRegistry {
         }
     }
 
-    /// Follow the connection: online state, the identity check, and the server summary.
     /// Clear a profile's cache; returns the bytes freed and tells open screens.
     pub fn clear(&self, profile: Uuid) -> Result<u64, stash_core::AppError> {
         let Some(r) = self.for_profile(profile) else {
@@ -96,6 +95,7 @@ impl CacheRegistry {
             .map_or(0, |r| lock(r.cache()).size_bytes())
     }
 
+    /// Follow the connection: online state, the identity check, and the server summary.
     pub fn follow(self: &Arc<Self>, manager: &Manager, runtime: &tokio::runtime::Handle) {
         let mut rx = manager.subscribe();
         let this = Arc::clone(self);

@@ -18,8 +18,8 @@ the end (spec FR-001, FR-003, SC-001).
 | C7 | 003 US1 | Screens open from the local cache, offline included | | | | |
 | C8 | 003 US2 | One command measures every performance budget | | | | |
 | C9 | 003 US3 | Every push is checked automatically | | | | |
-| C10 | 004 US1 | A navigation bar to every section, Settings, and notifications | | | | |
-| C11 | 004 US2 | Several views open in tabs, with back and forward | | | | |
+| C10 | 004 US1 | A navigation bar to every section, Settings, and notifications | The bar has back, forward, Home, Scenes, Settings (the current section is highlighted), the bell (its centre arrives with US5), and the connection indicator that opens the server menu; a section the tab just left is returned to rather than opened again | `tests/shell_flows.rs`, `tests/tabs.rs` | pass (user, V2) | 2026-10-04 |
+| C11 | 004 US2 | Several views open in tabs, with back and forward | The tab strip selects, closes (button or middle-click; never the last tab), and adds tabs (at most 50); Ctrl+T/W, Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+PageUp/PageDown, Ctrl+1–9, Ctrl+Shift+PageUp/PageDown move a tab; each tab keeps up to 50 screens with Alt+←/→ and the bar's arrows | `tests/tabs.rs`, `tests/shell_flows.rs` | pass (user, V2) | 2026-10-04 |
 | C12 | 004 US3 | One notification centre: connection alerts, failures, Stash jobs with live progress | | | | |
 | C13 | 004 US4 | Settings: servers, keyboard, troubleshooting (cache, logs), about | | | | |
 | C14 | 005 US1 | Browse the whole library as a paged grid or list, sorted, with thumbnails | | | | |
@@ -29,10 +29,10 @@ the end (spec FR-001, FR-003, SC-001).
 
 | # | Behaviour | Acceptance scenario (new UI) | Tests | Result | Date |
 |---|---|---|---|---|---|
-| B1 | A tab never resets: page, size, mode, scroll, selection kept, across back and forward | | | | |
-| B2 | Tabs restore fully on relaunch (clarified 2026-10-03) | | | | |
+| B1 | A tab never resets: page, size, mode, scroll, selection kept, across back and forward | Tabs hold whole screen states; back, forward, and switching tabs return the exact state, and a screen that has its data asks for nothing on return. (Scenes' own fields are exercised for real with US3.) | `tests/tabs.rs` | pass (user, V2) | 2026-10-04 |
+| B2 | Tabs restore fully on relaunch (clarified 2026-10-03) | Quit and relaunch: every tab, history, cursor, screen field, and the selected tab come back, per server; saved 500 ms after a change and on quit or switch; a corrupt or other-version `session.json` is set aside as `.bad` and the app opens a fresh Home tab | `tests/snapshot.rs`, `tests/shell_flows.rs` | pass (user, V2) | 2026-10-04 |
 | B3 | Paged lists: default 50, sizes 20–1000, first/previous/next/last, jump, total count | | | | |
-| B4 | Everything reachable from the keyboard; the player keeps 002's shortcuts | | | | |
+| B4 | Everything reachable from the keyboard; the player keeps 002's shortcuts | One keymap table drives dispatch, keyboard help (F1 or ?), and Settings → Keyboard; Tab / Shift+Tab move focus; typing in a field never triggers shortcuts; the player's bindings are exactly 002's | `tests/keymap.rs`, `tests/shell_flows.rs`, `tests/controls.rs` | partial (US3 adds the grid's keys) | |
 | B5 | mpv's video inside the window with controls on top; every frame shown | | | | |
 | B6 | Plain-language, distinct connection failures; security state always visible | Every failure kind has its own title, detail, and hint; the indicator shows the security state at all times | `tests/messages.rs`, `tests/connection.rs` | pass (user, V1) | 2026-10-04 |
 | B7 | One notification centre with a badge; toasts never take focus; infrastructure stays out of sight | | | | |

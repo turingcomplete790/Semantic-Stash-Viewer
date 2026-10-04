@@ -52,7 +52,9 @@ pub enum Message {
     // Inputs from the core and the window, routed into the active state.
     Connection(ConnectionSnapshot),
     Player(PlayerSnapshot),
-    Key(keyboard::Key),
+    Key(keyboard::Key, keyboard::Modifiers),
+    /// Background work finished with nothing to report.
+    Idle,
     FrameReady,
     Tick,
     WindowId(Option<window::Id>),
@@ -129,7 +131,8 @@ impl App {
             Message::Player(s) => {
                 self.session(session::Msg::Playback(session::playback::Msg::Snapshot(s)))
             }
-            Message::Key(key) => self.session(session::Msg::Key(key)),
+            Message::Key(key, mods) => self.session(session::Msg::Key(key, mods)),
+            Message::Idle => Vec::new(),
             Message::FrameReady => Vec::new(),
             Message::Tick => self.session(session::Msg::Playback(
                 session::playback::Msg::Controls(crate::player::view::Msg::Tick),
@@ -170,7 +173,12 @@ impl App {
         if let Some(mut v) = self.video.take() {
             v.stop();
         }
-        vec![Effect::Quit]
+        let mut effects = Vec::new();
+        if let State::Session(session) = &self.state {
+            effects.extend(session.save_now());
+        }
+        effects.push(Effect::Quit);
+        effects
     }
 
     fn onboarding(&mut self, msg: onboarding::Msg) -> Vec<Effect> {
@@ -195,6 +203,8 @@ impl App {
             // Leave this session for another saved server (001 US4).
             tracing::info!(to = %id, known = session.servers.len(), "switching server");
             if let Some(profile) = session.servers.iter().find(|p| p.id == *id).cloned() {
+                // Each server keeps its own tabs.
+                effects.extend(session.save_now());
                 let (next, entry) = Session::enter(profile, false);
                 self.state = State::Session(Box::new(next));
                 effects.extend(entry);
@@ -246,9 +256,9 @@ impl App {
             // Key events a focused widget captured (typing in a field) never reach the machine.
             iced::event::listen_with(|event, status, _window| match (event, status) {
                 (
-                    iced::Event::Keyboard(keyboard::Event::KeyPressed { key, .. }),
+                    iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }),
                     iced::event::Status::Ignored,
-                ) => Some(Message::Key(key)),
+                ) => Some(Message::Key(key, modifiers)),
                 _ => None,
             }),
         ];

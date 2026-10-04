@@ -117,3 +117,8 @@ pub fn menu_row(active: bool) -> impl Fn(&Theme, button::Status) -> button::Styl
         }
     }
 }
+
+/// The tab strip under the navigation bar.
+pub fn strip(_: &Theme) -> container::Style {
+    container::Style::default().background(Background::Color(BACKGROUND))
+}

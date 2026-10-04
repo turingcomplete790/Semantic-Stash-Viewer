@@ -216,6 +216,15 @@ impl Services {
         Ok((client, profile.api_key, profile.strict_tls))
     }
 
+    /// The last server summary read for the current profile, or the live connection's.
+    pub fn cached_server_info(&self) -> Option<stash_core::connection::ServerInfo> {
+        let cached = self
+            .current_profile()
+            .and_then(|id| self.caches.for_profile(id))
+            .and_then(|r| lock(r.cache()).get("server:info").map(|c| c.data));
+        cached.or_else(|| self.manager.snapshot().server)
+    }
+
     /// Read `key` through the current profile's cache: cached data shows even while offline, and
     /// without a cache it reads the server. `force` fetches now.
     pub async fn read_cached<T, F, Fut>(

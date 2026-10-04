@@ -8,6 +8,7 @@
 use std::sync::Arc;
 
 use iced::{window, Task};
+use stash_core::connection::ServerInfo;
 use stash_core::profiles::{ProfileDraft, ServerProfile};
 use stash_core::AppError;
 use uuid::Uuid;
@@ -15,6 +16,11 @@ use uuid::Uuid;
 use crate::app::Message;
 use crate::player::controls::Direction;
 use crate::services::Services;
+use crate::session::snapshot::{self, SavedSession};
+use crate::shell::TabId;
+
+/// How long after the last change the session is saved.
+pub const SAVE_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// A player command (the 006 controls); sent to mpv by the effect runner.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -34,15 +40,46 @@ pub enum PlayerAction {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Effect {
     /// Make a saved server active and connect (at launch, or a switch).
-    Connect { profile: Uuid, launch: bool },
+    Connect {
+        profile: Uuid,
+        launch: bool,
+    },
     /// Test a new server and save it; the result goes back to onboarding.
     CreateProfile(ProfileDraft),
     /// Re-test and save a changed server (a new API key from the key prompt).
-    UpdateProfile { id: Uuid, draft: ProfileDraft },
+    UpdateProfile {
+        id: Uuid,
+        draft: ProfileDraft,
+    },
     /// Read the saved servers (for the server menu).
     LoadProfiles,
     /// Move keyboard focus to a widget (an entry action).
     Focus(&'static str),
+    /// Move keyboard focus to the next or previous control (Tab, Shift+Tab).
+    FocusNext,
+    FocusPrevious,
+    /// Read the server summary for a tab's Home screen, cache first.
+    LoadSummary {
+        tab: TabId,
+    },
+    /// Read a profile's saved session.
+    LoadSession {
+        profile: Uuid,
+    },
+    /// Ask for a save after [`SAVE_DELAY`]; only the latest generation is written (debounce).
+    SaveSessionLater {
+        generation: u64,
+    },
+    /// Write a profile's session in the background.
+    SaveSession {
+        profile: Uuid,
+        session: SavedSession,
+    },
+    /// Write it before anything else runs (quit, server switch).
+    SaveSessionNow {
+        profile: Uuid,
+        session: SavedSession,
+    },
     /// Enter or leave fullscreen.
     SetFullscreen(bool),
     /// Look up a scene and start playing it.
@@ -60,6 +97,14 @@ pub enum Reply {
     ProfileUpdated(Result<ServerProfile, AppError>),
     Profiles(Vec<ServerProfile>),
     SceneOpened(Result<(), AppError>),
+    Summary {
+        tab: TabId,
+        info: Option<ServerInfo>,
+    },
+    SessionLoaded {
+        profile: Uuid,
+        saved: Option<SavedSession>,
+    },
 }
 
 /// Turn an effect into a task.
@@ -92,6 +137,38 @@ pub fn run(effect: Effect, services: &Arc<Services>, window: Option<window::Id>)
             })
         }
         Effect::Focus(id) => iced::widget::operation::focus(id),
+        Effect::FocusNext => iced::widget::operation::focus_next(),
+        Effect::FocusPrevious => iced::widget::operation::focus_previous(),
+        Effect::LoadSummary { tab } => {
+            let services = Arc::clone(services);
+            blocking(
+                move || services.cached_server_info(),
+                move |info| Message::Reply(Reply::Summary { tab, info }),
+            )
+        }
+        Effect::LoadSession { profile } => {
+            let path = services.paths.session();
+            blocking(
+                move || snapshot::load(&path, profile),
+                move |saved| Message::Reply(Reply::SessionLoaded { profile, saved }),
+            )
+        }
+        Effect::SaveSessionLater { generation } => {
+            Task::perform(tokio::time::sleep(SAVE_DELAY), move |()| {
+                Message::Session(crate::session::Msg::SaveDue(generation))
+            })
+        }
+        Effect::SaveSession { profile, session } => {
+            let path = services.paths.session();
+            blocking(
+                move || save_session(&path, profile, &session),
+                |()| Message::Idle,
+            )
+        }
+        Effect::SaveSessionNow { profile, session } => {
+            save_session(&services.paths.session(), profile, &session);
+            Task::none()
+        }
         Effect::SetFullscreen(fullscreen) => {
             if let Some(p) = &services.player {
                 p.set_fullscreen_flag(fullscreen);
@@ -128,6 +205,29 @@ pub fn run(effect: Effect, services: &Arc<Services>, window: Option<window::Id>)
             iced::exit()
         }
     }
+}
+
+fn save_session(path: &std::path::Path, profile: Uuid, session: &SavedSession) {
+    if let Err(e) = snapshot::save(path, profile, session) {
+        tracing::warn!(error = %e, "couldn't save the session");
+    }
+}
+
+/// Run `work` off the UI thread and turn its result into a message.
+fn blocking<T: Send + 'static>(
+    work: impl FnOnce() -> T + Send + 'static,
+    done: impl FnOnce(T) -> Message + Send + 'static,
+) -> Task<Message> {
+    Task::perform(
+        async move { tokio::task::spawn_blocking(work).await },
+        move |result| match result {
+            Ok(value) => done(value),
+            Err(e) => {
+                tracing::error!(error = %e, "background work failed");
+                Message::Idle
+            }
+        },
+    )
 }
 
 fn player_command(p: &player::Player, action: PlayerAction) {

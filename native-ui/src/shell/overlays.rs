@@ -1,5 +1,5 @@
 //! Overlays above the session (007 data model "Shell"): one at a time, Escape closes it. US1 adds
-//! the key prompt and the server menu; US2 and US5 add keyboard help and notifications.
+//! the key prompt and the server menu, US2 keyboard help; US5 adds notifications.
 
 use iced::widget::{button, column, container, row, text, text_input, Space};
 use iced::{Alignment, Element, Length};
@@ -24,6 +24,8 @@ pub enum Overlay {
     ServerMenu,
     /// Add another server (the onboarding form); the app switches to it once it connects.
     AddServer(ServerForm),
+    /// Every keyboard shortcut (F1 or ?).
+    KeyboardHelp,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -128,6 +130,26 @@ pub fn server_menu<'a>(
         .spacing(14)
         .into(),
         400.0,
+    )
+}
+
+/// The keyboard help: the keymap's table.
+pub fn keyboard_help() -> Element<'static, Msg> {
+    panel(
+        column![
+            row![
+                text("Keyboard shortcuts").size(20),
+                Space::new().width(Length::Fill),
+                button(text("Close"))
+                    .on_press(Msg::Close)
+                    .style(button::text),
+            ]
+            .align_y(Alignment::Center),
+            container(super::keymap::help_list()).height(Length::Fixed(520.0)),
+        ]
+        .spacing(12)
+        .into(),
+        460.0,
     )
 }
 
