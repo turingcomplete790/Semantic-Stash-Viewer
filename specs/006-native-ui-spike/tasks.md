@@ -226,6 +226,11 @@ keyboard while `perf-harness --app native --quick` measures (quickstart V1).
 
 ---
 
+> **Closed 2026-10-03 after the playback gate.** The user decided GO on US1's evidence
+> ([decision.md](decision.md)) and the constitution moved to iced (v4.0.0). The open tasks below
+> (US2 grid, US3 tabs, the rest of US4, Polish) are **moved to the port feature** as its starting
+> scope; they are left unchecked here on purpose.
+
 ## Phase 4: User Story 2 - Browse scenes a page at a time (Priority: P2)
 
 **Goal**: the paged Scenes grid and list of feature 005, with thumbnails straight from the core
@@ -385,7 +390,7 @@ measured for both builds.
     scratchpad with `SSV_HARNESS_EXIT` and `SSV_MEASURE`, plus 5 by hand);
   - after each launch, check that tabs come back;
   - record crashes, hangs, and lost state (expected none).
-- [ ] T043 [US4] Write `specs/006-native-ui-spike/decision.md` per
+- [X] T043 [US4] Write `specs/006-native-ui-spike/decision.md` per
   [contracts/decision-record.md](contracts/decision-record.md):
   1. GO or NO-GO;
   2. the evidence table for SC-001 to SC-011, both builds;
