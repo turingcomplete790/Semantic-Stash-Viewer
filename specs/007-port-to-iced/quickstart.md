@@ -86,3 +86,61 @@ apps, same day) or more scenes copied to Testing.
 
 `playback-displayed-fps` has no demo samples (the demo presents every frame mpv renders; only
 the native build reports it).
+
+### Both apps, same day (T058), 2026-10-05
+
+Testing profile (1,020 scenes since 2026-10-05), same machine (Xeon W-2135, Radeon RX 9060 XT,
+144 Hz display), debug builds as the harness runs them (dependencies optimised, research R16),
+playback rows pinned to the same scenes for both apps: `perf-harness --profile <Testing>
+--app native|web --scenes 185,192,194 --long 185` (1080p H.264, AV1, HEVC; long: 1080p H.264).
+Reports: `perf/20261005-155615.md` (native), `perf/20261005-161035.md` (demo).
+
+| Measurement | Native | Demo | Baseline (demo, T001) | Budget |
+|---|---|---|---|---|
+| cold-start-warm | 488 ms | 944 ms | 914 ms | 2 s |
+| cold-start-cleared | 480 ms | 1029 ms | 990 ms | info |
+| nav-first-paint (median) | 14 ms | 35 ms | 37 ms | 150 ms |
+| control press (median) | 15 ms | 34 ms | 32 ms | 50 ms |
+| tab-switch-20-tabs, one playing (median) | 14 ms (`videoSized` 8/8) | 32 ms | 32 ms | info |
+| now-playing-appears / back-to-scene | 14 / 14 ms | 48 / 51 ms | 49 / 50 ms | info |
+| scenes-page-change median / p95 | 21 / 340 ms **fail** | 113 / 394 ms **fail** | 89 / 98 ms (3 pages) | 150 ms p95 |
+| scenes-page-jump median / p95 | 28 / 70 ms | 120 / 166 ms | 65 / 68 ms | 1 s p95 |
+| scenes-scroll-1000 grid (missed) | 5.9% at 144 Hz **fail** | 0.7% at 60 Hz | 0% (≈200 cards) | 1% |
+| scenes-scroll-1000 list (missed) | 0.1% at 144 Hz | 0% at 60 Hz | 0% (≈200 cards) | 1% |
+| playback-open (median) | 143 ms | 124 ms | 120 ms | 1.5 s |
+| seek-to-frame median / p95 | 83 / 238 ms | 81 / 238 ms | 155 / 515 ms | 1 s |
+| dropped frames per min (1080p) | 0 | 0 | 0 | 1 |
+| playback displayed fps | 29.9 (every frame) | – | – | info |
+| playback main-thread CPU | 3% | 10% | 8% | info |
+| memory / CPU at rest on Scenes (50) | 736 MB / 0% | 760 MB / 0% (3 processes) | – | info |
+| memory / CPU playing 1080p | 778 MB / 8.7% | 1179 MB / 18% (3 processes) | – | info |
+
+**Reading it**:
+- The native app is faster on every interaction row, and plays the same (0 dropped, every frame
+  shown) with half the CPU and two-thirds of the memory while playing.
+- **Page change** fails in both apps on its p95 only: one cold change in 20 (the harness clears
+  the cache in its earlier runs); medians are 21 ms (native) and 113 ms (demo).
+- **Grid scrolling**: the demo is judged at WebKit's 60 Hz (16.7 ms per frame); the native app at
+  the display's 144 Hz (6.9 ms per frame), so it moves 2.4 times the frames per second. It misses
+  5.9% of 144 Hz frames with 1000 cards (list mode: 0.1%), which the user found smoother than the
+  demo in use (V3). Remaining cause: re-laying out the rows around the view as new rows enter
+  (research R16).
+- The baseline (T001) had about 200 scenes on Testing, so its page and 1000-card rows aren't
+  comparable to today's; its playback rows played other (older) scenes.
+
+
+### Stability (T059), 2026-10-05
+
+20 scripted cycles on Testing (`SSV_MEASURE_QUIT_WHILE_PLAYING=185`, every other one fullscreen):
+launch, connect, restore the saved tabs, open scene 185 in a tab, play it, and close the window
+while it plays. Result: **20 of 20 exited cleanly; no crashes, no hangs; no tabs lost** (the
+saved tabs grew by one per cycle, 2 → 21, as each cycle opened its scene before the saved tabs
+arrived).
+
+Found and fixed on the way:
+- Quitting while fullscreen crashed about one run in three (mpv's decoder teardown raced the
+  render context being freed): playback is now stopped and mpv left idle first.
+- A tab used before the saved tabs arrived (a click right at launch) was replaced by the
+  restore: it's now kept as an extra tab, selected, with playback still attached.
+
+The 5 cycles by hand are part of the user's V6 check.

@@ -236,6 +236,8 @@ async fn measure_long(services: &Services, player: &Player, id: &str, secs: u64)
         player.snapshot().state == PlayerStateKind::Playing
     })
     .await;
+    // Memory and CPU while playing: the harness samples the process tree (007 T057).
+    emit(&json!({"sample": "playing", "secs": 20}));
     let start_drops = player.stats().dropped_frames;
     let start_frames = crate::player::video::frame_counts();
     let start_cpu = main_thread_cpu_ticks();

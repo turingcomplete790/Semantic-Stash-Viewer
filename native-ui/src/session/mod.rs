@@ -158,6 +158,10 @@ impl Session {
         if self.playback.snapshot().fullscreen {
             return true;
         }
+        // Opened outside a tab (the playback measurement): it shows in the active tab.
+        if self.playback.owner.is_none() {
+            return true;
+        }
         let tab = self.shell.active();
         self.playback.owner == Some(tab.id)
             && matches!(
@@ -244,6 +248,10 @@ impl Session {
             Some(shell_mod::Up::Play(id)) => {
                 let owner = self.shell.active().id;
                 step.with_all(self.playback.open(id, owner))
+            }
+            Some(shell_mod::Up::AddServer) => {
+                self.overlay = Overlay::AddServer(onboarding::ServerForm::default());
+                step.with(Effect::Focus(onboarding::ADDRESS_ID))
             }
             Some(shell_mod::Up::Closed(tab)) => {
                 if self.playback.active() && self.playback.owner == Some(tab) {
@@ -389,8 +397,17 @@ impl Session {
                         // shell's default left the grid building rows for a smaller window
                         // after a server switch, with an empty band below them).
                         let layout = self.shell.layout;
-                        self.shell = shell;
+                        let previous = std::mem::replace(&mut self.shell, shell);
                         self.shell.layout = layout;
+                        // Something was already done before the saved tabs arrived (a quick
+                        // click at launch): keep that tab too, selected, so nothing is lost.
+                        if previous.touched() {
+                            let old_id = previous.active().id;
+                            let new_id = self.shell.adopt(previous.active().clone());
+                            if self.playback.owner == Some(old_id) {
+                                self.playback.owner = Some(new_id);
+                            }
+                        }
                         // Restored Home screens pick up a summary that's already here.
                         if let Some(info) = self.connection.snapshot.server.clone() {
                             self.shell.server_info(&info);
@@ -485,7 +502,40 @@ impl Session {
                 self.update(Msg::AddServer(onboarding::Msg::Reply(reply)))
             }
             Msg::Reply(Reply::Profiles(list)) => {
+                self.shell.settings_profiles(&list);
                 self.servers = list;
+                Step::none()
+            }
+            Msg::Reply(Reply::ProfileSaved { id, result }) => {
+                self.shell.settings_saved(id, &result);
+                match result {
+                    Ok(p) => {
+                        if let Some(slot) = self.servers.iter_mut().find(|s| s.id == p.id) {
+                            *slot = p.clone();
+                        }
+                        // The active server changed: connect with its new settings.
+                        if p.id == self.profile.id {
+                            self.profile = p;
+                            return Step::effect(Effect::Connect {
+                                profile: self.profile.id,
+                                launch: false,
+                            });
+                        }
+                        Step::none()
+                    }
+                    Err(_) => Step::none(),
+                }
+            }
+            Msg::Reply(Reply::ProfileDeleted(result)) => {
+                self.shell.settings_deleted(&result);
+                Step::effect(Effect::LoadProfiles)
+            }
+            Msg::Reply(Reply::CacheSize(size)) => {
+                self.shell.settings_cache_size(size);
+                Step::none()
+            }
+            Msg::Reply(Reply::CacheCleared(result)) => {
+                self.shell.settings_cleared(&result);
                 Step::none()
             }
             Msg::Reply(Reply::ProfileUpdated(Ok(profile))) => {
@@ -644,6 +694,7 @@ impl Session {
                 .into();
                 let chrome: Element<'a, Msg> = self.shell.chrome(right).map(Msg::Shell);
                 let content: Element<'a, Msg> = match self.shell.active().current() {
+                    _ if self.playback.active() && self.playback.owner.is_none() => player(),
                     crate::screens::Screen::Scene(scene) if self.player_visible() => {
                         crate::screens::scene::layout(
                             player(),

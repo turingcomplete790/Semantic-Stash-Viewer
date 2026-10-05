@@ -43,6 +43,8 @@ pub struct Shell {
     next_id: TabId,
     /// The window's size (the grid's columns, keyboard moves, scroll positions).
     pub layout: Layout,
+    /// Something changed since the shell was made (a restore then keeps the current tab).
+    touched: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -65,6 +67,8 @@ pub enum ShellMsg {
     MoveLeft,
     MoveRight,
     SettingsPage(SettingsPage),
+    /// For the active Settings screen.
+    Settings(crate::screens::settings::SettingsMsg),
     /// For the active Scenes screen.
     Scenes(ScenesMsg),
     // Handled above the shell.
@@ -80,6 +84,8 @@ pub enum Up {
     Play(String),
     /// A tab was closed (playback it owned stops).
     Closed(TabId),
+    /// Open the "Add a server" form.
+    AddServer,
     ServerMenu,
     Notifications,
     KeyboardHelp,
@@ -93,6 +99,7 @@ impl Shell {
             selected: 0,
             next_id: 2,
             layout: Layout::default(),
+            touched: false,
         };
         let effects = shell.active_mut().enter();
         (shell, effects)
@@ -117,6 +124,7 @@ impl Shell {
             tabs,
             next_id,
             layout: Layout::default(),
+            touched: false,
         };
         let effects = shell.active_mut().enter();
         Some((shell, effects))
@@ -206,7 +214,27 @@ impl Shell {
         self.selected = to as usize;
     }
 
+    /// Whether anything happened since the shell was made.
+    pub fn touched(&self) -> bool {
+        self.touched
+    }
+
+    /// Add a tab from another shell (the one used before the saved tabs arrived) as a new tab,
+    /// selected. Returns its id here.
+    pub fn adopt(&mut self, mut tab: Tab) -> TabId {
+        let id = self.next_id;
+        self.next_id += 1;
+        tab.id = id;
+        if self.tabs.len() >= MAX_TABS {
+            self.tabs.pop();
+        }
+        self.tabs.push(tab);
+        self.selected = self.tabs.len() - 1;
+        id
+    }
+
     pub fn update(&mut self, msg: ShellMsg) -> Step<Up> {
+        self.touched = true;
         let len = self.tabs.len();
         let effects = match msg {
             ShellMsg::Section(section) => self.active_mut().open_section(section),
@@ -232,11 +260,17 @@ impl Shell {
                 self.move_by(1);
                 Vec::new()
             }
-            ShellMsg::SettingsPage(page) => {
-                if let Screen::Settings(s) = self.active_mut().current_mut() {
-                    s.page = page;
-                }
-                Vec::new()
+            ShellMsg::SettingsPage(page) => match self.active_mut().current_mut() {
+                Screen::Settings(s) => s.open(page),
+                _ => Vec::new(),
+            },
+            ShellMsg::Settings(m) => {
+                let Screen::Settings(s) = self.active_mut().current_mut() else {
+                    return Step::none();
+                };
+                return s.update(m).map_up(|up| match up {
+                    crate::screens::settings::SettingsUp::AddServer => Up::AddServer,
+                });
             }
             ShellMsg::Scenes(m) => {
                 let (tab, layout) = (self.active().id, self.layout);
@@ -283,6 +317,56 @@ impl Shell {
             })
             .map(|state| state.page_loaded(generation, result, waiting))
             .unwrap_or_default()
+    }
+
+    /// Every Settings screen, in every tab (results for Settings reach them all).
+    fn settings_screens(&mut self) -> impl Iterator<Item = &mut crate::screens::SettingsState> {
+        self.tabs
+            .iter_mut()
+            .flat_map(|t| t.history.iter_mut())
+            .filter_map(|s| match s {
+                Screen::Settings(s) => Some(s),
+                _ => None,
+            })
+    }
+
+    pub fn settings_profiles(&mut self, list: &[stash_core::profiles::ServerProfile]) {
+        for s in self.settings_screens() {
+            s.servers.loaded(list.to_vec());
+        }
+    }
+
+    pub fn settings_saved(
+        &mut self,
+        id: uuid::Uuid,
+        result: &Result<stash_core::profiles::ServerProfile, AppError>,
+    ) {
+        for s in self.settings_screens() {
+            s.servers.saved(id, result.clone());
+        }
+    }
+
+    pub fn settings_deleted(
+        &mut self,
+        result: &Result<stash_core::profiles::ServerProfile, AppError>,
+    ) {
+        for s in self.settings_screens() {
+            s.servers.deleted(result.clone());
+        }
+    }
+
+    pub fn settings_cache_size(&mut self, size: u64) {
+        for s in self.settings_screens() {
+            s.troubleshooting.cache_size = Some(size);
+        }
+    }
+
+    pub fn settings_cleared(&mut self, result: &Result<u64, AppError>) {
+        for s in self.settings_screens() {
+            if s.troubleshooting.clear == crate::screens::settings::Clear::Clearing {
+                s.troubleshooting.cleared(result.clone());
+            }
+        }
     }
 
     /// A scene's details arrived for tab `tab`.

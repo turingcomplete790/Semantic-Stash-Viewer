@@ -111,6 +111,24 @@ pub enum Effect {
         title: String,
         detail: Option<String>,
     },
+    /// Re-test and save a server from Settings (`force`: save even if the test fails).
+    SaveProfile {
+        id: Uuid,
+        draft: ProfileDraft,
+        force: bool,
+    },
+    /// Delete a saved server (and its cache).
+    DeleteProfile(Uuid),
+    /// Save the servers' order.
+    ReorderProfiles(Vec<Uuid>),
+    /// Read the current server's cache size.
+    ReadCacheSize,
+    /// Clear the current server's cache.
+    ClearCache,
+    /// Open the log folder in the file manager.
+    OpenLogFolder,
+    /// The UI bench resumes after this long (it idles without its frame clock).
+    WakeBench(std::time::Duration),
     /// Mark read or dismiss entries in the notification centre.
     Notifications(NotificationAction),
     /// Hide a toast after a while (`stamp`: the entry's version that toasted).
@@ -186,6 +204,13 @@ pub enum Reply {
         id: String,
         cover: Option<iced::widget::image::Handle>,
     },
+    ProfileSaved {
+        id: Uuid,
+        result: Result<ServerProfile, AppError>,
+    },
+    ProfileDeleted(Result<ServerProfile, AppError>),
+    CacheSize(u64),
+    CacheCleared(Result<u64, AppError>),
     /// Thumbnails worth having before they're shown (the next page's).
     Warm(Vec<ThumbKey>),
     SessionLoaded {
@@ -329,6 +354,63 @@ pub fn run(effect: Effect, services: &Arc<Services>, window: Option<window::Id>)
                 });
             Task::none()
         }
+        Effect::SaveProfile { id, draft, force } => {
+            let services = Arc::clone(services);
+            Task::perform(
+                async move { services.update_profile(id, draft, force).await },
+                move |result| Message::Reply(Reply::ProfileSaved { id, result }),
+            )
+        }
+        Effect::DeleteProfile(id) => {
+            let services = Arc::clone(services);
+            blocking(
+                move || services.delete_profile(id),
+                |result| Message::Reply(Reply::ProfileDeleted(result)),
+            )
+        }
+        Effect::ReorderProfiles(ids) => {
+            let services = Arc::clone(services);
+            blocking(
+                move || {
+                    if let Err(e) = services.reorder_profiles(&ids) {
+                        tracing::warn!(error = %e, "couldn't save the servers' order");
+                    }
+                    services.profiles()
+                },
+                |list| Message::Reply(Reply::Profiles(list)),
+            )
+        }
+        Effect::ReadCacheSize => {
+            let services = Arc::clone(services);
+            blocking(
+                move || {
+                    services
+                        .current_profile()
+                        .map_or(0, |id| services.caches.size(id))
+                },
+                |size| Message::Reply(Reply::CacheSize(size)),
+            )
+        }
+        Effect::ClearCache => {
+            let services = Arc::clone(services);
+            blocking(
+                move || match services.current_profile() {
+                    Some(id) => services.clear_cache(id),
+                    None => Ok(0),
+                },
+                |result| Message::Reply(Reply::CacheCleared(result)),
+            )
+        }
+        Effect::OpenLogFolder => {
+            let logs = services.paths.logs();
+            if let Err(e) = std::process::Command::new("xdg-open").arg(&logs).spawn() {
+                tracing::warn!(error = %e, "couldn't open the log folder");
+            }
+            Task::none()
+        }
+        Effect::WakeBench(after) => Task::perform(tokio::time::sleep(after), |()| {
+            Message::Frame(std::time::Instant::now())
+        }),
         Effect::Notifications(action) => {
             match action {
                 NotificationAction::MarkRead(ids) => services.notifications.mark_read(&ids),

@@ -6,17 +6,15 @@
 pub mod home;
 pub mod scene;
 pub mod scenes;
+pub mod settings;
 
-use iced::widget::{button, column, container, row, text, Space};
-use iced::{Element, Length};
+use iced::Element;
 use serde::{Deserialize, Serialize};
 use stash_core::profiles::ServerProfile;
 
 use crate::effects::Effect;
 use crate::session::connection::Connection;
-use crate::shell::keymap;
 use crate::shell::{ShellMsg, TabId};
-use crate::widgets::theme;
 
 /// What screen views read beyond their own state.
 pub struct Context<'a> {
@@ -29,6 +27,7 @@ pub struct Context<'a> {
 
 pub use scene::SceneState;
 pub use scenes::ScenesState;
+pub use settings::{SettingsPage, SettingsState};
 
 /// The navigation bar's sections.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,38 +42,6 @@ pub enum Mode {
     #[default]
     Grid,
     List,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub enum SettingsPage {
-    #[default]
-    Servers,
-    Keyboard,
-    Troubleshooting,
-    About,
-}
-
-impl SettingsPage {
-    pub const ALL: [SettingsPage; 4] = [
-        SettingsPage::Servers,
-        SettingsPage::Keyboard,
-        SettingsPage::Troubleshooting,
-        SettingsPage::About,
-    ];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            SettingsPage::Servers => "Servers",
-            SettingsPage::Keyboard => "Keyboard",
-            SettingsPage::Troubleshooting => "Troubleshooting",
-            SettingsPage::About => "About",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct SettingsState {
-    pub page: SettingsPage,
 }
 
 /// One screen state, externally tagged by variant in the saved session.
@@ -100,7 +67,7 @@ impl Screen {
     }
 
     pub fn settings(page: SettingsPage) -> Self {
-        Screen::Settings(SettingsState { page })
+        Screen::Settings(SettingsState::at(page))
     }
 
     /// A fresh screen for a navigation bar section.
@@ -137,7 +104,7 @@ impl Screen {
             Screen::Home(_) => Screen::home(),
             Screen::Scenes(s) => Screen::Scenes(s.persistent()),
             Screen::Scene(s) => Screen::Scene(s.persistent()),
-            other => other.clone(),
+            Screen::Settings(s) => Screen::Settings(s.persistent()),
         }
     }
 
@@ -148,6 +115,7 @@ impl Screen {
             Screen::Home(h) if h.needs_load() => vec![Effect::LoadSummary { tab }],
             Screen::Scenes(s) => s.enter(tab),
             Screen::Scene(s) => s.enter(tab),
+            Screen::Settings(s) => s.enter(),
             _ => Vec::new(),
         }
     }
@@ -168,33 +136,7 @@ impl Screen {
             Screen::Home(h) => h.view(ctx),
             Screen::Scenes(s) => scenes::view(s, ctx, tab),
             Screen::Scene(s) => s.view(&ctx.layout),
-            Screen::Settings(s) => settings_view(s),
+            Screen::Settings(s) => s.view(ctx),
         }
     }
-}
-
-fn settings_view(state: &SettingsState) -> Element<'_, ShellMsg> {
-    let mut pages = column![].spacing(4).width(Length::Fixed(200.0));
-    for page in SettingsPage::ALL {
-        pages = pages.push(
-            button(text(page.label()))
-                .width(Length::Fill)
-                .padding([6, 10])
-                .style(theme::menu_row(page == state.page))
-                .on_press(ShellMsg::SettingsPage(page)),
-        );
-    }
-    let body: Element<'_, ShellMsg> = match state.page {
-        SettingsPage::Keyboard => keymap::help_list(),
-        page => text(format!("{} arrives with US6 (Settings).", page.label()))
-            .color(theme::MUTED)
-            .into(),
-    };
-    row![
-        pages,
-        container(body).padding([0, 24]).width(Length::Fill),
-        Space::new().width(0)
-    ]
-    .padding(16)
-    .into()
 }

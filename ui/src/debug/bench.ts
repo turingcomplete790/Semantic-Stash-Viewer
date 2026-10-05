@@ -329,6 +329,14 @@ export async function runBench(): Promise<void> {
     report("now-playing-appears", { playing, ...summary(away.length ? away : [NaN]) });
     report("back-to-scene", summary(back.length ? back : [NaN]));
     close(sceneTab);
+
+    // At rest on a 50-card Scenes page: the harness samples the process tree's memory and CPU
+    // (007 T057, the same sample point as the native app).
+    navigate({ kind: "scenes" }, { newTab: true });
+    await until(() => pane() != null && firstTitle(pane() as HTMLElement) !== null, 15_000);
+    await new Promise((r) => setTimeout(r, 5000));
+    void commands.debugReport(JSON.stringify({ sample: "idle-scenes-50", secs: 5 }));
+    await new Promise((r) => setTimeout(r, 6000));
   } finally {
     // Put the tabs back as they were.
     for (const t of [...tabs()]) if (!original.includes(t.id)) close(t.id);

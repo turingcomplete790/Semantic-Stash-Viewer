@@ -228,3 +228,50 @@ mod restore_keeps_the_window {
         assert_eq!(s.shell.layout, window);
     }
 }
+
+mod early_navigation {
+    use semantic_stash_viewer_native::effects::Reply;
+    use semantic_stash_viewer_native::screens::{Screen, Section};
+    use semantic_stash_viewer_native::session::{Msg, Session};
+    use semantic_stash_viewer_native::shell::{Shell, ShellMsg};
+    use stash_core::profiles::ServerProfile;
+
+    #[test]
+    fn a_tab_used_before_the_saved_tabs_arrive_is_kept() {
+        let p = ServerProfile {
+            id: uuid::Uuid::new_v4(),
+            display_name: "Testing".into(),
+            base_url: "http://localhost:9998/".parse().expect("url"),
+            strict_tls: false,
+            api_key: None,
+            created_at: chrono::Utc::now(),
+            last_used_at: None,
+        };
+        let (mut saved, _) = Shell::new();
+        let _ = saved.update(ShellMsg::Section(Section::Settings));
+        let _ = saved.update(ShellMsg::NewTab);
+        let (mut s, _) = Session::enter(p.clone(), true);
+        // A scene opened and playing before the saved session was read.
+        let _ = s.update(Msg::Shell(ShellMsg::Open(Screen::scene("7", "Seven"))));
+        let _ = s.update(Msg::Shell(ShellMsg::Play("7".into())));
+        let _ = s.update(Msg::Reply(Reply::SessionLoaded {
+            profile: p.id,
+            saved: Some(saved.capture()),
+        }));
+        assert_eq!(
+            s.shell.tabs.len(),
+            3,
+            "the two saved tabs plus the one in use"
+        );
+        assert_eq!(s.shell.active().current().title(), "Seven");
+        assert_eq!(s.playback.owner, Some(s.shell.active().id));
+
+        // Nothing done before the restore: just the saved tabs.
+        let (mut quiet, _) = Session::enter(p.clone(), true);
+        let _ = quiet.update(Msg::Reply(Reply::SessionLoaded {
+            profile: p.id,
+            saved: Some(saved.capture()),
+        }));
+        assert_eq!(quiet.shell.tabs.len(), 2);
+    }
+}

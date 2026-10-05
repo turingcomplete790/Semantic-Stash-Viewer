@@ -53,17 +53,26 @@ struct Options {
     profile: String,
     quick: bool,
     app: App,
+    /// Scenes for the playback rows (`auto`: the newest).
+    scenes: String,
+    /// The scene for the long playback (`auto`: the newest 1080p one).
+    long: String,
 }
 
 fn parse_args() -> Result<Options, String> {
     let mut profile = None;
     let mut quick = false;
     let mut app = App::Native;
+    let mut scenes = "auto".to_owned();
+    let mut long = "auto".to_owned();
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--profile" => profile = args.next(),
             "--quick" => quick = true,
+            // Pin the scenes so both apps (and runs on different days) play the same files.
+            "--scenes" => scenes = args.next().ok_or("--scenes takes a list of ids")?,
+            "--long" => long = args.next().ok_or("--long takes a scene id")?,
             "--app" => {
                 app = match args.next().as_deref() {
                     Some("web") => App::Web,
@@ -79,6 +88,8 @@ fn parse_args() -> Result<Options, String> {
         profile: profile.ok_or("--profile <display name> is required")?,
         quick,
         app,
+        scenes,
+        long,
     })
 }
 
@@ -90,7 +101,8 @@ fn main() -> ExitCode {
                 eprintln!("{message}");
             }
             eprintln!(
-                "usage: perf-harness --profile \"<display name>\" [--app native|web] [--quick]"
+                "usage: perf-harness --profile \"<display name>\" [--app native|web] [--quick] \
+                 [--scenes <id,id,…>] [--long <id>]"
             );
             return ExitCode::from(2);
         }
@@ -172,8 +184,8 @@ fn run(options: &Options) -> Result<Report, String> {
         &app,
         &base,
         &[
-            ("SSV_MEASURE", "auto"),
-            ("SSV_MEASURE_LONG", "auto"),
+            ("SSV_MEASURE", options.scenes.as_str()),
+            ("SSV_MEASURE_LONG", options.long.as_str()),
             ("SSV_MEASURE_LONG_SECS", &long_secs),
         ],
     )?;
@@ -184,6 +196,7 @@ fn run(options: &Options) -> Result<Report, String> {
     measurements.extend(bench_measurements(&bench));
     measurements.extend(scenes_measurements(&bench));
     measurements.extend(playback_measurements(&playback));
+    measurements.extend(resource_measurements(&bench, &playback));
 
     let dir = perf_dir();
     let previous = newest_report(&dir, options.app.name());
@@ -287,10 +300,47 @@ fn launch(app: &Path, base: &[(&str, String)], extra: &[(&str, &str)]) -> Result
 
     let deadline = Instant::now() + LAUNCH_TIMEOUT;
     let mut result = Launch::default();
+    let root = child.id();
+    // Process-tree samples the app asked for (`{"sample": name, "secs": n}`), in progress.
+    let mut sampling: Vec<(String, Instant, Instant, TreeUsage)> = Vec::new();
     loop {
         while let Ok(value) = rx.try_recv() {
+            if let (Some(name), Some(secs)) = (
+                value.get("sample").and_then(Value::as_str),
+                value.get("secs").and_then(Value::as_f64),
+            ) {
+                let now = Instant::now();
+                sampling.push((
+                    name.to_owned(),
+                    now,
+                    now + Duration::from_secs_f64(secs),
+                    tree_usage(root),
+                ));
+            }
             result.lines.push(value);
         }
+        let now = Instant::now();
+        sampling.retain(|(name, started, until, start)| {
+            if now < *until {
+                return true;
+            }
+            let end = tree_usage(root);
+            let secs = now.duration_since(*started).as_secs_f64();
+            let cpu_ticks: u64 = end
+                .cpu
+                .iter()
+                .map(|(pid, ticks)| ticks.saturating_sub(start.cpu.get(pid).copied().unwrap_or(0)))
+                .sum();
+            let line = serde_json::json!({
+                "sampled": name,
+                "rssMb": (end.rss_kb as f64 / 1024.0).round(),
+                "cpuPercent": ((cpu_ticks as f64 / CLOCK_TICKS / secs) * 1000.0).round() / 10.0,
+                "processes": end.cpu.len(),
+            });
+            eprintln!("    {}", describe_line(&line));
+            result.lines.push(line);
+            false
+        });
         match child.try_wait() {
             Ok(Some(status)) => {
                 // Drain what's left after exit.
@@ -313,6 +363,121 @@ fn launch(app: &Path, base: &[(&str, String)], extra: &[(&str, &str)]) -> Result
         }
     }
     Ok(result)
+}
+
+/// Linux `USER_HZ`, fixed at 100 on every supported architecture.
+const CLOCK_TICKS: f64 = 100.0;
+
+/// Memory and CPU time of a process and all its descendants (for the web build, WebKit's
+/// processes too), from `/proc`.
+#[derive(Default)]
+struct TreeUsage {
+    /// Resident memory, summed.
+    rss_kb: u64,
+    /// `utime + stime` per process, in clock ticks.
+    cpu: std::collections::HashMap<u32, u64>,
+}
+
+/// `(ppid, utime + stime)` from `/proc/<pid>/stat`.
+fn stat(pid: u32) -> Option<(u32, u64)> {
+    let text = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // Fields after the command (which can hold spaces) start after the last ')'.
+    let rest = &text[text.rfind(')')? + 2..];
+    let fields: Vec<&str> = rest.split_whitespace().collect();
+    // state is field 3 (index 0 here): ppid 4 → 1, utime 14 → 11, stime 15 → 12.
+    let ppid = fields.get(1)?.parse().ok()?;
+    let utime: u64 = fields.get(11)?.parse().ok()?;
+    let stime: u64 = fields.get(12)?.parse().ok()?;
+    Some((ppid, utime + stime))
+}
+
+fn rss_kb(pid: u32) -> u64 {
+    std::fs::read_to_string(format!("/proc/{pid}/status"))
+        .ok()
+        .and_then(|s| {
+            s.lines()
+                .find_map(|l| l.strip_prefix("VmRSS:"))
+                .and_then(|v| v.split_whitespace().next()?.parse().ok())
+        })
+        .unwrap_or(0)
+}
+
+fn tree_usage(root: u32) -> TreeUsage {
+    let mut all: Vec<(u32, u32, u64)> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir("/proc") {
+        for e in entries.flatten() {
+            if let Some(pid) = e.file_name().to_str().and_then(|n| n.parse::<u32>().ok()) {
+                if let Some((ppid, ticks)) = stat(pid) {
+                    all.push((pid, ppid, ticks));
+                }
+            }
+        }
+    }
+    let mut tree = vec![root];
+    let mut i = 0;
+    while i < tree.len() {
+        let parent = tree[i];
+        tree.extend(
+            all.iter()
+                .filter(|(_, pp, _)| *pp == parent)
+                .map(|(p, _, _)| *p),
+        );
+        i += 1;
+    }
+    let mut usage = TreeUsage::default();
+    for (pid, _, ticks) in all.iter().filter(|(p, _, _)| tree.contains(p)) {
+        usage.cpu.insert(*pid, *ticks);
+        usage.rss_kb += rss_kb(*pid);
+    }
+    usage
+}
+
+/// Memory and CPU rows from the process-tree samples (contracts/measurements.md).
+fn resource_measurements(bench: &Launch, playback: &Launch) -> Vec<Measurement> {
+    let rows = [
+        (
+            bench,
+            "idle-scenes-50",
+            "memory-idle-scenes-50",
+            "cpu-idle-scenes-50",
+        ),
+        (
+            playback,
+            "playing",
+            "memory-playing-1080p",
+            "cpu-playing-1080p",
+        ),
+    ];
+    let mut out = Vec::new();
+    for (launch, sample, memory, cpu) in rows {
+        let line = launch
+            .lines
+            .iter()
+            .find(|l| l.get("sampled").and_then(Value::as_str) == Some(sample));
+        let invalid = launch
+            .invalid()
+            .or_else(|| line.is_none().then(|| "not measured".to_owned()));
+        let value = |key: &str| {
+            line.and_then(|l| number(l, key))
+                .into_iter()
+                .collect::<Vec<_>>()
+        };
+        out.push(Measurement::from_samples(
+            memory,
+            Unit::Mb,
+            None,
+            &value("rssMb"),
+            invalid.clone(),
+        ));
+        out.push(Measurement::from_samples(
+            cpu,
+            Unit::Percent,
+            None,
+            &value("cpuPercent"),
+            invalid,
+        ));
+    }
+    out
 }
 
 /// A short progress line (no addresses are ever in `MEASURE` lines).

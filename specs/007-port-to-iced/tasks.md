@@ -417,7 +417,7 @@ failures, and live Stash jobs (spec US5, FR-010).
 
 ### Tests for User Story 6
 
-- [ ] T055 [P] [US6] `native-ui/tests/settings.rs` (transition tests):
+- [X] T055 [P] [US6] `native-ui/tests/settings.rs` (transition tests):
   - the Servers editor moves `Editing → Testing → Saving` (or `Error` with its message);
   - delete asks for confirmation;
   - reorder emits `ReorderProfiles`;
@@ -426,18 +426,18 @@ failures, and live Stash jobs (spec US5, FR-010).
 
 ### Implementation for User Story 6
 
-- [ ] T056 [US6] `native-ui/src/screens/settings/`: `servers.rs` (list, edit, test, delete with
+- [X] T056 [US6] `native-ui/src/screens/settings/`: `servers.rs` (list, edit, test, delete with
   confirmation, reorder), `keyboard.rs` (the keymap table), `troubleshooting.rs` (cache size, clear
   cache, open log folder through `xdg-open`), and `about.rs` (version, build, licence).
-- [ ] T057 [US6] Memory and CPU rows for both apps in `crates/perf-harness/src/main.rs`
+- [X] T057 [US6] Memory and CPU rows for both apps in `crates/perf-harness/src/main.rs`
   (contracts/measurements.md): `VmRSS` and CPU time summed over the process tree from `/proc`,
   sampled after the bench settles and during the long playback.
-- [ ] T058 [US6] Run the full harness for the native app and the demo on Testing on the same day;
+- [X] T058 [US6] Run the full harness for the native app and the demo on Testing on the same day;
   record both in `quickstart.md` "Results"; compare every row against T001's baseline (SC-008).
-- [ ] T059 [US6] Stability run: 20 launch, browse, play, and quit cycles (scripted with
+- [X] T059 [US6] Stability run: 20 launch, browse, play, and quit cycles (scripted with
   `SSV_HARNESS_EXIT` and `SSV_MEASURE`, plus 5 by hand); record crashes, hangs, and lost tabs
   (expected none, SC-007).
-- [ ] T060 [US6] Complete `capabilities.md` (every capability and behaviour that stays passes, with
+- [X] T060 [US6] Complete `capabilities.md` (every capability and behaviour that stays passes, with
   its tests) and get the **user's sign-off**. Stop here until it's given.
 - [ ] T061 [US6] Remove the demo:
   - Delete `ui/`, `src-tauri/`, the root npm files, and CI's Node and bindings steps in

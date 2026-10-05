@@ -87,6 +87,9 @@ enum Op {
     ReportThumbs,
     /// Print the 1000-card page's size (the Testing library may hold fewer scenes).
     ReportCards,
+    /// Ask the harness to sample the process tree's memory and CPU for this long (the app holds
+    /// still meanwhile).
+    ProcSample(&'static str, u64),
     /// Note the frames shown so far (before switching tabs).
     VideoMark,
     /// If the playing tab is showing, wait (a few frames) for a new video frame on screen.
@@ -108,6 +111,9 @@ enum Wait {
     Scrolling,
     /// Waiting this many more frames for a video frame to be shown.
     Video(u32),
+    /// Idle until this time: no frame clock (the app redraws only if something changes), so
+    /// memory and CPU samples see the app at rest. A timer wakes the bench.
+    Idle(Instant),
 }
 
 pub struct Bench {
@@ -320,6 +326,10 @@ fn script() -> Vec<Op> {
     ops.extend([
         shell(ShellMsg::Scenes(ScenesMsg::Mode(Mode::Grid))),
         shell(ShellMsg::Scenes(ScenesMsg::PageSize(50))),
+        Until(Cond::Ready, ms(15_000)),
+        // At rest on a 50-card page: memory and CPU (007 T057).
+        Sleep(ms(5000)),
+        ProcSample("idle-scenes-50", 5),
         Op::Act(A::CloseBenchTabs),
         Frames(2),
         Done,
@@ -517,6 +527,12 @@ impl Bench {
                 }
                 self.wait = Wait::None;
             }
+            Wait::Idle(until) => {
+                if now < until {
+                    return (effects, false);
+                }
+                self.wait = Wait::None;
+            }
             Wait::Video(left) => {
                 if crate::player::video::frame_counts().1 > self.video_mark {
                     self.video_sized += 1;
@@ -643,6 +659,13 @@ impl Bench {
                         return (effects, false);
                     }
                 }
+                Op::ProcSample(name, secs) => {
+                    super::emit(&serde_json::json!({"sample": name, "secs": secs}));
+                    let rest = Duration::from_secs(secs + 1);
+                    self.wait = Wait::Idle(now + rest);
+                    effects.push(Effect::WakeBench(rest));
+                    return (effects, false);
+                }
                 Op::ReportCards => {
                     let n = Self::scenes(session).map_or(0, |s| s.cards().len());
                     let mut line = serde_json::json!({"cards": n});
@@ -663,7 +686,7 @@ impl Bench {
 
     /// Whether the bench needs frame messages now (not while the scrollable times itself).
     pub fn wants_frames(&self) -> bool {
-        !matches!(self.wait, Wait::Scrolling)
+        !matches!(self.wait, Wait::Scrolling | Wait::Idle(_))
     }
 
     /// The scrollable finished a bench scroll.

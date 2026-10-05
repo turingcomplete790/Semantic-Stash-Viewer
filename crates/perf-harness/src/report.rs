@@ -12,6 +12,8 @@ pub enum Unit {
     Fps,
     Count,
     Percent,
+    /// Megabytes of memory.
+    Mb,
 }
 
 impl Unit {
@@ -25,6 +27,7 @@ impl Unit {
             Unit::Fps => "fps",
             Unit::Count => "",
             Unit::Percent => "%",
+            Unit::Mb => "MB",
         }
     }
 }
