@@ -8,7 +8,6 @@ use crate::connection::failure::ConnectFailure;
 /// Every fallible command returns this. Connection problems are wrapped as `Connect` so the UI
 /// can show the matching plain-language message; the rest are app-level problems.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, thiserror::Error)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",

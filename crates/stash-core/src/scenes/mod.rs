@@ -16,7 +16,6 @@ use crate::adapter::endpoint;
 
 /// One row of the "recently added" picker.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct SceneListItem {
     pub id: String,
@@ -32,7 +31,6 @@ pub struct SceneListItem {
 /// One card in the Scenes grid or row in the list (005 data-model "SceneCard"). Text stays on
 /// one line each for title and details (research R3).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct SceneCard {
     pub id: String,
@@ -53,7 +51,6 @@ pub struct SceneCard {
 
 /// One page of cards with the total number of matching scenes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct ScenePage {
     pub count: u32,
@@ -84,7 +81,6 @@ pub fn screenshot_version(path: &str) -> String {
 
 /// A labelled group of scenes (the spike's test set: 4K, WMV, …).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct SceneGroup {
     pub label: String,
@@ -93,7 +89,6 @@ pub struct SceneGroup {
 
 /// The primary file's technical details.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct SceneFile {
     pub container: Option<String>,

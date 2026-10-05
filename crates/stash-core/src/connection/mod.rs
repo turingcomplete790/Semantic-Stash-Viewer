@@ -17,7 +17,6 @@ pub use version::VersionStatus;
 
 /// Library summary shown after connecting (FR-007).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct LibraryCounts {
     pub scenes: u32,
@@ -28,7 +27,6 @@ pub struct LibraryCounts {
 
 /// Facts read from the server on connect (data-model.md "ServerInfo").
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct ServerInfo {
     /// For example `v0.31.1`, or `unknown` if the server didn't report one.

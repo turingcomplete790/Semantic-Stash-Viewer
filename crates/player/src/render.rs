@@ -5,8 +5,7 @@
 //!
 //! **Ownership**: a render context must not outlive the `Mpv` it was made from. A
 //! [`RenderOwner`] keeps the player's mpv core alive, and a [`Renderer`] borrows it, so the
-//! borrow checker enforces the order: the renderer is dropped before its owner. A host that has
-//! to store the renderer (a toolkit callback) uses [`OwnedRenderer`], which holds both.
+//! borrow checker enforces the order: the renderer is dropped before its owner.
 
 use std::ffi::c_void;
 use std::sync::Arc;
@@ -102,48 +101,5 @@ impl Renderer<'_> {
     /// schedule a redraw on the GL thread instead.
     pub fn set_update_callback(&mut self, callback: impl Fn() + Send + 'static) {
         self.ctx.set_update_callback(callback);
-    }
-}
-
-/// A renderer stored together with its owner, for hosts that keep it in a callback (the demo's
-/// GTK `GLArea`). The self-reference is built by `ouroboros`, so no lifetime is extended by hand.
-#[ouroboros::self_referencing]
-pub struct OwnedRenderer {
-    owner: RenderOwner,
-    #[borrows(owner)]
-    #[covariant]
-    renderer: Renderer<'this>,
-}
-
-impl OwnedRenderer {
-    /// Create a renderer that owns its mpv core.
-    ///
-    /// # Safety
-    /// As [`RenderOwner::create_renderer`].
-    pub unsafe fn create(
-        player: &Player,
-        get_proc_address: GetProcAddress,
-        wayland_display: Option<*mut c_void>,
-    ) -> Result<Self, PlayerError> {
-        OwnedRendererTryBuilder {
-            owner: player.render_owner(),
-            renderer_builder: |owner| {
-                // SAFETY: the caller upholds `create_renderer`'s contract (this function's).
-                unsafe { owner.create_renderer(get_proc_address, wayland_display) }
-            },
-        }
-        .try_build()
-    }
-
-    pub fn render(&self, fbo: i32, width: i32, height: i32) -> Result<(), PlayerError> {
-        self.borrow_renderer().render(fbo, width, height)
-    }
-
-    pub fn report_swap(&self) {
-        self.borrow_renderer().report_swap();
-    }
-
-    pub fn set_update_callback(&mut self, callback: impl Fn() + Send + 'static) {
-        self.with_renderer_mut(|r| r.set_update_callback(callback));
     }
 }

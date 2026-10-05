@@ -3,14 +3,10 @@ name = "stash-core"
 description = "Headless core for Semantic Stash Viewer: Stash adapter, connection logic, profiles"
 version.workspace = true
 edition.workspace = true
-rust-version = "1.85"
+rust-version.workspace = true
 license.workspace = true
 
-# This crate MUST NOT depend on tauri (constitution Principle III).
-
-[features]
-default = []
-specta = ["dep:specta", "dep:specta-typescript"]
+# This crate MUST NOT depend on a UI toolkit (constitution Principle III).
 
 [dependencies]
 tokio = { workspace = true }
@@ -21,10 +17,6 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 url = { workspace = true }
 chrono = { workspace = true }
-specta = { workspace = true, optional = true }
-# Only for `specta_typescript::Unknown`: opaque JSON fields (tab routes, view state) export as
-# TypeScript `unknown` instead of serde_json::Value's i64-based model.
-specta-typescript = { version = "0.0.12", optional = true }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "http2"] }
 # Typed GraphQL (007 research R5): queries and fragments as Rust structs checked against Stash
 # v0.31.1's schema at build time. MPL-2.0, used unmodified.
@@ -32,7 +24,6 @@ cynic = "3.14"
 tokio-util = "0.7"
 semver = "1"
 # Scene screenshots cross the UI bridge as data URLs (004 restored scene tabs).
-base64 = "0.22"
 # View cache (003 research R1): SQLite compiled in, no system library.
 rusqlite = { version = "0.40", features = ["bundled"] }
 # Free disk space for the cache's size limit (003 research R1b); already in the tree.

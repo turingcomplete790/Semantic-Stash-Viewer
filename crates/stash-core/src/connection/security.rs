@@ -5,7 +5,6 @@ use url::Url;
 
 /// How secure the current connection is, shown in the connection indicator at all times.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub enum SecurityState {
     /// Plain http.

@@ -13,7 +13,6 @@ use crate::error::AppError;
 /// Every scene sort the Stash web UI offers (`ui/v2.5/src/models/list-filter/scenes.ts` plus the
 /// media and common options), serialized as Stash's sort names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "snake_case")]
 pub enum SceneSort {
     Title,
@@ -125,7 +124,6 @@ impl SceneSort {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "snake_case")]
 pub enum SortDirection {
     Asc,
@@ -135,7 +133,6 @@ pub enum SortDirection {
 
 /// What a Scenes tab is showing. Kept in the tab's view state (004) and used as the cache key.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase", default)]
 pub struct SceneQuery {
     /// Search text; empty means none.

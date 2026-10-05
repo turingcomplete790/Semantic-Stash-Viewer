@@ -439,7 +439,7 @@ failures, and live Stash jobs (spec US5, FR-010).
   (expected none, SC-007).
 - [X] T060 [US6] Complete `capabilities.md` (every capability and behaviour that stays passes, with
   its tests) and get the **user's sign-off**. Stop here until it's given.
-- [ ] T061 [US6] Remove the demo:
+- [X] T061 [US6] Remove the demo:
   - Delete `ui/`, `src-tauri/`, the root npm files, and CI's Node and bindings steps in
     `.github/workflows/ci.yml`.
   - Delete core code only the demo used: `crates/stash-core/src/shell/tabs.rs` and the screenshot
@@ -447,10 +447,10 @@ failures, and live Stash jobs (spec US5, FR-010).
   - Remove `perf-harness`'s `--app` option.
   - Set the workspace members to `stash-core`, `player`, `native-ui`, `perf-harness`, with
     `rust-version = "1.88"`.
-- [ ] T062 [US6] Update `README.md` (the native app only; how to run, test, and measure; the demo's
+- [X] T062 [US6] Update `README.md` (the native app only; how to run, test, and measure; the demo's
   old `semantic-stash-viewer/` folders can be deleted by hand) and `ROADMAP.md` (Phase 1 continues
   natively).
-- [ ] T063 [US6] Fresh-clone check: clone into a temporary directory and run build, the full gate,
+- [X] T063 [US6] Fresh-clone check: clone into a temporary directory and run build, the full gate,
   the app, and `perf-harness --quick` with only the Rust toolchain and system libraries (SC-009);
   record the result.
 

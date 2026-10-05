@@ -1,5 +1,4 @@
-//! The playback run (006 T020), a port of `src-tauri/src/measure.rs` with the same `MEASURE`
-//! lines: open each scene in `SSV_MEASURE` through the real in-window player, time first frame and
+//! The playback run (006 T020; the web demo's `MEASURE` lines, kept so reports compare): open each scene in `SSV_MEASURE` through the real in-window player, time first frame and
 //! seeks, count dropped frames, then optionally play `SSV_MEASURE_LONG` for dropped frames per
 //! minute and main-thread CPU. Nothing is written to Stash.
 //!

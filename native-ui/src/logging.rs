@@ -1,5 +1,4 @@
-//! Logging: a file beside the web build's logs, plus stderr in debug builds (a copy of
-//! `src-tauri/src/logging.rs` with its own file name, 006 T003).
+//! Logging: a daily file in the app's log folder, plus stderr in debug builds (006 T003).
 //!
 //! The core never logs API keys; nothing here adds any.
 

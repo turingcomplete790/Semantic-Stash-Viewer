@@ -47,7 +47,7 @@ impl PlayerConfig {
 /// What to play and how to reach it.
 #[derive(Debug, Clone)]
 pub struct OpenRequest {
-    /// URL or path. The Tauri layer only ever passes Stash's direct stream (FR-003).
+    /// URL or path. The app only ever passes Stash's direct stream (FR-003).
     pub source: String,
     pub scene_id: Option<String>,
     pub title: Option<String>,

@@ -446,25 +446,8 @@ pub async fn scene_details(client: &StashClient, id: &str) -> Result<SceneDetail
     })
 }
 
-/// Largest screenshot passed to the UI; bigger ones are skipped (they cross the IPC bridge as
-/// base64).
-const MAX_SCREENSHOT_BYTES: usize = 2 * 1024 * 1024;
 /// Thumbnail sources are resized right away, so large uploaded covers are fine (005 R5).
 const MAX_THUMB_SOURCE_BYTES: usize = 16 * 1024 * 1024;
-
-/// The scene's screenshot as a `data:` URL, or `None` if Stash has none (or it's too big).
-///
-/// Fetched by the core with the API key, because the UI never talks to Stash itself
-/// (constitution Principle III) and an `<img>` can't send the `ApiKey` header. Read-only.
-pub async fn scene_screenshot(client: &StashClient, id: &str) -> Result<Option<String>, AppError> {
-    use base64::Engine as _;
-    let Some((bytes, content_type)) = screenshot_bytes(client, id, MAX_SCREENSHOT_BYTES).await?
-    else {
-        return Ok(None);
-    };
-    let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
-    Ok(Some(format!("data:{content_type};base64,{encoded}")))
-}
 
 /// A scene's screenshot (or uploaded cover) as bytes and content type, for thumbnails (005
 /// research R5). The key goes in a header; `None` when the scene has none.

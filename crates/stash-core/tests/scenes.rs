@@ -210,8 +210,8 @@ fn legacy_formats_and_short_clips_get_a_sized_cache() {
 }
 
 #[tokio::test]
-async fn fetches_a_scene_screenshot_as_a_data_url_with_the_api_key() {
-    use stash_core::adapter::scenes::scene_screenshot;
+async fn fetches_a_scene_screenshot_with_the_api_key() {
+    use stash_core::adapter::scenes::scene_screenshot_bytes;
     use wiremock::matchers::header;
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -241,10 +241,17 @@ async fn fetches_a_scene_screenshot_as_a_data_url_with_the_api_key() {
     let client =
         StashClient::new(url(&server.uri()), false, Some("secret".into())).expect("client");
 
-    let shot = scene_screenshot(&client, "5").await.expect("fetch");
-    assert_eq!(shot.as_deref(), Some("data:image/jpeg;base64,/9j/"));
+    let shot = scene_screenshot_bytes(&client, "5").await.expect("fetch");
+    assert_eq!(
+        shot,
+        Some((vec![0xFF, 0xD8, 0xFF], "image/jpeg".to_owned()))
+    );
     // Missing screenshot: nothing to show, not an error.
-    assert_eq!(scene_screenshot(&client, "6").await.expect("fetch"), None);
-    // Oversized: skipped rather than pushed through the UI bridge.
-    assert_eq!(scene_screenshot(&client, "7").await.expect("fetch"), None);
+    assert_eq!(
+        scene_screenshot_bytes(&client, "6").await.expect("fetch"),
+        None
+    );
+    // Large covers are fine (they're resized or drawn scaled).
+    let big = scene_screenshot_bytes(&client, "7").await.expect("fetch");
+    assert_eq!(big.map(|(b, _)| b.len()), Some(3 * 1024 * 1024));
 }

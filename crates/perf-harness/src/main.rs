@@ -1,20 +1,18 @@
 //! One command for every Phase 0 performance budget (003 US2, research R8).
 //!
-//! `cargo run -p perf-harness -- --profile "<name>" [--app native|web] [--quick]` builds the
-//! debug app (`native`, the default, or the frozen web demo until it's removed; 007
-//! contracts/measurements.md), starts
-//! the UI dev server if it isn't running, launches the app several times with the harness
-//! switches, collects its `MEASURE` lines, and writes a report to
-//! `~/.local/share/semantic-stash-viewer/perf/`. Exits non-zero if a budget failed.
+//! `cargo run -p perf-harness -- --profile "<name>" [--quick] [--scenes <ids>] [--long <id>]`
+//! builds the debug app, launches it several times with the harness switches, collects its
+//! `MEASURE` lines (and samples its memory and CPU from `/proc`), and writes a report to
+//! `~/.local/share/dev.semantic-stash-viewer/perf/` (007 contracts/measurements.md). Exits
+//! non-zero if a budget failed.
 //!
 //! The harness never talks to Stash and never sees an address: the app picks its own scenes.
 
 mod report;
 
 use std::io::{BufRead, BufReader};
-use std::net::TcpStream;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, ExitCode, Stdio};
+use std::process::{Command, ExitCode, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -22,37 +20,16 @@ use serde_json::Value;
 
 use report::{summarise, Check, Measurement, Report, Unit};
 
-const DEV_PORT: u16 = 5173;
 const LAUNCH_TIMEOUT: Duration = Duration::from_secs(300);
 const LONG_PLAYBACK_SECS: u32 = 60;
 
-/// Which build to measure (006): the Tauri web build, or the native spike build.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum App {
-    Web,
-    Native,
-}
-
-impl App {
-    fn package(self) -> &'static str {
-        match self {
-            App::Web => "semantic-stash-viewer",
-            App::Native => "semantic-stash-viewer-native",
-        }
-    }
-
-    fn name(self) -> &'static str {
-        match self {
-            App::Web => "web",
-            App::Native => "native",
-        }
-    }
-}
+/// The app's package, and the name reports carry (reports compare within one app).
+const PACKAGE: &str = "semantic-stash-viewer-native";
+const APP: &str = "native";
 
 struct Options {
     profile: String,
     quick: bool,
-    app: App,
     /// Scenes for the playback rows (`auto`: the newest).
     scenes: String,
     /// The scene for the long playback (`auto`: the newest 1080p one).
@@ -62,7 +39,6 @@ struct Options {
 fn parse_args() -> Result<Options, String> {
     let mut profile = None;
     let mut quick = false;
-    let mut app = App::Native;
     let mut scenes = "auto".to_owned();
     let mut long = "auto".to_owned();
     let mut args = std::env::args().skip(1);
@@ -73,13 +49,6 @@ fn parse_args() -> Result<Options, String> {
             // Pin the scenes so both apps (and runs on different days) play the same files.
             "--scenes" => scenes = args.next().ok_or("--scenes takes a list of ids")?,
             "--long" => long = args.next().ok_or("--long takes a scene id")?,
-            "--app" => {
-                app = match args.next().as_deref() {
-                    Some("web") => App::Web,
-                    Some("native") => App::Native,
-                    _ => return Err("--app takes web or native".into()),
-                }
-            }
             "-h" | "--help" => return Err(String::new()),
             other => return Err(format!("unknown argument: {other}")),
         }
@@ -87,7 +56,6 @@ fn parse_args() -> Result<Options, String> {
     Ok(Options {
         profile: profile.ok_or("--profile <display name> is required")?,
         quick,
-        app,
         scenes,
         long,
     })
@@ -101,7 +69,7 @@ fn main() -> ExitCode {
                 eprintln!("{message}");
             }
             eprintln!(
-                "usage: perf-harness --profile \"<display name>\" [--app native|web] [--quick] \
+                "usage: perf-harness --profile \"<display name>\" [--quick] \
                  [--scenes <id,id,…>] [--long <id>]"
             );
             return ExitCode::from(2);
@@ -135,10 +103,10 @@ fn run(options: &Options) -> Result<Report, String> {
     let started = Instant::now();
     let root = workspace_root();
 
-    step(&format!("Building the debug app ({})", options.app.name()));
+    step("Building the debug app");
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
     let status = Command::new(cargo)
-        .args(["build", "-p", options.app.package()])
+        .args(["build", "-p", PACKAGE])
         .current_dir(&root)
         .status()
         .map_err(|e| format!("couldn't run cargo: {e}"))?;
@@ -147,13 +115,7 @@ fn run(options: &Options) -> Result<Report, String> {
     }
     let target =
         std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| root.join("target"), PathBuf::from);
-    let app = target.join("debug").join(options.app.package());
-
-    // Only the web build loads its UI from the dev server.
-    let _dev_server = match options.app {
-        App::Web => Some(DevServer::start(&root)?),
-        App::Native => None,
-    };
+    let app = target.join("debug").join(PACKAGE);
 
     let base = [
         ("SSV_HARNESS_PROFILE", options.profile.clone()),
@@ -199,13 +161,13 @@ fn run(options: &Options) -> Result<Report, String> {
     measurements.extend(resource_measurements(&bench, &playback));
 
     let dir = perf_dir();
-    let previous = newest_report(&dir, options.app.name());
+    let previous = newest_report(&dir, APP);
     let mut report = Report {
         created_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         app_version: env!("CARGO_PKG_VERSION").to_owned(),
         machine: machine(),
         profile: options.profile.clone(),
-        app: options.app.name().to_owned(),
+        app: APP.to_owned(),
         measurements,
     };
     report.compare(previous.as_ref());
@@ -490,64 +452,6 @@ fn describe_line(value: &Value) -> String {
     }
 }
 
-/// The UI dev server, started here unless it's already running; stopped on drop.
-struct DevServer(Option<Child>);
-
-impl DevServer {
-    fn start(root: &Path) -> Result<Self, String> {
-        if port_open() {
-            eprintln!("==> Using the UI dev server already on port {DEV_PORT}");
-            return Ok(Self(None));
-        }
-        step("Starting the UI dev server");
-        let mut command = Command::new("npm");
-        command
-            .args(["--prefix", "ui", "run", "dev"])
-            .current_dir(root)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        #[cfg(unix)]
-        std::os::unix::process::CommandExt::process_group(&mut command, 0);
-        let child = command
-            .spawn()
-            .map_err(|e| format!("couldn't start npm: {e}"))?;
-        let server = Self(Some(child));
-        let deadline = Instant::now() + Duration::from_secs(60);
-        while !port_open() {
-            if Instant::now() > deadline {
-                return Err("the UI dev server didn't start within 60 s".into());
-            }
-            std::thread::sleep(Duration::from_millis(250));
-        }
-        Ok(server)
-    }
-}
-
-impl Drop for DevServer {
-    fn drop(&mut self) {
-        if let Some(child) = &mut self.0 {
-            // npm starts vite as a child: stop the whole process group.
-            #[cfg(unix)]
-            let _ = Command::new("kill")
-                .args(["-TERM", "--", &format!("-{}", child.id())])
-                .status();
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-    }
-}
-
-/// Vite listens on `localhost`, which may be IPv6 only (`::1`): try every address it has.
-fn port_open() -> bool {
-    use std::net::ToSocketAddrs;
-    ("localhost", DEV_PORT)
-        .to_socket_addrs()
-        .map(|mut addrs| {
-            addrs.any(|addr| TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok())
-        })
-        .unwrap_or(false)
-}
-
 // ---- Turning MEASURE lines into measurements ---------------------------------------------
 
 fn number(value: &Value, key: &str) -> Option<f64> {
@@ -809,11 +713,11 @@ fn perf_dir() -> PathBuf {
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
         .unwrap_or_else(|| PathBuf::from("."));
-    data.join("semantic-stash-viewer").join("perf")
+    data.join("dev.semantic-stash-viewer").join("perf")
 }
 
-/// The newest earlier report (names are timestamps, so they sort in time order).
-/// The newest earlier report for the same app (reports from before 006 are the web build's).
+/// The newest earlier report for the same app (names are timestamps, so they sort in time
+/// order; reports from the web demo say `web`).
 fn newest_report(dir: &Path, app: &str) -> Option<Report> {
     let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
         .ok()?

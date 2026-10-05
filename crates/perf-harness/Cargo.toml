@@ -1,10 +1,10 @@
 [package]
 name = "perf-harness"
-description = "One command for every performance budget (003 US2; moved out of src-tauri in 007)"
+description = "One command for every performance budget (003 US2, 007)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-rust-version = "1.80"
+rust-version.workspace = true
 publish = false
 
 [[bin]]

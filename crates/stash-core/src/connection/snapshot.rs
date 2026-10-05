@@ -10,7 +10,6 @@ use super::ServerInfo;
 
 /// Session state (data-model.md "ConnectionState and transitions").
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
@@ -38,7 +37,6 @@ pub enum SessionState {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionSnapshot {
     pub profile_id: Option<Uuid>,

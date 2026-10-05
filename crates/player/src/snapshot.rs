@@ -7,7 +7,6 @@ use crate::tracks::Track;
 
 /// Player state (data-model.md "PlayerState and transitions").
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub enum PlayerStateKind {
     #[default]
@@ -21,7 +20,6 @@ pub enum PlayerStateKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct PlayerSnapshot {
     pub scene_id: Option<String>,
@@ -65,7 +63,6 @@ impl Default for PlayerSnapshot {
 
 /// Playback measurements for the spike's decision record (debug builds only).
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct PlayerStats {
     /// From opening a scene to its first rendered frame.

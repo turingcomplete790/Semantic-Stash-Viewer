@@ -2,19 +2,18 @@
 
 [![CI](https://github.com/turingcomplete790/Semantic-Stash-Viewer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/turingcomplete790/Semantic-Stash-Viewer/actions/workflows/ci.yml)
 
-A fast, native desktop client for [Stash](https://github.com/stashapp/stash), built in Rust with
-[Tauri](https://tauri.app/). Point it at your Stash server, add an API key if your server uses
-one, and browse and play your library the way Jellyfin desktop clients work with a Jellyfin
-server.
+A fast, native desktop client for [Stash](https://github.com/stashapp/stash), written in Rust and
+drawn with [iced](https://iced.rs/). Point it at your Stash server, add an API key if your
+server uses one, and browse and play your library the way Jellyfin desktop clients work with a
+Jellyfin server.
 
-> **Status:** pre-alpha. Connecting to Stash servers works: saved server profiles, automatic
-> reconnection, and a connection-security indicator. Scenes play in mpv inside the app window,
-> with full playback controls. The app shell is in place: a Stash-style navigation bar, tabs,
-> a notification centre (connection alerts and live Stash jobs), and Settings. Phase 0 (the
-> foundation) is complete: screens open instantly from a local cache and stay usable offline,
-> and every performance budget is measured by one command. The whole scene library can be
-> browsed as a paged grid or list, in every web UI sort; search, filters, and the scene page
-> come next (see the [roadmap](ROADMAP.md)). The project is specified with
+> **Status:** pre-alpha. Saved servers with automatic reconnection and a connection-security
+> indicator; a Stash-style navigation bar with tabs that never reset and come back exactly after
+> a restart; the whole scene library as a paged grid or list in every web UI sort, with
+> thumbnails; a scene view; mpv playback inside the window with the viewer's own controls; a
+> notification centre with live Stash jobs; and Settings. Screens open from a local cache and stay
+> usable offline, and one command measures every performance budget. Search, filters, and the
+> rest of the library come next (see the [roadmap](ROADMAP.md)). The project is specified with
 > [Spec Kit](https://github.com/github/spec-kit), and its governing rules live in the
 > [constitution](.specify/memory/constitution.md).
 
@@ -25,10 +24,10 @@ server.
    Actions, Roles, Traits, Labels, Mise-en-scène, the Timeline, Archetypes, Looks, and the
    Semantic Search Matrix. The viewer reads and writes the same data as the plugin, so both can
    be used on the same library at the same time.
-2. **Near-native speed.** Batched, narrowly scoped GraphQL, a local semantic index, and
-   virtualized views. The interface never waits on the network.
+2. **Native speed.** Batched, narrowly scoped GraphQL, a local cache, and a native UI. The
+   interface never waits on the network.
 3. **No transcoding.** Videos play in [mpv](https://mpv.io/) from Stash's direct stream and are
-   decoded on your machine, not transcoded by the server.
+   decoded on your machine (hardware-decoded where the GPU can), not transcoded by the server.
 4. **Full Stash web UI coverage.** Galleries, scrapers and StashBox, tag editing, markers,
    ratings, library tasks, and the rest, so you never need to go back to the browser.
 
@@ -38,60 +37,64 @@ server.
   stores locally is a cache and can be deleted without losing data.
 - **Your server only.** The only server the viewer talks to is the Stash server you configure.
   Each server's address and API key are saved in the viewer's local config.
-- **Rust core, web frontend.** A Rust core handles all Stash I/O and the semantic engine. The
-  Tauri webview only draws the interface.
+- **Rust all the way down.** A headless core handles all Stash I/O; the UI is one hierarchical
+  state machine in iced, whose work leaves as data (effects) and comes back as messages. mpv
+  renders on its own thread into frames shared with iced's Vulkan device, so video reaches the
+  screen without copies.
 
 ## Requirements
 
 - Stash **v0.31.1** or newer
-- mpv / libmpv
-- Linux is the main platform. Windows and macOS are planned where Tauri and mpv allow.
+- Linux with a Vulkan driver (Mesa RADV, ANV, or NVIDIA) and libmpv; Wayland or X11
+- Windows and macOS are planned where iced and mpv allow
 
 ## Development
 
 ### Prerequisites
 
-- Rust 1.80 or newer, Node 20 or newer, npm
-- Tauri CLI v2: `cargo install tauri-cli --version "^2"`
-- Linux: the WebKitGTK 4.1 development package (for example `libwebkit2gtk-4.1-dev` on
-  Debian/Ubuntu, `webkit2gtk-4.1` on Arch/Manjaro)
-- libmpv with its development headers: the `mpv` package on Arch/Manjaro, `libmpv-dev` on
-  Debian/Ubuntu. VA-API drivers are optional but give hardware decoding.
+- Rust 1.88 or newer
+- libmpv with its development headers: `mpv` on Arch/Manjaro, `libmpv-dev` on Debian/Ubuntu.
+  VA-API drivers are optional but give hardware decoding.
+- libturbojpeg (`libjpeg-turbo` on Arch/Manjaro, `libturbojpeg0-dev` on Debian/Ubuntu)
+- A Vulkan driver and libEGL (part of Mesa on most systems)
 
 ### Run
 
 ```bash
-npm --prefix ui install
-cargo tauri dev
+cargo run -p semantic-stash-viewer-native
 ```
 
-### Player (spike)
+The first launch asks for your Stash server's address (and API key, if it uses one).
 
-Playback runs libmpv inside the app window: mpv draws each frame into a GPU surface under the
-webview, and the SolidJS controls sit on top. It plays Stash's direct stream only, so the
-server never transcodes. Why this approach, and how it measured, is in the
-[decision record](specs/002-mpv-playback-spike/decision.md). Debug builds can rerun the
-measurements with `SSV_MEASURE=<scene ids> cargo tauri dev`.
+### Files
 
-Saved server profiles, including their API keys, live in
-`~/.config/semantic-stash-viewer/profiles.json`. Logs go to
-`~/.local/share/semantic-stash-viewer/logs/`.
+| What | Where |
+|---|---|
+| Saved servers (with their API keys) | `~/.config/dev.semantic-stash-viewer/profiles.json` |
+| Tabs, notifications, logs | `~/.local/share/dev.semantic-stash-viewer/` |
+| Cache (per server; thumbnails too) | `~/.cache/dev.semantic-stash-viewer/` |
+
+The cache is safe to delete at any time; Settings → Troubleshooting → Clear cache does the same
+from inside the app. If you used the earlier web demo, its `semantic-stash-viewer/` folders under
+`~/.config`, `~/.local/share`, and `~/.cache` are no longer read and can be deleted by hand.
 
 ### Keyboard
 
-- `g h` Home, `g s` Scenes, `g z` Settings, `g n` notifications (the Stash web UI's `g` keys)
-- Ctrl+T / Ctrl+W new / close tab, Ctrl+Tab and Ctrl+1–9 to switch, Ctrl+Shift+T to reopen,
-  Alt+←/→ back and forward
-- `?` lists every shortcut, including the player's
+- Ctrl+T / Ctrl+W new / close tab, Ctrl+Tab, Ctrl+PageUp/PageDown, and Ctrl+1–9 to switch,
+  Ctrl+Shift+PageUp/PageDown to move a tab
+- Alt+←/→ (or the mouse's back and forward buttons) to go back and forward
+- In Scenes: arrows, Home/End, `[` `]` for pages, Enter to open, Ctrl+Enter in a new tab
+- In the player: Space, ←/→, ↑/↓, `[` `]` `\`, `.` `,`, F, M, Esc
+- F1 or `?` lists every shortcut
 
 ### Layout
 
 | Path | What |
 |---|---|
-| `crates/stash-core/` | Headless Rust core: the only code that talks to Stash, plus connection and profile logic. Never depends on Tauri. |
-| `crates/player/` | Headless libmpv session: playback state, commands, and the render API wrapper. Never depends on Tauri. |
-| `src-tauri/` | Thin Tauri shell: typed commands and events over `stash-core` and `player`, and the Linux video surface |
-| `ui/` | SolidJS + TypeScript frontend. `ui/src/bindings.ts` is generated from Rust. `ui/src/shell/` is the app shell (navigation bar, tabs, notifications); `ui/src/views/` and `ui/src/settings/` are the views inside it. |
+| `crates/stash-core/` | Headless core: the only code that talks to Stash (typed GraphQL with Cynic), connections, profiles, the cache, thumbnails, notifications, and Stash jobs. No UI toolkit, no `unsafe`. |
+| `crates/player/` | Headless libmpv session: playback state, commands, and the render API wrapper. |
+| `native-ui/` | The app: the state machine (`app.rs`, `session/`, `shell/`, `screens/`), effects (`effects.rs`), the service layer over the core (`services/`), the video path (`player/video/`), and the UI bench (`measure/`). |
+| `crates/perf-harness/` | Measures every performance budget. |
 | `specs/` | Spec Kit feature specs, plans, and task lists |
 
 ### Checks
@@ -99,35 +102,30 @@ Saved server profiles, including their API keys, live in
 ```bash
 cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-npm --prefix ui run lint && npm --prefix ui run typecheck && npm --prefix ui test
 
 # Opt-in test against a real Stash (use a disposable instance)
 STASH_TEST_URL=http://localhost:9998 cargo test -p stash-core --test live_stash -- --ignored
-
-# Regenerate ui/src/bindings.ts after changing a command or DTO (CI fails on drift)
-cargo run -p semantic-stash-viewer --bin export-bindings
 ```
+
+Clippy also enforces the constitution's unsafe-code rules: every `unsafe` block documented and
+doing one thing, in the two crates that need it (`player`, `native-ui`); none in the core.
 
 ### Performance harness
 
-Measures every performance budget from the constitution (cold start, navigation, input,
-scrolling, playback open, seeking, and dropped frames) against one of your saved servers:
+Measures every budget from the constitution against one of your saved servers: cold start,
+navigation, control presses, tab switching with a video playing, Scenes paging and 1000-card
+scrolling, playback (open, seek, dropped and displayed frames), and memory and CPU:
 
 ```bash
-cargo run -p perf-harness -- --profile "<server name>"   # native app; --app web for the demo; --quick for fewer runs
+cargo run -p perf-harness -- --profile "<server name>"            # --quick for fewer runs
+cargo run -p perf-harness -- --profile "<server name>" --scenes 1,2,3 --long 1   # pin scenes
 ```
 
 It builds the debug app, launches it several times (keep the window visible), and takes about
-2 minutes. It only reads from Stash. Reports go to
-`~/.local/share/semantic-stash-viewer/perf/<timestamp>.{md,json}`, each with the change since the
-previous run; anything more than 20% slower is flagged, and it exits non-zero if a budget fails.
-
-### Cache
-
-Screens open from a local cache in `~/.cache/semantic-stash-viewer/` (one folder per server).
-Scene thumbnails (resized to 480 px) are kept there too. It's safe to delete at any time: the
-app just reads from the server again. Settings →
-Troubleshooting → Clear cache does the same from inside the app.
+3 minutes. It only reads from Stash. Reports go to
+`~/.local/share/dev.semantic-stash-viewer/perf/<timestamp>.{md,json}`, each with the change since
+the previous run; anything more than 20% slower is flagged, and it exits non-zero if a budget
+fails.
 
 ### Workflow
 
@@ -145,3 +143,4 @@ the [roadmap](ROADMAP.md).
 - [semantic-tagging](../Stash-Plugins/semantic-tagging/): the Stash plugin whose features and
   data format this viewer follows
 - [Stash](https://github.com/stashapp/stash)
+- [iced](https://iced.rs/), [mpv](https://mpv.io/)

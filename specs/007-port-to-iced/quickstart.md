@@ -144,3 +144,13 @@ Found and fixed on the way:
   restore: it's now kept as an extra tab, selected, with playback still attached.
 
 The 5 cycles by hand are part of the user's V6 check.
+
+### Fresh clone (T063), 2026-10-05
+
+The demo-free tree (exactly the files to be committed) copied to an empty folder and built with
+an empty target directory, using only the Rust toolchain and system libraries (no Node, npm, or
+WebKit): `cargo build --workspace` (6 min from scratch), `cargo fmt --all --check`,
+`cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` (314 passed,
+0 failed), the app (launch, play, quit while playing: clean), and `perf-harness --quick` (every
+budget passed in that run, including Scenes page change, 83 ms p95, and grid scrolling, 0.4%
+missed; report `perf/20261005-174530.md`). SC-009 holds.

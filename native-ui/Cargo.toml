@@ -1,11 +1,10 @@
 [package]
 name = "semantic-stash-viewer-native"
-description = "Native UI spike (006): the viewer's hard screens built with iced"
+description = "Semantic Stash Viewer: a native Stash client drawn with iced"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-# iced 0.14 needs 1.88; the shared crates keep the workspace's 1.80 (006 research R2).
-rust-version = "1.88"
+rust-version.workspace = true
 publish = false
 
 [dependencies]

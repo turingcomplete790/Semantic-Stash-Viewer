@@ -16,7 +16,6 @@ use super::store::{JsonStore, Versioned};
 use super::MAX_NOTIFICATIONS;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub enum NotificationKind {
     Connection,
@@ -27,7 +26,6 @@ pub enum NotificationKind {
 
 /// Ordered: `Info < Warning < Error`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub enum Severity {
     Info,
@@ -36,7 +34,6 @@ pub enum Severity {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub enum JobStatus {
     Queued,
@@ -57,7 +54,6 @@ impl JobStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct JobProgress {
     pub status: JobStatus,
@@ -68,7 +64,6 @@ pub struct JobProgress {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct Notification {
     pub id: String,
