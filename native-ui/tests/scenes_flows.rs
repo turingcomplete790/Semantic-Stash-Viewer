@@ -1,4 +1,4 @@
-//! 007 T035: Scenes flows with fixture pages (spec US3; B1): `]` and `[` change page, and opening
+//! 007 T035: Scenes flows with fixture pages (spec US3; capability C14; B1): `]` and `[` change page, and opening
 //! a card then going back returns the exact page, mode, and scroll.
 
 use iced::keyboard::{Key, Modifiers};

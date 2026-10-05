@@ -1,5 +1,5 @@
-//! 006 T011: the player's control logic, matching the web player (002 FR-008–FR-010;
-//! `ui/src/player/keyboard.ts`, `speeds.ts`, `Controls.tsx`).
+//! 006 T011: the player's control logic, matching 002's player (002 FR-008–FR-010; capability C6;
+//! behaviour that stays B4: the player keeps 002's shortcuts).
 
 use std::time::{Duration, Instant};
 

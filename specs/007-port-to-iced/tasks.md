@@ -458,10 +458,10 @@ failures, and live Stash jobs (spec US5, FR-010).
 
 ## Phase 9: Polish & Cross-Cutting Concerns
 
-- [ ] T064 Run the full gate: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --
+- [X] T064 Run the full gate: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --
   -D warnings`, `cargo test --workspace`. Confirm no `unsafe` outside the video path
   (`grep -rn unsafe native-ui/src crates`).
-- [ ] T065 [P] Check every test file names the capability or behaviour it covers, and every row in
+- [X] T065 [P] Check every test file names the capability or behaviour it covers, and every row in
   `capabilities.md` lists at least one test (FR-015).
 
 ---

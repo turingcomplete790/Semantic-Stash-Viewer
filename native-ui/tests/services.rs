@@ -1,5 +1,6 @@
 //! 007 T004: the native app keeps every file under its own app-id directories and never opens the
-//! demo's `semantic-stash-viewer/` folders (spec FR-005, research R4).
+//! demo's `semantic-stash-viewer/` folders (spec FR-005, research R4; capabilities C7 and C13,
+//! the cache and the file locations About lists).
 
 use std::path::Path;
 

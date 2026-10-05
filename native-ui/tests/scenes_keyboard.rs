@@ -1,5 +1,5 @@
-//! 007 T033: the grid's keyboard rules (005 research R8, FR-006; the web build's
-//! `scenes/keyboard.ts`), as a pure function.
+//! 007 T033: the grid's keyboard rules (005 research R8, FR-006; capability C14; behaviour that
+//! stays B4), as a pure function.
 
 use iced::keyboard::key::Named;
 use iced::keyboard::Key;

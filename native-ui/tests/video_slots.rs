@@ -1,5 +1,5 @@
 //! 006 T010: the frame-slot ring shared by mpv's render thread and the iced video widget
-//! (data-model "VideoSurface").
+//! (data-model "VideoSurface"; capability C5; behaviour that stays B5: every frame shown).
 
 use std::time::{Duration, Instant};
 
