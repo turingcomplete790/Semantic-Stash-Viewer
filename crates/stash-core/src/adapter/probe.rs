@@ -1,21 +1,66 @@
 //! The connect probe and its response classification (contracts/stash-http.md §1, research R5).
 
-use graphql_client::GraphQLQuery;
+use cynic::QueryBuilder;
 use reqwest::StatusCode;
 use url::Url;
 
+use super::gql::schema;
 use super::StashClient;
 use crate::connection::address::base_from_endpoint;
 use crate::connection::failure::ConnectFailure;
 use crate::connection::LibraryCounts;
 
-#[derive(GraphQLQuery)]
-#[graphql(
-    schema_path = "graphql/schema.json",
-    query_path = "graphql/connect_probe.graphql",
-    response_derives = "Debug"
-)]
-pub struct ConnectProbe;
+/// Stash's readiness; a value this build doesn't know becomes `Other`.
+#[derive(cynic::Enum, Clone, Debug, PartialEq, Eq)]
+#[cynic(graphql_type = "SystemStatusEnum")]
+enum SystemStatusEnum {
+    Setup,
+    NeedsMigration,
+    Ok,
+    #[cynic(fallback)]
+    Other(String),
+}
+
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(graphql_type = "Version")]
+struct VersionFields {
+    version: Option<String>,
+    hash: String,
+}
+
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(graphql_type = "SystemStatus")]
+struct SystemStatusFields {
+    app_schema: i32,
+    status: SystemStatusEnum,
+    // Tells two Stash instances at the same address apart (003 research R2). Only a hash of these
+    // is kept; the paths themselves are never stored.
+    database_path: Option<String>,
+    config_path: Option<String>,
+}
+
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(graphql_type = "StatsResultType")]
+struct StatsFields {
+    #[cynic(rename = "scene_count")]
+    scene_count: i32,
+    #[cynic(rename = "image_count")]
+    image_count: i32,
+    #[cynic(rename = "gallery_count")]
+    gallery_count: i32,
+    #[cynic(rename = "performer_count")]
+    performer_count: i32,
+}
+
+/// One round trip on connect: identity, version, readiness, and the library summary (001
+/// FR-007). Only what the connection screen needs (Principle IV).
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(graphql_type = "Query")]
+struct ConnectProbe {
+    version: VersionFields,
+    system_status: SystemStatusFields,
+    stats: StatsFields,
+}
 
 /// What the probe learned from a server that answered like Stash.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,7 +127,7 @@ async fn resolve_redirects(client: &StashClient) -> Result<StashClient, ConnectF
 }
 
 async fn send(client: &StashClient, with_key: bool) -> Result<reqwest::Response, ConnectFailure> {
-    let body = ConnectProbe::build_query(connect_probe::Variables);
+    let body = ConnectProbe::build(());
     client
         .graphql_request(with_key)
         .json(&body)
@@ -113,7 +158,7 @@ async fn parse_stash(
         .text()
         .await
         .map_err(|e| client.classify_transport_error(&e))?;
-    let parsed: graphql_client::Response<connect_probe::ResponseData> =
+    let parsed: cynic::GraphQlResponse<ConnectProbe> =
         serde_json::from_str(&text).map_err(|_| not_stash.clone())?;
     let data = parsed.data.ok_or(not_stash)?;
 
@@ -121,7 +166,7 @@ async fn parse_stash(
         final_base_url: client.base_url().clone(),
         version: data.version.version,
         hash: data.version.hash,
-        app_schema: data.system_status.app_schema,
+        app_schema: i64::from(data.system_status.app_schema),
         status: status_name(&data.system_status.status),
         counts: LibraryCounts {
             scenes: count(data.stats.scene_count),
@@ -134,16 +179,15 @@ async fn parse_stash(
     })
 }
 
-fn status_name(status: &connect_probe::SystemStatusEnum) -> String {
-    use connect_probe::SystemStatusEnum as S;
+fn status_name(status: &SystemStatusEnum) -> String {
     match status {
-        S::OK => "OK".into(),
-        S::NEEDS_MIGRATION => "NEEDS_MIGRATION".into(),
-        S::SETUP => "SETUP".into(),
-        S::Other(other) => other.clone(),
+        SystemStatusEnum::Ok => "OK".into(),
+        SystemStatusEnum::NeedsMigration => "NEEDS_MIGRATION".into(),
+        SystemStatusEnum::Setup => "SETUP".into(),
+        SystemStatusEnum::Other(other) => other.clone(),
     }
 }
 
-fn count(n: i64) -> u32 {
+fn count(n: i32) -> u32 {
     u32::try_from(n).unwrap_or(0)
 }

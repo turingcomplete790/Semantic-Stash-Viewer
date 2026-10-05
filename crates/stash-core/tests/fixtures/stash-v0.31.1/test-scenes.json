@@ -1,6 +1,6 @@
 {
  "data": {
-  "fourKH264": {
+  "four_k_h264": {
    "scenes": [
     {
      "id": "19810",
@@ -46,7 +46,7 @@
     }
    ]
   },
-  "fourKHevc": {
+  "four_k_hevc": {
    "scenes": [
     {
      "id": "15564",
@@ -92,7 +92,7 @@
     }
    ]
   },
-  "aboveFourK": {
+  "above_four_k": {
    "scenes": [
     {
      "id": "11647",
@@ -124,7 +124,7 @@
     }
    ]
   },
-  "wmvHd": {
+  "wmv_hd": {
    "scenes": [
     {
      "id": "23413",
@@ -170,7 +170,7 @@
     }
    ]
   },
-  "vp9Hd": {
+  "vp9_hd": {
    "scenes": [
     {
      "id": "8203",

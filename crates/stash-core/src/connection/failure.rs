@@ -6,7 +6,6 @@ use uuid::Uuid;
 
 /// A classified connection failure. No variant carries a raw response body.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, thiserror::Error)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",

@@ -1,14 +1,6 @@
-# Rust / Tauri
+# Rust
 /target/
-/src-tauri/target/
-/src-tauri/gen/
 *.rs.bk
-
-# Frontend
-node_modules/
-/dist/
-/ui/dist/
-coverage/
 
 # Logs and local env
 *.log

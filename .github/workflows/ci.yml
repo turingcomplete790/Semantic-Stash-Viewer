@@ -12,15 +12,17 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-24.04
-    # A hung test can't hold a runner for hours (runs normally take about 6 minutes).
+    # A hung test can't hold a runner for hours.
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
+      # libmpv for the player, libturbojpeg for thumbnails, and Mesa's software Vulkan
+      # (lavapipe) with EGL so the UI's headless tests can draw (007).
       - name: Linux dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libmpv-dev ffmpeg libturbojpeg0-dev
+          sudo apt-get install -y libmpv-dev ffmpeg libturbojpeg0-dev mesa-vulkan-drivers libegl1 libwayland-client0
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -28,37 +30,12 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: ui/package-lock.json
-
-      - name: Install UI dependencies
-        run: npm --prefix ui ci
-
-      - name: Build UI (required by tauri::generate_context!)
-        run: npm --prefix ui run build
-
       - name: Rust format
         run: cargo fmt --all --check
 
+      # Includes the unsafe-code lints (constitution C4).
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Rust tests
+      - name: Tests
         run: cargo test --workspace
-
-      - name: Bindings drift check
-        run: |
-          cargo run -p semantic-stash-viewer --bin export-bindings
-          git diff --exit-code ui/src/bindings.ts
-
-      - name: UI lint
-        run: npm --prefix ui run lint
-
-      - name: UI typecheck
-        run: npm --prefix ui run typecheck
-
-      - name: UI tests
-        run: npm --prefix ui run test

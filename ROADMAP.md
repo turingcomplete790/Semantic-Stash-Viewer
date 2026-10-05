@@ -20,6 +20,11 @@ Each checkbox group is meant to become one or more Spec Kit features
 | 4 | Semantic tagging | Parity with the semantic-tagging plugin (Principle II) |
 | 5 | Semantic query engine | Follows the plugin's own roadmap: query language, CONSTRUCT, rules |
 
+**Platform (2026-10-05):** features 001–005 were first built as a Tauri/SolidJS app. Feature 007
+([specs/007-port-to-iced](specs/007-port-to-iced/)) rebuilt everything natively in Rust with
+iced, and the Tauri app was removed. Phase 0 below records the foundation as it was built; the
+core, the player, and every capability it lists carried over, and Phase 1 continues natively.
+
 The phases are mostly sequential. Phase 4 needs the adapter, tag editing, and the caching work
 from Phases 0–2. Parts of Phase 3 (scrapers, tasks) can run alongside Phase 4 if needed.
 
@@ -78,8 +83,12 @@ mpv.
 - [ ] Sorting, filtering (the web UI's filter criteria), and search (sorting done in 005 P1,
       including a stable random order; search and filters are 005 US2)
 - [ ] Loading and applying saved filters
-- [ ] Scene detail page: metadata, performers, studio, tags, groups, galleries, files
-- [ ] mpv playback: direct stream, hardware decode, resume position, markers as chapters
+- [ ] Scene detail page: metadata, performers, studio, tags, groups, galleries, files (the scene
+      view in 007 shows the cover, title, date, studio, performers, tags, description, and the
+      file, with Play; groups, galleries, and links to the other entities remain)
+- [ ] mpv playback: direct stream, hardware decode, resume position, markers as chapters (direct
+      stream and hardware decode done, inside the window with every frame shown, 006–007;
+      resume position and markers remain)
 - [ ] Play count, play duration, and resume position sync back to Stash (Principle V)
 - [ ] Resume where you left off: a Settings → Playback option (as in the Stash web UI) to start
       scenes from their saved resume point instead of the beginning
@@ -131,6 +140,9 @@ lost, not as a design to copy.
 - [ ] Home page with configurable rows (recently added, recently played, saved filters)
 - [ ] Global search across entity types
 - [ ] Keyboard navigation throughout; groundwork for a 10-foot (remote/controller) mode
+- [ ] Adjustable panel sizes: drag the dividers between panels (e.g. the scene view's picture and
+      its details side panel) and keep the sizes per view; the defaults use the width of
+      widescreen displays (side panels rather than stacked ones)
 
 **Exit criteria:** every entity type can be browsed, filtered, and opened. Scenes play in mpv
 and resume state syncs back. Principle VI's budgets are met on a large library.

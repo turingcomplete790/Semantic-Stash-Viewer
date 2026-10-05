@@ -3,7 +3,6 @@
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub enum TrackKind {
     Video,
@@ -24,7 +23,6 @@ impl TrackKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct Track {
     /// mpv's per-kind track id (`track-list/N/id`); small, so `i32` (TypeScript-safe).

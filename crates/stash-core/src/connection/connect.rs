@@ -42,7 +42,6 @@ pub struct ConnectOutcome {
 
 /// What `test_connection` returns to the UI (contracts/tauri-commands.md `TestResult`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct TestResult {
     /// Final base URL after redirects, as shown to the user.

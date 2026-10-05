@@ -1,0 +1,39 @@
+[package]
+name = "semantic-stash-viewer-native"
+description = "Semantic Stash Viewer: a native Stash client drawn with iced"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+stash-core = { path = "../crates/stash-core" }
+player = { path = "../crates/player" }
+iced = { version = "0.14", features = ["wgpu", "image", "svg", "tokio", "advanced", "lazy"] }
+tokio = { workspace = true }
+tokio-util = "0.7"
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+chrono = { workspace = true }
+# The video path (research R1): the Vulkan side through iced's own wgpu (wgpu-hal 27 uses ash
+# 0.38), mpv's side GL context through libEGL loaded at runtime, and the `gl` loader the web build
+# already uses.
+ash = "0.38"
+khronos-egl = { version = "6", features = ["dynamic"] }
+gl = "0.14"
+# libwayland-client, loaded at runtime, for mpv's VA-API connection (already in the tree).
+libloading = "0.8"
+
+[dev-dependencies]
+iced_test = "0.14"
+tempfile = "3"
+chrono = { workspace = true }
+
+[lints]
+workspace = true

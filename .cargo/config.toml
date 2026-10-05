@@ -1,0 +1,5 @@
+# The native app's video path imports frames into wgpu's Vulkan device (006 research R1). wgpu
+# prefers Vulkan on Linux anyway; this pins it for `cargo run` and tests without the app setting
+# its own environment (007 T045). An explicit `WGPU_BACKEND` (the GL fallback) still wins.
+[env]
+WGPU_BACKEND = { value = "vulkan", force = false }

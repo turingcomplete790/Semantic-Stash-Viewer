@@ -161,9 +161,9 @@ async fn test_scenes_come_back_as_labelled_groups_in_order() {
 #[tokio::test]
 async fn empty_test_groups_are_dropped() {
     let body = r#"{"data":{
-        "fourKH264":{"scenes":[]},"fourKHevc":{"scenes":[]},"aboveFourK":{"scenes":[]},
-        "wmvHd":{"scenes":[{"id":"9","title":"","files":[{"basename":"x.wmv","duration":60.0,"width":1920,"height":1080,"video_codec":"wmv3","format":"wmv"}]}]},
-        "vp9Hd":{"scenes":[]},"av1":{"scenes":[]},"mpeg4":{"scenes":[]},"flv":{"scenes":[]}}}"#;
+        "four_k_h264":{"scenes":[]},"four_k_hevc":{"scenes":[]},"above_four_k":{"scenes":[]},
+        "wmv_hd":{"scenes":[{"id":"9","title":"","files":[{"basename":"x.wmv","duration":60.0,"width":1920,"height":1080,"video_codec":"wmv3","format":"wmv"}]}]},
+        "vp9_hd":{"scenes":[]},"av1":{"scenes":[]},"mpeg4":{"scenes":[]},"flv":{"scenes":[]}}}"#;
     let server = stash_answering(body).await;
     let groups = test_scenes(&client(&server)).await.expect("test set");
     assert_eq!(groups.len(), 1);
@@ -210,8 +210,8 @@ fn legacy_formats_and_short_clips_get_a_sized_cache() {
 }
 
 #[tokio::test]
-async fn fetches_a_scene_screenshot_as_a_data_url_with_the_api_key() {
-    use stash_core::adapter::scenes::scene_screenshot;
+async fn fetches_a_scene_screenshot_with_the_api_key() {
+    use stash_core::adapter::scenes::scene_screenshot_bytes;
     use wiremock::matchers::header;
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -241,10 +241,17 @@ async fn fetches_a_scene_screenshot_as_a_data_url_with_the_api_key() {
     let client =
         StashClient::new(url(&server.uri()), false, Some("secret".into())).expect("client");
 
-    let shot = scene_screenshot(&client, "5").await.expect("fetch");
-    assert_eq!(shot.as_deref(), Some("data:image/jpeg;base64,/9j/"));
+    let shot = scene_screenshot_bytes(&client, "5").await.expect("fetch");
+    assert_eq!(
+        shot,
+        Some((vec![0xFF, 0xD8, 0xFF], "image/jpeg".to_owned()))
+    );
     // Missing screenshot: nothing to show, not an error.
-    assert_eq!(scene_screenshot(&client, "6").await.expect("fetch"), None);
-    // Oversized: skipped rather than pushed through the UI bridge.
-    assert_eq!(scene_screenshot(&client, "7").await.expect("fetch"), None);
+    assert_eq!(
+        scene_screenshot_bytes(&client, "6").await.expect("fetch"),
+        None
+    );
+    // Large covers are fine (they're resized or drawn scaled).
+    let big = scene_screenshot_bytes(&client, "7").await.expect("fetch");
+    assert_eq!(big.map(|(b, _)| b.len()), Some(3 * 1024 * 1024));
 }

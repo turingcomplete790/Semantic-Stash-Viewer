@@ -17,7 +17,6 @@ use crate::session::{lock, Inner, MAX_SPEED, MIN_SPEED};
 const STALE_SEEK: Duration = Duration::from_millis(500);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub enum FrameDirection {
     Forward,

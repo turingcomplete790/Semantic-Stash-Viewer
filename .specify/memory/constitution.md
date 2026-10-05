@@ -1,7 +1,8 @@
 # Semantic Stash Viewer Constitution
 
 Semantic Stash Viewer is an opinionated, native desktop frontend for the
-[Stash](https://github.com/stashapp/stash) media server, built in Rust with Tauri. Its goals:
+[Stash](https://github.com/stashapp/stash) media server, built entirely in Rust with the iced
+toolkit. Its goals:
 (1) bring every feature of the evolving `semantic-tagging` Stash plugin
 (`~/Projects/Stash-Plugins/semantic-tagging/`) to a first-class client; (2) deliver a
 responsive, near-native browsing experience with optimized GraphQL usage and mpv as the one
@@ -54,19 +55,22 @@ two diverge, the user loses the ability to use either one safely.
 ### III. Brain/UI Separation
 
 - Domain logic — Stash I/O, semantic vocabulary, index/graph building, query evaluation,
-  archetype inheritance, caching — MUST live in Rust crates/modules that have no dependency on
-  Tauri, the webview, or the frontend framework.
-- The frontend MUST reach Stash only through typed Tauri commands/events exposed by the Rust
-  core; it MUST NOT issue its own GraphQL requests.
+  archetype inheritance, caching — MUST live in Rust crates that have no dependency on the UI
+  toolkit (iced), its renderer, or any windowing code.
+- The UI MUST reach Stash only through the core's typed, asynchronous API (calls that return typed
+  results, run off the UI thread, and come back to the UI as messages); it MUST NOT issue its own
+  GraphQL requests or open its own connections to Stash.
 - Layering inside the core mirrors the plugin: a single Stash adapter owns all network I/O; the
   semantic engine consumes the adapter; the UI consumes the engine. Cross-layer shortcuts are
   violations.
-- Core modules MUST be unit-testable headlessly (no running webview, and ideally no running
-  Stash, via recorded/fixture GraphQL responses).
+- Core modules MUST be unit-testable headlessly (no window or GPU, and ideally no running Stash,
+  via recorded/fixture GraphQL responses).
 
 **Rationale**: The plugin's roadmap already established that "the brain" must be independent of
 React. Carrying that into Rust makes the engine fast, testable, and reusable (CLI tools, future
-background indexing) without redesign.
+background indexing) without redesign. With the UI in Rust too, the boundary is a crate boundary
+rather than a serialisation bridge: views get typed data from the core and its cache directly, with
+no command layer or generated bindings to keep in sync.
 
 ### IV. Lean, Batched GraphQL
 
@@ -107,12 +111,15 @@ navigation. Batching and indexing locally is where a native client earns its spe
 - **Images** opened for viewing MUST display in mpv at full resolution, loaded on demand; the
   viewer MAY prefetch the items next to the current one. Zoom, pan, rotation, fit, and animated
   images (GIF, WebP, and the like) are handled by mpv.
-- **The webview plays no media.** It MUST NOT use `<video>`/`<audio>` or any other playback
-  pipeline, including for previews. Grids and lists MUST show appropriately sized thumbnails as
-  images; moving previews MUST be image formats (for example Stash's animated WebP previews), with
-  the still thumbnail as the fallback.
+- **mpv's picture is part of the app window.** Video and full-resolution images MUST be drawn
+  inside the viewer's own window, with the viewer's controls on top, never in a separate player
+  window (except a pop-out a feature spec adds per Principle IX).
+- **The UI toolkit plays no media.** The UI MUST NOT decode or play video or audio itself, or use
+  any second playback pipeline, including for previews. Grids and lists MUST show appropriately
+  sized thumbnails as images; moving previews MUST be image formats (for example Stash's animated
+  WebP previews), with the still thumbnail as the fallback.
 - Streams and images MUST be fetched with the profile's configured API key, sent in a header and
-  never placed in URLs the webview or logs can see.
+  never placed in URLs or logs.
 - Features that depend on Stash data (resume position, play count, O-counter, markers,
   Timeline slots/Stages as chapters) MUST sync back to Stash per Principle I.
 
@@ -120,13 +127,13 @@ navigation. Batching and indexing locally is where a native client earns its spe
 mpv handles virtually every video and image format natively, fast and colour-accurately; pushing
 decode to the client makes playback instant and makes low-power Stash hosts viable. One player for
 both media types is what lets galleries mix images and scenes seamlessly (Principle X), and keeping
-the webview out of playback avoids a second, weaker pipeline with different formats and
-behaviour.
+the UI out of playback avoids a second, weaker pipeline with different formats and behaviour.
 
 ### VI. Responsive, Near-Native UI
 
-- The UI thread MUST never block on network or disk. All Stash I/O and heavy computation run in
-  the Rust core asynchronously, with loading states rendered immediately.
+- The UI thread (the event loop that updates and draws the UI) MUST never block on network or
+  disk. All Stash I/O, image decoding, and heavy computation run in the Rust core asynchronously
+  or on worker threads, with loading states rendered immediately.
 - Performance budgets (on a mid-range desktop against a LAN Stash with a warm cache):
   - Input acknowledgement (hover, press, focus) < 50 ms; view navigation first paint < 150 ms.
   - Scrolling within a page sustains 60 fps, and moving to another page meets the navigation
@@ -136,6 +143,9 @@ behaviour.
   - Local semantic queries over an already-indexed library return in < 200 ms.
   - Cold start to an interactive home view < 2 s (excluding first-run index build, which MUST
     show progress and remain cancellable).
+  - Playback shows every frame mpv renders: dropped-frame budgets count frames that never reached
+    the screen, not only frames mpv failed to decode or render, and measurements MUST check the
+    rate frames are actually displayed.
 - The UI MUST be fully keyboard-navigable and SHOULD support remote/controller-style navigation
   for a "10-foot" mode, in the spirit of Jellyfin clients.
 - The product is opinionated: when a Stash web UI behaviour conflicts with speed or clarity, the
@@ -266,26 +276,31 @@ Designing it fresh, instead of porting Stash's viewer, avoids inheriting its pro
 
 ## Technology & Platform Constraints
 
-- **Application shell**: Tauri (v2 or later) with a Rust backend. Business logic lives in Rust
-  per Principle III.
-- **Frontend**: a web UI rendered in the Tauri webview. The specific framework is chosen in the
-  first implementation plan and MUST satisfy Principle VI's budgets; it performs no direct
-  network I/O.
+- **Native UI**: the whole application is Rust. The UI is built with **iced** (0.14 or later),
+  drawn on the GPU through wgpu (Vulkan on Linux), with no web engine, webview, or JavaScript.
+  Business logic lives in the core crates per Principle III; UI code holds view state and talks
+  to the core only through its API. Moving to another native Rust toolkit is a MAJOR amendment.
 - **Stash API**: GraphQL only, via a single Rust adapter module. Typed operations (e.g. generated
   from Stash's schema) are preferred over hand-built query strings.
 - **Media**: mpv/libmpv as the only media player: video, full-resolution images, and mixed
-  image/video sequences (Principles V and X). The webview renders thumbnails and animated image
-  previews only.
+  image/video sequences (Principles V and X), embedded through libmpv's render API into GPU images
+  the UI draws (zero-copy, with hardware decoding where available). The UI renders thumbnails and
+  animated image previews only.
 - **Local persistence**: limited to caches, derived semantic indexes, preferences, and profile
   profiles, including their API keys (Principles I and VII).
-- **Target platforms**: Linux is the primary development and release platform; Windows and macOS
-  SHOULD be supported where Tauri and mpv allow, and platform-specific gaps MUST be documented.
+- **Target platforms**: Linux (Wayland first, X11 where it works) is the primary development and
+  release platform; Windows and macOS SHOULD be supported where iced, wgpu, and mpv allow, and
+  platform-specific gaps (for example the GPU path that shares mpv's frames) MUST be documented.
 - **Stash compatibility**: the minimum supported version is **Stash v0.31.1** (latest stable at
   ratification). It provides `custom_fields` on Tags, Scenes, Images, and Performers. The viewer
   MUST check the server version on connect and refuse to proceed, with a clear message, when the
   server is older. Raising the minimum is a MINOR amendment to this constitution.
-- **Dependencies**: each new crate or npm package MUST be justified in the plan (what it replaces,
-  its size, its maintenance status). Prefer mature, widely used crates.
+- **Dependencies**: each new crate MUST be justified in the plan (what it replaces, its size, its
+  maintenance status). Prefer mature, widely used crates, and crates already in the dependency tree.
+- **Transition from the Tauri build**: the Tauri/webview build (features 001–005) is frozen. It
+  receives no new features, stays buildable as the reference until the native build covers its
+  features (connection and profiles, cache, app shell, Scenes, playback), and is then removed.
+  Specs 001–005 keep their user-facing requirements; their implementation plans are superseded.
 
 ## Development Workflow & Quality Gates
 
@@ -302,11 +317,33 @@ Designing it fresh, instead of porting Stash's viewer, avoids inheriting its pro
     round-trip through the viewer's read → write path unchanged.
   - Integration/E2E tests against a disposable Stash instance for connection, auth, and write
     paths where practical.
+  - UI: view state and its transitions (paging, keyboard moves, tabs, history) are plain Rust
+    and unit-tested; screen flows are tested headlessly with iced's test support, without a
+    server.
 - **Performance gates**: changes to list views, GraphQL operations, or the index MUST state their
   expected request count and be checked against Principle VI's budgets before merge.
-- **Hygiene**: `cargo fmt`, `cargo clippy` (no warnings), and the frontend's formatter/linter MUST
-  pass. Commit after every working change; small, reviewable commits are preferred over large
+- **Hygiene**: `cargo fmt` and `cargo clippy` (no warnings) MUST pass for the whole workspace,
+  UI included. Commit after every working change; small, reviewable commits are preferred over large
   multi-feature drops.
+- **Unsafe code**:
+  - `unsafe` is allowed only at foreign-function boundaries: libmpv, EGL and OpenGL, Vulkan
+    interop through wgpu-hal, libwayland, and similar C libraries. It lives in small modules
+    behind safe wrapper types (owning handles freed on drop), so UI and feature code never
+    writes `unsafe`.
+  - Core crates with no foreign-function work (`stash-core`) MUST declare
+    `#![forbid(unsafe_code)]`.
+  - Every `unsafe` block MUST carry a `// SAFETY:` comment naming the invariant it relies on,
+    and SHOULD perform one unsafe operation. Every `unsafe fn` MUST document its preconditions
+    under `# Safety`.
+  - Crates that contain `unsafe` MUST deny `clippy::undocumented_unsafe_blocks`,
+    `clippy::multiple_unsafe_ops_per_block`, and `unsafe_op_in_unsafe_fn`; an exception is
+    allowed only on a single item, with a comment saying why.
+  - A plan that adds `unsafe` MUST list it in its Constitution Check: where it is, which
+    boundary it serves, and the safe type that hides it.
+  - Lifetime tricks (`transmute` to `'static`, raw pointers between Rust objects) are not a
+    foreign-function need: use ownership instead (an owner that outlives the borrowers, or a
+    self-referential cell crate).
+  - The frozen Tauri build is exempt until it's removed.
 - **Secrets**: no API keys, endpoints of real private servers, or captured media in the repo or
   test fixtures; fixtures MUST be scrubbed.
 
@@ -328,4 +365,4 @@ Designing it fresh, instead of porting Stash's viewer, avoids inheriting its pro
   structure, Principle II's parity expectations MUST be re-evaluated and parity work added to the
   backlog.
 
-**Version**: 3.3.0 | **Ratified**: 2026-09-23 | **Last Amended**: 2026-10-01
+**Version**: 4.1.0 | **Ratified**: 2026-09-23 | **Last Amended**: 2026-10-03

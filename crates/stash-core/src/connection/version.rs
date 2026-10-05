@@ -11,7 +11,6 @@ pub const MINIMUM_APP_SCHEMA: i64 = 85;
 
 /// How confident we are that the server is compatible.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub enum VersionStatus {
     /// A release at or above the minimum.

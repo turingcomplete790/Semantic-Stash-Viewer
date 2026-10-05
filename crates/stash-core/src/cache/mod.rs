@@ -33,7 +33,6 @@ const LIMIT_RECHECK_WRITES: u32 = 50;
 
 /// Data served to the UI, with where it came from (contracts "Cached<T>").
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct Cached<T> {
     pub data: T,

@@ -35,7 +35,6 @@ pub struct ServerProfile {
 
 /// What the connection form submits for `test_connection`, `create_profile`, `update_profile`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileDraft {
     #[serde(default)]
@@ -58,7 +57,6 @@ impl ProfileDraft {
 
 /// The profile as sent to the UI (contracts/tauri-commands.md `ProfileSummary`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileSummary {
     pub id: Uuid,

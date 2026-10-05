@@ -16,7 +16,6 @@ use crate::adapter::endpoint;
 
 /// One row of the "recently added" picker.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct SceneListItem {
     pub id: String,
@@ -32,7 +31,6 @@ pub struct SceneListItem {
 /// One card in the Scenes grid or row in the list (005 data-model "SceneCard"). Text stays on
 /// one line each for title and details (research R3).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct SceneCard {
     pub id: String,
@@ -53,7 +51,6 @@ pub struct SceneCard {
 
 /// One page of cards with the total number of matching scenes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct ScenePage {
     pub count: u32,
@@ -84,7 +81,6 @@ pub fn screenshot_version(path: &str) -> String {
 
 /// A labelled group of scenes (the spike's test set: 4K, WMV, …).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct SceneGroup {
     pub label: String,
@@ -93,7 +89,6 @@ pub struct SceneGroup {
 
 /// The primary file's technical details.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct SceneFile {
     pub container: Option<String>,
@@ -104,6 +99,34 @@ pub struct SceneFile {
     pub frame_rate: Option<f64>,
     pub bit_rate: Option<u64>,
     pub size: Option<u64>,
+}
+
+/// What the scene view shows (007 T048). Cached per scene (`scene:details:<id>`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SceneDetails {
+    pub id: String,
+    /// The scene title, or the primary file's base name when the title is empty.
+    pub title: String,
+    pub code: Option<String>,
+    /// `YYYY-MM-DD`.
+    pub date: Option<String>,
+    /// The description.
+    pub details: Option<String>,
+    pub director: Option<String>,
+    pub studio: Option<String>,
+    pub performers: Vec<String>,
+    pub tags: Vec<String>,
+    /// 1–100.
+    pub rating100: Option<u8>,
+    pub play_count: u32,
+    pub o_count: u32,
+    pub duration_seconds: Option<f64>,
+    /// The primary file's name (not its path).
+    pub file_name: Option<String>,
+    pub file: Option<SceneFile>,
+    /// The screenshot's version (it changes when the cover does).
+    pub cover_version: String,
 }
 
 /// What the player needs to open one scene.

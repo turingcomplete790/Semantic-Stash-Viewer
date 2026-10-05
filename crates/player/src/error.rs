@@ -3,7 +3,6 @@
 use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, thiserror::Error)]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
