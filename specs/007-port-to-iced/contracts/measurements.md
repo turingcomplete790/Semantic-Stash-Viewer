@@ -27,6 +27,14 @@ Rewritten for the new UI; the line names stay the demo's so reports compare.
 | `scenes-page-jump` | until the target page's cards show | < 1 s p95 (SC-004) |
 | `scenes-scroll-1000-{grid,list}-cold` | thumbnails still arriving | < 1% missed (SC-005) |
 | `scenes-scroll-1000-{grid,list}` | thumbnails cached | < 1% missed (SC-005) |
+| `scenes-thumbs-1000-{grid,list}` | how long the page's thumbnails took to arrive before the cached scroll | info |
+| `scenes-page-1000` | cards on the 1000-per-page page (fewer when the library is smaller) | info |
+
+Scrolling moves 3,840 px per second (the web bench's 64 px per frame at 60 Hz), whatever the
+display's refresh rate, and runs inside the scrollable with no messages per frame; each line
+carries `pxPerSecond`. A frame counts as missed when it takes over 1.5 times the display's idle
+frame time. `scroll-frame-time` (the 003 reference list) isn't in the native app and reports
+"not measured".
 
 Playback lines as 006 (with `rendered_fps` / `displayed_fps`; frames not shown count as
 dropped).

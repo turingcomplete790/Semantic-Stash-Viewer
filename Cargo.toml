@@ -22,3 +22,19 @@ specta = { version = "=2.0.0-rc.25", features = ["derive", "url", "uuid", "chron
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 unwrap_used = "warn"
+
+# Dependencies (iced, wgpu, text shaping, image decoding) are optimised even in debug builds,
+# without debug assertions: the UI and the harness's measurements run debug builds, and
+# unoptimised, assertion-checked dependencies made them several times slower than the shipped app
+# (the standard library's precondition checks alone were a third of image resizing). Our own
+# crates keep their assertions.
+[profile.dev.package."*"]
+opt-level = 2
+debug-assertions = false
+overflow-checks = false
+
+# The UI crate itself at opt-level 1: iced's widget code is generic over the app's message type,
+# so it's compiled here, and unoptimised it made layout several times slower than the shipped app.
+# Debug assertions (which the measurement code needs) stay on.
+[profile.dev.package.semantic-stash-viewer-native]
+opt-level = 1

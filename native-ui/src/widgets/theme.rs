@@ -122,3 +122,23 @@ pub fn menu_row(active: bool) -> impl Fn(&Theme, button::Status) -> button::Styl
 pub fn strip(_: &Theme) -> container::Style {
     container::Style::default().background(Background::Color(BACKGROUND))
 }
+
+/// A scene card or list row; `focused` is the keyboard's card.
+pub fn card(focused: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_, status| {
+        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+        let edge = if focused {
+            FROSTED_BLUE
+        } else if hovered {
+            CERULEAN
+        } else {
+            Color::TRANSPARENT
+        };
+        button::Style {
+            background: Some(Background::Color(if hovered { YALE_BLUE } else { SURFACE })),
+            text_color: TEXT,
+            border: border::rounded(8).color(edge).width(2.0),
+            ..button::Style::default()
+        }
+    }
+}

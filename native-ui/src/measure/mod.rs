@@ -2,6 +2,7 @@
 //! variables and `MEASURE {json}` lines, so the performance harness reads both builds the same way.
 //! Debug builds only; release builds ignore all of it.
 
+pub mod bench;
 pub mod playback;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -19,7 +20,7 @@ pub enum Finish {
     Measure,
 }
 
-fn var(name: &str) -> Option<String> {
+pub(crate) fn var(name: &str) -> Option<String> {
     if !cfg!(debug_assertions) {
         return None;
     }

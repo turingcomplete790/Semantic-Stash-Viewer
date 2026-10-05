@@ -1,5 +1,6 @@
 //! Small widgets shared by every screen (007 T013): icons, one-line text, and button styles.
 
+pub mod scroll_watch;
 pub mod theme;
 
 use iced::widget::{button, container, svg, text, Svg};

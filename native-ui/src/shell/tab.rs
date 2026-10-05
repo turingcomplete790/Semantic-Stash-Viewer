@@ -63,8 +63,9 @@ impl Tab {
     }
 
     /// The active screen's entry actions.
-    pub fn enter(&self) -> Vec<Effect> {
-        self.current().enter(self.id)
+    pub fn enter(&mut self) -> Vec<Effect> {
+        let id = self.id;
+        self.current_mut().enter(id)
     }
 
     /// Open a screen: entries after the cursor are dropped, and the oldest beyond the limit.

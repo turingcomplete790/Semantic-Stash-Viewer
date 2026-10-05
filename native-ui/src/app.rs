@@ -58,10 +58,14 @@ pub enum Message {
     FrameReady,
     Tick,
     WindowId(Option<window::Id>),
-    Resized,
+    Resized(iced::Size),
+    Modifiers(keyboard::Modifiers),
+    CacheChanged(String),
     WindowMode(window::Mode),
     CloseRequested,
     MeasureDone,
+    /// A window frame (the UI bench's clock).
+    Frame(std::time::Instant),
 }
 
 pub struct App {
@@ -72,6 +76,9 @@ pub struct App {
     video_error: Option<String>,
     window: Option<window::Id>,
     interactive_marked: bool,
+    bench: Option<measure::bench::Bench>,
+    /// The window's size, handed to each new session.
+    layout: crate::screens::scenes::layout::Layout,
 }
 
 impl App {
@@ -95,6 +102,8 @@ impl App {
             video_error,
             window: None,
             interactive_marked: false,
+            bench: None,
+            layout: crate::screens::scenes::layout::Layout::default(),
         };
         let mut tasks = vec![window::oldest().map(Message::WindowId)];
         tasks.push(app.run_effects(effects));
@@ -119,7 +128,18 @@ impl App {
     fn update(&mut self, message: Message) -> Task<Message> {
         let effects = match message {
             Message::Onboarding(m) => self.onboarding(m),
-            Message::Session(m) => self.session(m),
+            Message::Session(m) => {
+                if let (
+                    Some(bench),
+                    session::Msg::Shell(crate::shell::ShellMsg::Scenes(
+                        crate::screens::scenes::ScenesMsg::AutoScrolled(result),
+                    )),
+                ) = (self.bench.as_mut(), &m)
+                {
+                    bench.scrolled(result.clone());
+                }
+                self.session(m)
+            }
             Message::Reply(Reply::SceneOpened(r)) => self.session(session::Msg::SceneOpened(r)),
             Message::Reply(reply @ Reply::ProfileCreated(_))
                 if matches!(self.state, State::Onboarding(_)) =>
@@ -141,10 +161,15 @@ impl App {
                 self.window = id;
                 Vec::new()
             }
-            Message::Resized => {
+            Message::Modifiers(m) => self.session(session::Msg::Modifiers(m)),
+            Message::CacheChanged(key) => self.session(session::Msg::CacheChanged(key)),
+            Message::Resized(size) => {
+                self.layout = crate::screens::scenes::layout::Layout::new(size.width, size.height);
+                let effects = self.session(session::Msg::Layout(self.layout));
+                let task = self.run_effects(effects);
                 return match self.window {
-                    Some(id) => window::mode(id).map(Message::WindowMode),
-                    None => Task::none(),
+                    Some(id) => Task::batch([task, window::mode(id).map(Message::WindowMode)]),
+                    None => task,
                 };
             }
             Message::WindowMode(mode) => {
@@ -156,6 +181,20 @@ impl App {
                     }
                 }
                 Vec::new()
+            }
+            Message::Frame(now) => {
+                let (Some(bench), State::Session(session)) = (self.bench.as_mut(), &mut self.state)
+                else {
+                    return Task::none();
+                };
+                let (mut effects, done) = bench.frame(now, session);
+                if done {
+                    self.bench = None;
+                    if measure::should_exit(Finish::Bench) {
+                        effects.extend(self.quit_effects());
+                    }
+                }
+                effects
             }
             Message::MeasureDone => {
                 if measure::should_exit(Finish::Measure) {
@@ -187,7 +226,8 @@ impl App {
         };
         let Step { mut effects, up } = form.update(msg);
         if let Some(onboarding::Up::Saved(profile)) = up {
-            let (session, entry) = Session::enter(profile, false);
+            let (mut session, entry) = Session::enter(profile, false);
+            session.shell.layout = self.layout;
             self.state = State::Session(Box::new(session));
             effects.extend(entry);
         }
@@ -205,7 +245,8 @@ impl App {
             if let Some(profile) = session.servers.iter().find(|p| p.id == *id).cloned() {
                 // Each server keeps its own tabs.
                 effects.extend(session.save_now());
-                let (next, entry) = Session::enter(profile, false);
+                let (mut next, entry) = Session::enter(profile, false);
+                next.shell.layout = self.layout;
                 self.state = State::Session(Box::new(next));
                 effects.extend(entry);
             }
@@ -217,13 +258,7 @@ impl App {
                 if measure::mark_interactive() {
                     effects.extend(self.quit_effects());
                 } else if measure::bench_requested() {
-                    // The UI bench arrives with the screens it measures (US3, T040).
-                    measure::emit(
-                        &serde_json::json!({"bench": "done", "note": "bench not built yet (007 T040)"}),
-                    );
-                    if measure::should_exit(Finish::Bench) {
-                        effects.extend(self.quit_effects());
-                    }
+                    self.bench = Some(measure::bench::Bench::new(session));
                 }
             }
         }
@@ -252,16 +287,27 @@ impl App {
             Subscription::run(connection_stream).map(Message::Connection),
             Subscription::run(player_stream).map(Message::Player),
             window::close_requests().map(|_| Message::CloseRequested),
-            window::resize_events().map(|_| Message::Resized),
+            window::resize_events().map(|(_, size)| Message::Resized(size)),
+            Subscription::run(cache_stream).map(Message::CacheChanged),
             // Key events a focused widget captured (typing in a field) never reach the machine.
             iced::event::listen_with(|event, status, _window| match (event, status) {
                 (
                     iced::Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }),
                     iced::event::Status::Ignored,
                 ) => Some(Message::Key(key, modifiers)),
+                (iced::Event::Keyboard(keyboard::Event::ModifiersChanged(m)), _) => {
+                    Some(Message::Modifiers(m))
+                }
                 _ => None,
             }),
         ];
+        if self
+            .bench
+            .as_ref()
+            .is_some_and(measure::bench::Bench::wants_frames)
+        {
+            subs.push(window::frames().map(Message::Frame));
+        }
         if let State::Session(session) = &self.state {
             if session.playback.active() {
                 subs.push(Subscription::run(video::frames).map(|()| Message::FrameReady));
@@ -321,6 +367,29 @@ fn connection_stream() -> impl iced::futures::Stream<Item = ConnectionSnapshot> 
                     }
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    })
+}
+
+/// Changes to cached data, for the current profile, as messages.
+fn cache_stream() -> impl iced::futures::Stream<Item = String> {
+    iced::stream::channel(16, async |mut output| {
+        use iced::futures::SinkExt;
+        let mut rx = services().caches.changes();
+        loop {
+            match rx.recv().await {
+                Ok((profile, key)) => {
+                    if services().current_profile() == Some(profile)
+                        && output.send(key).await.is_err()
+                    {
+                        break;
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    let _ = output.send("*".to_owned()).await;
+                }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             }
         }

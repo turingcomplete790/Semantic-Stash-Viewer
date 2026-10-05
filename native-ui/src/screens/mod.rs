@@ -4,12 +4,12 @@
 //! effects. Home is complete here; Scenes, Scene, and Settings fill in with US3 and US4.
 
 pub mod home;
+pub mod scenes;
 
 use iced::widget::{button, center, column, container, row, text, Space};
 use iced::{Alignment, Element, Length};
 use serde::{Deserialize, Serialize};
 use stash_core::profiles::ServerProfile;
-use stash_core::scenes::query::SceneQuery;
 
 use crate::effects::Effect;
 use crate::session::connection::Connection;
@@ -21,7 +21,12 @@ use crate::widgets::theme;
 pub struct Context<'a> {
     pub profile: &'a ServerProfile,
     pub connection: &'a Connection,
+    pub thumbs: &'a scenes::Thumbs,
+    /// The window's size, for the grid's columns.
+    pub layout: scenes::layout::Layout,
 }
+
+pub use scenes::ScenesState;
 
 /// The navigation bar's sections.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,34 +41,6 @@ pub enum Mode {
     #[default]
     Grid,
     List,
-}
-
-/// The page sizes offered (005).
-pub const PAGE_SIZES: [u32; 8] = [20, 40, 50, 60, 120, 250, 500, 1000];
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ScenesState {
-    pub query: SceneQuery,
-    /// From 1.
-    pub page: u32,
-    pub page_size: u32,
-    pub mode: Mode,
-    /// Logical pixels from the top.
-    pub scroll: f32,
-    pub focused: Option<usize>,
-}
-
-impl Default for ScenesState {
-    fn default() -> Self {
-        Self {
-            query: SceneQuery::default(),
-            page: 1,
-            page_size: 50,
-            mode: Mode::Grid,
-            scroll: 0.0,
-            focused: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -166,30 +143,35 @@ impl Screen {
     pub fn persistent(&self) -> Screen {
         match self {
             Screen::Home(_) => Screen::home(),
+            Screen::Scenes(s) => Screen::Scenes(s.persistent()),
             other => other.clone(),
         }
     }
 
     /// Entry actions when the screen becomes active in tab `tab`. A screen that already has its
     /// data asks for nothing, so switching back to it never reloads (B1).
-    pub fn enter(&self, tab: TabId) -> Vec<Effect> {
+    pub fn enter(&mut self, tab: TabId) -> Vec<Effect> {
         match self {
             Screen::Home(h) if h.needs_load() => vec![Effect::LoadSummary { tab }],
+            Screen::Scenes(s) => s.enter(tab),
             _ => Vec::new(),
         }
     }
 
+    /// Nothing to show yet and nothing on its way (retried when the connection comes up).
+    pub fn needs_load(&self) -> bool {
+        match self {
+            Screen::Home(h) => h.needs_load(),
+            Screen::Scenes(s) => s.needs_load(),
+            _ => false,
+        }
+    }
+
     /// The screen's body.
-    pub fn view<'a>(&'a self, ctx: &Context<'a>) -> Element<'a, ShellMsg> {
+    pub fn view<'a>(&'a self, ctx: &Context<'a>, tab: TabId) -> Element<'a, ShellMsg> {
         match self {
             Screen::Home(h) => h.view(ctx),
-            Screen::Scenes(s) => placeholder(
-                "Scenes",
-                format!(
-                    "Page {} · {} per page · {:?}. The grid arrives with US3.",
-                    s.page, s.page_size, s.mode
-                ),
-            ),
+            Screen::Scenes(s) => scenes::view(s, ctx, tab),
             Screen::Scene(s) => center(
                 column![
                     text(s.title.clone()).size(24),
@@ -202,18 +184,6 @@ impl Screen {
             Screen::Settings(s) => settings_view(s),
         }
     }
-}
-
-fn placeholder<'a>(title: &'a str, detail: String) -> Element<'a, ShellMsg> {
-    center(
-        column![
-            text(title).size(24),
-            text(detail).size(14).color(theme::MUTED)
-        ]
-        .spacing(8)
-        .align_x(Alignment::Center),
-    )
-    .into()
 }
 
 fn settings_view(state: &SettingsState) -> Element<'_, ShellMsg> {

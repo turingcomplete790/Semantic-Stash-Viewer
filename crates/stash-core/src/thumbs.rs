@@ -109,26 +109,63 @@ impl ThumbService {
 pub fn prepare(source: &[u8], content_type: &str) -> Result<Vec<u8>, String> {
     let is_jpeg = source.starts_with(&[0xFF, 0xD8, 0xFF]);
     let (rgb, width, height) = if is_jpeg {
-        decode_jpeg_scaled(source)?
+        decode_jpeg_scaled(source, THUMB_WIDTH)?
     } else {
         decode_other(source, content_type)?
     };
     let (rgb, width, height) = if width > THUMB_WIDTH {
-        resize(rgb, width, height)?
+        resize(rgb, width, height, THUMB_WIDTH)?
     } else {
         (rgb, width, height)
     };
     encode_jpeg(&rgb, width, height)
 }
 
-/// Decode at the largest DCT scale (1/8, 1/4, 1/2, 1) that stays at least `THUMB_WIDTH` wide.
-fn decode_jpeg_scaled(source: &[u8]) -> Result<(Vec<u8>, u32, u32), String> {
+/// A thumbnail (as `prepare` makes them) decoded to RGBA pixels for a UI to draw about `width`
+/// wide without decoding on its own thread. JPEGs decode at the DCT scale (1/8, 1/4, 1/2, 1)
+/// closest to `width` from above, allowing a 10% stretch, with no separate resize: that keeps it
+/// cheap enough to run while a grid scrolls. `(pixels, width, height)`.
+pub fn decode_rgba(source: &[u8], width: u32) -> Result<(Vec<u8>, u32, u32), String> {
+    if !source.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        let image = image::load_from_memory(source)
+            .map_err(|e| e.to_string())?
+            .into_rgba8();
+        let (w, h) = image.dimensions();
+        return Ok((image.into_raw(), w, h));
+    }
+    let mut decoder = turbojpeg::Decompressor::new().map_err(|e| e.to_string())?;
+    let header = decoder.read_header(source).map_err(|e| e.to_string())?;
+    let enough = (width as usize * 9 / 10).max(1);
+    let factor = [8, 4, 2, 1]
+        .into_iter()
+        .map(|n| turbojpeg::ScalingFactor::new(1, n))
+        .find(|f| f.scale(header.width) >= enough)
+        .unwrap_or(turbojpeg::ScalingFactor::ONE);
+    decoder
+        .set_scaling_factor(factor)
+        .map_err(|e| e.to_string())?;
+    let (w, h) = (factor.scale(header.width), factor.scale(header.height));
+    let mut image = turbojpeg::Image {
+        pixels: vec![0u8; w * h * 4],
+        width: w,
+        pitch: w * 4,
+        height: h,
+        format: turbojpeg::PixelFormat::RGBA,
+    };
+    decoder
+        .decompress(source, image.as_deref_mut())
+        .map_err(|e| e.to_string())?;
+    Ok((image.pixels, dim(w)?, dim(h)?))
+}
+
+/// Decode at the largest DCT scale (1/8, 1/4, 1/2, 1) that stays at least `min_width` wide.
+fn decode_jpeg_scaled(source: &[u8], min_width: u32) -> Result<(Vec<u8>, u32, u32), String> {
     let mut decoder = turbojpeg::Decompressor::new().map_err(|e| e.to_string())?;
     let header = decoder.read_header(source).map_err(|e| e.to_string())?;
     let factor = [8, 4, 2, 1]
         .into_iter()
         .map(|n| turbojpeg::ScalingFactor::new(1, n))
-        .find(|f| f.scale(header.width) >= THUMB_WIDTH as usize)
+        .find(|f| f.scale(header.width) >= min_width as usize)
         .unwrap_or(turbojpeg::ScalingFactor::ONE);
     decoder
         .set_scaling_factor(factor)
@@ -155,14 +192,19 @@ fn decode_other(source: &[u8], content_type: &str) -> Result<(Vec<u8>, u32, u32)
     Ok((image.into_raw(), width, height))
 }
 
-fn resize(rgb: Vec<u8>, width: u32, height: u32) -> Result<(Vec<u8>, u32, u32), String> {
+fn resize(
+    rgb: Vec<u8>,
+    width: u32,
+    height: u32,
+    target_width: u32,
+) -> Result<(Vec<u8>, u32, u32), String> {
     let target_height =
-        u32::try_from(u64::from(height) * u64::from(THUMB_WIDTH) / u64::from(width))
+        u32::try_from(u64::from(height) * u64::from(target_width) / u64::from(width))
             .unwrap_or(1)
             .max(1);
     let source = fr::images::Image::from_vec_u8(width, height, rgb, fr::PixelType::U8x3)
         .map_err(|e| e.to_string())?;
-    let mut target = fr::images::Image::new(THUMB_WIDTH, target_height, fr::PixelType::U8x3);
+    let mut target = fr::images::Image::new(target_width, target_height, fr::PixelType::U8x3);
     fr::Resizer::new()
         .resize(
             &source,
@@ -171,7 +213,7 @@ fn resize(rgb: Vec<u8>, width: u32, height: u32) -> Result<(Vec<u8>, u32, u32), 
                 .resize_alg(fr::ResizeAlg::Convolution(fr::FilterType::Bilinear)),
         )
         .map_err(|e| e.to_string())?;
-    Ok((target.into_vec(), THUMB_WIDTH, target_height))
+    Ok((target.into_vec(), target_width, target_height))
 }
 
 fn encode_jpeg(rgb: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {

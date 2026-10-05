@@ -19,6 +19,8 @@ use crate::effects::{Effect, Reply};
 use crate::machine::Step;
 use crate::onboarding;
 use crate::player::video::Shared;
+use crate::screens::scenes::layout::Layout;
+use crate::screens::scenes::{ScenesMsg, Thumbs};
 use crate::screens::Context;
 use crate::shell::keymap::{self, Action, Level};
 use crate::shell::overlays::{self, KeyPrompt, Overlay, KEY_PROMPT_ID};
@@ -32,11 +34,17 @@ pub struct Session {
     pub playback: playback::Playback,
     pub overlay: Overlay,
     pub shell: Shell,
+    /// Thumbnails for every tab.
+    pub thumbs: Thumbs,
+    /// Held modifier keys (Ctrl+click opens in a new tab).
+    modifiers: Modifiers,
     ever_connected: bool,
     /// The saved session has been read (or there was none): saving can't overwrite it now.
     restored: bool,
     /// Bumped on every change to the shell; only the latest pending save is written.
     save_generation: u64,
+    /// The UI bench is running: its tabs aren't saved.
+    pub saving_suspended: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -54,6 +62,11 @@ pub enum Msg {
     Shell(ShellMsg),
     /// A debounced save came due.
     SaveDue(u64),
+    Modifiers(Modifiers),
+    /// Cached data changed (a refresh found something new, or a clear: `*`).
+    CacheChanged(String),
+    /// The window's size changed.
+    Layout(Layout),
 }
 
 /// Events for the app.
@@ -91,9 +104,12 @@ impl Session {
                 playback: playback::Playback::default(),
                 overlay: Overlay::None,
                 shell,
+                thumbs: Thumbs::default(),
+                modifiers: Modifiers::empty(),
                 ever_connected: false,
                 restored: false,
                 save_generation: 0,
+                saving_suspended: false,
             },
             effects,
         )
@@ -102,7 +118,7 @@ impl Session {
     /// Save now, before leaving (quit or a server switch); nothing until the saved session was
     /// read, so a fresh shell never replaces it.
     pub fn save_now(&self) -> Option<Effect> {
-        self.restored.then(|| Effect::SaveSessionNow {
+        (self.restored && !self.saving_suspended).then(|| Effect::SaveSessionNow {
             profile: self.profile.id,
             session: self.shell.capture(),
         })
@@ -117,15 +133,48 @@ impl Session {
         )
     }
 
+    /// The session is still connecting, so a failed read isn't final yet.
+    fn waiting(&self) -> bool {
+        !self.connection.connected() && !self.unreachable()
+    }
+
+    /// Thumbnails for what the active screen shows.
+    fn thumbnails(&mut self) -> Vec<Effect> {
+        let width = self.thumb_width();
+        self.thumbs.want_cards(self.shell.active_cards(), width)
+    }
+
+    /// The width thumbnails are decoded at: a grid card's (list rows draw them smaller), in steps
+    /// of 32 px so small window changes reuse them.
+    fn thumb_width(&self) -> u32 {
+        let w = self.shell.layout.card_width().ceil() as u32;
+        w.div_ceil(32) * 32
+    }
+
     fn shell(&mut self, msg: ShellMsg) -> Step<Up> {
+        // A click with Ctrl held opens the scene in a new tab.
+        let msg = match msg {
+            ShellMsg::Scenes(ScenesMsg::Open {
+                index,
+                new_tab: false,
+            }) if self.modifiers.control() => ShellMsg::Scenes(ScenesMsg::Open {
+                index,
+                new_tab: true,
+            }),
+            other => other,
+        };
         let Step { mut effects, up } = self.shell.update(msg);
+        effects.extend(self.thumbnails());
         if self.restored {
             self.save_generation += 1;
             effects.push(Effect::SaveSessionLater {
                 generation: self.save_generation,
             });
         }
-        let step = Step::effects(effects);
+        self.shell_up(Step::effects(effects), up)
+    }
+
+    fn shell_up(&mut self, step: Step<Up>, up: Option<shell_mod::Up>) -> Step<Up> {
         match up {
             None => step,
             Some(shell_mod::Up::Play(id)) => step.with(Effect::OpenScene(id)),
@@ -159,6 +208,16 @@ impl Session {
             }
             return Step::none();
         }
+        if let Some(Step { mut effects, up }) = self.shell.screen_key(key, mods) {
+            effects.extend(self.thumbnails());
+            if self.restored {
+                self.save_generation += 1;
+                effects.push(Effect::SaveSessionLater {
+                    generation: self.save_generation,
+                });
+            }
+            return self.shell_up(Step::effects(effects), up);
+        }
         let msg = match keymap::resolve(key, mods, &[Level::Shell]) {
             Some(Action::NewTab) => ShellMsg::NewTab,
             Some(Action::CloseTab) => ShellMsg::CloseActive,
@@ -172,7 +231,7 @@ impl Session {
             Some(Action::KeyboardHelp) => ShellMsg::KeyboardHelp,
             Some(Action::FocusNext) => return Step::effect(Effect::FocusNext),
             Some(Action::FocusPrevious) => return Step::effect(Effect::FocusPrevious),
-            Some(Action::Player) | None => return Step::none(),
+            Some(Action::Player | Action::Scenes) | None => return Step::none(),
         };
         self.shell(msg)
     }
@@ -187,11 +246,43 @@ impl Session {
                 if self.unreachable() {
                     self.shell.unreachable();
                 }
-                self.connection_event(up)
+                let retry = if up == Some(connection::Up::BecameConnected) {
+                    self.shell.retry_active()
+                } else {
+                    Vec::new()
+                };
+                self.connection_event(up).with_all(retry)
+            }
+            Msg::Modifiers(m) => {
+                self.modifiers = m;
+                Step::none()
+            }
+            Msg::Layout(layout) => {
+                self.shell.layout = layout;
+                Step::none()
+            }
+            Msg::CacheChanged(key) => Step::effects(self.shell.cache_changed(&key)),
+            Msg::Reply(Reply::ScenesPage {
+                tab,
+                generation,
+                result,
+            }) => {
+                let waiting = self.waiting();
+                let mut effects = self.shell.scenes_page(tab, generation, result, waiting);
+                effects.extend(self.thumbnails());
+                Step::effects(effects)
+            }
+            Msg::Reply(Reply::Thumbnails(batch)) => {
+                self.thumbs.insert_all(batch);
+                Step::none()
+            }
+            Msg::Reply(Reply::Warm(keys)) => {
+                let width = self.thumb_width();
+                Step::effects(self.thumbs.want(&keys, width))
             }
             Msg::Shell(m) => self.shell(m),
             Msg::SaveDue(generation) => {
-                if generation == self.save_generation && self.restored {
+                if generation == self.save_generation && self.restored && !self.saving_suspended {
                     Step::effect(Effect::SaveSession {
                         profile: self.profile.id,
                         session: self.shell.capture(),
@@ -368,6 +459,8 @@ impl Session {
             let ctx = Context {
                 profile: &self.profile,
                 connection: &self.connection,
+                thumbs: &self.thumbs,
+                layout: self.shell.layout,
             };
             let page: Element<'a, ShellMsg> =
                 column![self.shell.chrome(indicator), self.shell.content(&ctx)].into();

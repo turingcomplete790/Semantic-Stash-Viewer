@@ -141,6 +141,8 @@ pub enum Action {
     FocusPrevious,
     /// Handled by the player's own controls (002 FR-009; frame steps only while paused).
     Player,
+    /// Handled by the Scenes grid (`screens::scenes::keyboard`; 005 FR-006).
+    Scenes,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -259,6 +261,21 @@ pub fn bindings() -> Vec<Binding> {
             "Go to tab",
         ));
     }
+    // The grid's keys (005 FR-006), listed here; the grid applies them.
+    for (chord, label) in [
+        (
+            Chord::plain(N(Named::ArrowRight)),
+            "Move between scenes (arrows)",
+        ),
+        (Chord::plain(N(Named::Home)), "First scene on the page"),
+        (Chord::plain(N(Named::End)), "Last scene on the page"),
+        (Chord::plain(Char("]")), "Next page"),
+        (Chord::plain(Char("[")), "Previous page"),
+        (Chord::plain(N(Named::Enter)), "Open the scene"),
+        (Chord::ctrl(N(Named::Enter)), "Open in a new tab"),
+    ] {
+        all.push(b(Level::Scenes, chord, Action::Scenes, label));
+    }
     // 002 FR-009, exactly.
     for (key, label) in [
         (N(Named::Space), "Play or pause"),
@@ -305,6 +322,9 @@ pub fn help_list<'a, M: 'a>() -> Element<'a, M> {
         }
         let keys = match b.action {
             Action::SelectTab(_) => "Ctrl+1…9".to_owned(),
+            Action::Scenes if b.chord.key == ChordKey::Named(Named::ArrowRight) => {
+                "← ↑ → ↓".to_owned()
+            }
             _ => b.chord.describe(),
         };
         let label = match b.action {

@@ -33,10 +33,8 @@ fn a_session_round_trips_exactly() {
     let (restored, _) = Shell::restore(back).expect("valid");
     assert_eq!(restored.selected, shell.selected);
     assert_eq!(restored.tabs.len(), shell.tabs.len());
-    for (a, b) in restored.tabs.iter().zip(&shell.tabs) {
-        assert_eq!(a.history, b.history);
-        assert_eq!(a.cursor, b.cursor);
-    }
+    // Loaded data isn't saved, so compare the saved forms.
+    assert_eq!(restored.capture(), shell.capture());
 }
 
 #[test]

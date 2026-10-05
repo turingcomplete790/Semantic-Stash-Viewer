@@ -177,7 +177,7 @@ and code structure are designed fresh. Nothing is kept for compatibility with th
 
 - **Decision**: Scenes follows 006's research (R3, R4): page loading through `read_cached` (cache
   keys are the core's), neighbour prefetch, thumbnails from the core's `ThumbService` as image
-  handles in an LRU (at most 2,000) with next-page warming, a plain grid with row windowing only
+  handles in an LRU (at most 2,000; 1,200 after R16) with next-page warming, a plain grid with row windowing only
   if the 1000-card scroll misses its budget, paging rules unchanged (a behaviour that stays). The
   scene view (title, cover, details, Play) is designed fresh; the cover comes from the core's
   screenshot fetch through the cache. Playback is the Session's playback region around 006's
@@ -230,3 +230,34 @@ and code structure are designed fresh. Nothing is kept for compatibility with th
 - **Decision**: Wayland `app_id` / X11 class `dev.semantic-stash-viewer`, matching the data
   directories (R4); the app icon moves from `src-tauri/icons` into `native-ui` before the demo
   is removed.
+
+## R16. What made the Scenes grid scroll smoothly (T040–T041, measured 2026-10-05)
+
+Measured with the UI bench on Testing (1,020 scenes, 1000 per page) on a 144 Hz display, scrolling
+at the web bench's speed (64 px per frame at 60 Hz = 3,840 px/s).
+
+- **Build profile.** The harness measures debug builds. Unoptimised dependencies and, worse, iced's
+  generic widget code (compiled in the UI crate, since it's generic over the app's message type)
+  made layout several times slower than the shipped app, and the standard library's precondition
+  checks were a third of image resizing. Dev builds now optimise dependencies (`opt-level = 2`,
+  no debug assertions or overflow checks) and the UI crate at `opt-level = 1`; our crates keep
+  their assertions, which the measurement code needs. Incremental UI builds: ~30 s.
+- **Messages per scroll frame.** iced rebuilds and lays out the view after every message, and a
+  scrollable's `on_scroll` sends one per frame. `widgets/scroll_watch.rs` watches the offset
+  itself and reports it only when it crosses a row (so the built rows can move) and once
+  scrolling settles (so the saved position is exact). The bench's scroll runs inside it (no
+  messages per frame, as when a person scrolls).
+- **Rows built.** Only the rows in view plus one each side (`Layout::window`), with spacers;
+  cards cached with `lazy` until their page, mode, focus, size, thumbnails, or window change; rows
+  keyed by their place so moving the window keeps their state.
+- **Card text.** A line that doesn't wrap is shaped in full: long file-name titles made each new
+  row slow. Text is cut to what the card could ever show before it reaches iced.
+- **Thumbnails.** Decoded off the UI thread straight to RGBA at the DCT scale nearest the drawn
+  width (no separate resize), at most three at a time, delivered in batches every 100 ms; the LRU
+  holds 1,200 (≈ 160 MB at 240 px).
+
+Remaining (2026-10-05): grid scrolling misses 1–3% of frames with thumbnails cached and 5–7% while
+1000 thumbnails are still arriving (list: 0–1% either way); runs vary by about 1.5 points with the
+machine in use. Section navigation, tab switching, control presses, page change, and page jump
+are far inside their budgets.
+

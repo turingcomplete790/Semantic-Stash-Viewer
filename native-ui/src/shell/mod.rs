@@ -11,9 +11,15 @@ use stash_core::connection::ServerInfo;
 
 use crate::effects::Effect;
 use crate::machine::Step;
+use crate::screens::scenes::keyboard::{grid_key, GridKeys};
+use crate::screens::scenes::layout::Layout;
+use crate::screens::scenes::{ScenesMsg, ScenesUp};
 use crate::screens::{Context, Screen, Section, SettingsPage};
 use crate::session::snapshot::{SavedSession, SavedTab};
 use crate::widgets::{icon, icon_button, one_line, theme, Icon};
+use iced::keyboard::{key::Named, Key, Modifiers};
+use stash_core::scenes::{SceneCard, ScenePage};
+use stash_core::AppError;
 
 pub use tab::{Tab, TabId, MAX_HISTORY};
 
@@ -34,6 +40,8 @@ pub struct Shell {
     pub tabs: Vec<Tab>,
     pub selected: usize,
     next_id: TabId,
+    /// The window's size (the grid's columns, keyboard moves, scroll positions).
+    pub layout: Layout,
 }
 
 #[derive(Debug, Clone)]
@@ -56,6 +64,8 @@ pub enum ShellMsg {
     MoveLeft,
     MoveRight,
     SettingsPage(SettingsPage),
+    /// For the active Scenes screen.
+    Scenes(ScenesMsg),
     // Handled above the shell.
     Play(String),
     ServerMenu,
@@ -75,12 +85,13 @@ pub enum Up {
 impl Shell {
     /// One Home tab.
     pub fn new() -> (Self, Vec<Effect>) {
-        let shell = Self {
+        let mut shell = Self {
             tabs: vec![Tab::new(1, Screen::home())],
             selected: 0,
             next_id: 2,
+            layout: Layout::default(),
         };
-        let effects = shell.active().enter();
+        let effects = shell.active_mut().enter();
         (shell, effects)
     }
 
@@ -98,12 +109,13 @@ impl Shell {
             return None;
         }
         let next_id = tabs.iter().map(|t| t.id).max().unwrap_or(0) + 1;
-        let shell = Self {
+        let mut shell = Self {
             selected: saved.selected.min(tabs.len() - 1),
             tabs,
             next_id,
+            layout: Layout::default(),
         };
-        let effects = shell.active().enter();
+        let effects = shell.active_mut().enter();
         Some((shell, effects))
     }
 
@@ -140,7 +152,7 @@ impl Shell {
             return Vec::new();
         }
         self.selected = index;
-        self.active().enter()
+        self.active_mut().enter()
     }
 
     fn new_tab(&mut self, at: usize, screen: Screen) -> Vec<Effect> {
@@ -151,7 +163,7 @@ impl Shell {
         self.next_id += 1;
         self.tabs.insert(at, Tab::new(id, screen));
         self.selected = at;
-        self.active().enter()
+        self.active_mut().enter()
     }
 
     fn close(&mut self, index: usize) -> Vec<Effect> {
@@ -165,7 +177,7 @@ impl Shell {
         } else if index == self.selected {
             // The tab after it takes its place; the one before when it was last.
             self.selected = index.min(self.tabs.len() - 1);
-            self.active().enter()
+            self.active_mut().enter()
         } else {
             Vec::new()
         }
@@ -215,12 +227,95 @@ impl Shell {
                 }
                 Vec::new()
             }
+            ShellMsg::Scenes(m) => {
+                let (tab, layout) = (self.active().id, self.layout);
+                let Screen::Scenes(state) = self.active_mut().current_mut() else {
+                    return Step::none();
+                };
+                let Step { mut effects, up } = state.update(m, tab, &layout);
+                if let Some(ScenesUp::Open { id, title, new_tab }) = up {
+                    let screen = Screen::scene(&id, &title);
+                    effects.extend(if new_tab {
+                        self.new_tab(self.selected + 1, screen)
+                    } else {
+                        self.active_mut().open(screen)
+                    });
+                }
+                effects
+            }
             ShellMsg::Play(id) => return Step::up(Up::Play(id)),
             ShellMsg::ServerMenu => return Step::up(Up::ServerMenu),
             ShellMsg::Notifications => return Step::up(Up::Notifications),
             ShellMsg::KeyboardHelp => return Step::up(Up::KeyboardHelp),
         };
         Step::effects(effects)
+    }
+
+    /// A page of scenes arrived for a request from tab `tab`; it lands on the screen that asked,
+    /// wherever it is in the tab's history.
+    pub fn scenes_page(
+        &mut self,
+        tab: TabId,
+        generation: u64,
+        result: Result<ScenePage, AppError>,
+        waiting: bool,
+    ) -> Vec<Effect> {
+        let Some(i) = self.index_of(tab) else {
+            return Vec::new();
+        };
+        self.tabs[i]
+            .history
+            .iter_mut()
+            .find_map(|screen| match screen {
+                Screen::Scenes(state) if state.awaits(generation) => Some(state),
+                _ => None,
+            })
+            .map(|state| state.page_loaded(generation, result, waiting))
+            .unwrap_or_default()
+    }
+
+    /// Cached data changed (`*`: all of it): the active screen re-reads in place.
+    pub fn cache_changed(&mut self, key: &str) -> Vec<Effect> {
+        let tab = self.active().id;
+        match self.active_mut().current_mut() {
+            Screen::Scenes(state) => state.cache_changed(key, tab),
+            _ => Vec::new(),
+        }
+    }
+
+    /// The connection came up: the active screen loads what it couldn't before.
+    pub fn retry_active(&mut self) -> Vec<Effect> {
+        if self.active().current().needs_load() {
+            self.active_mut().enter()
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// The cards the active screen shows.
+    pub fn active_cards(&self) -> &[SceneCard] {
+        match self.active().current() {
+            Screen::Scenes(state) => state.cards(),
+            _ => &[],
+        }
+    }
+
+    /// A key for the active screen (the grid's keys on Scenes); `None` when it isn't one.
+    pub fn screen_key(&mut self, key: &Key, mods: Modifiers) -> Option<Step<Up>> {
+        if mods.alt() || mods.logo() || (mods.control() && *key != Key::Named(Named::Enter)) {
+            return None;
+        }
+        let Screen::Scenes(state) = self.active().current() else {
+            return None;
+        };
+        let keys = GridKeys {
+            index: state.focused,
+            count: state.cards().len(),
+            cols: self.layout.cols(state.mode),
+            ctrl: mods.control(),
+        };
+        let action = grid_key(key, keys)?;
+        Some(self.update(ShellMsg::Scenes(ScenesMsg::Grid(action))))
     }
 
     /// A summary read for tab `tab`'s Home screen.
@@ -347,6 +442,6 @@ impl Shell {
 
     /// The active screen.
     pub fn content<'a>(&'a self, ctx: &Context<'a>) -> Element<'a, ShellMsg> {
-        self.active().current().view(ctx)
+        self.active().current().view(ctx, self.active().id)
     }
 }

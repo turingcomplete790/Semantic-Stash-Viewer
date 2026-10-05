@@ -8,13 +8,18 @@
 use std::sync::Arc;
 
 use iced::{window, Task};
+use stash_core::cache::refresh::RefreshPolicy;
 use stash_core::connection::ServerInfo;
 use stash_core::profiles::{ProfileDraft, ServerProfile};
+use stash_core::scenes::query::SceneQuery;
+use stash_core::scenes::ScenePage;
 use stash_core::AppError;
 use uuid::Uuid;
 
 use crate::app::Message;
 use crate::player::controls::Direction;
+use crate::screens::scenes::page_key;
+use crate::screens::scenes::thumbs::{thumb_key, ThumbKey, WARM_LIMIT};
 use crate::services::Services;
 use crate::session::snapshot::{self, SavedSession};
 use crate::shell::TabId;
@@ -62,6 +67,32 @@ pub enum Effect {
     LoadSummary {
         tab: TabId,
     },
+    /// Read a page of scenes through the cache, for the screen in `tab` that asked (`generation`).
+    LoadScenesPage {
+        tab: TabId,
+        generation: u64,
+        query: SceneQuery,
+        page: u32,
+        size: u32,
+    },
+    /// Read neighbouring pages into the cache; warm the thumbnails of page `warm`.
+    PrefetchScenes {
+        query: SceneQuery,
+        pages: Vec<u32>,
+        size: u32,
+        warm: Option<u32>,
+    },
+    /// Scenes' thumbnails (the core's, through its disk cache), delivered in batches so arriving
+    /// thumbnails don't rebuild the view on every frame.
+    LoadThumbnails {
+        keys: Vec<ThumbKey>,
+        width: u32,
+    },
+    /// Scroll a scrollable to `y`.
+    ScrollTo {
+        id: String,
+        y: f32,
+    },
     /// Read a profile's saved session.
     LoadSession {
         profile: Uuid,
@@ -101,6 +132,15 @@ pub enum Reply {
         tab: TabId,
         info: Option<ServerInfo>,
     },
+    ScenesPage {
+        tab: TabId,
+        generation: u64,
+        result: Result<ScenePage, AppError>,
+    },
+    /// Thumbnails that arrived, decoded (`None`: the core had nothing for that scene).
+    Thumbnails(Vec<(ThumbKey, Option<iced::widget::image::Handle>)>),
+    /// Thumbnails worth having before they're shown (the next page's).
+    Warm(Vec<ThumbKey>),
     SessionLoaded {
         profile: Uuid,
         saved: Option<SavedSession>,
@@ -146,6 +186,60 @@ pub fn run(effect: Effect, services: &Arc<Services>, window: Option<window::Id>)
                 move |info| Message::Reply(Reply::Summary { tab, info }),
             )
         }
+        Effect::LoadScenesPage {
+            tab,
+            generation,
+            query,
+            page,
+            size,
+        } => {
+            let services = Arc::clone(services);
+            Task::perform(
+                async move { scenes_page(&services, query, page, size).await },
+                move |result| {
+                    Message::Reply(Reply::ScenesPage {
+                        tab,
+                        generation,
+                        result,
+                    })
+                },
+            )
+        }
+        Effect::PrefetchScenes {
+            query,
+            pages,
+            size,
+            warm,
+        } => Task::batch(pages.into_iter().map(|page| {
+            let services = Arc::clone(services);
+            let query = query.clone();
+            Task::perform(
+                async move { scenes_page(&services, query, page, size).await },
+                move |result| match result {
+                    Ok(p) if Some(page) == warm => Message::Reply(Reply::Warm(
+                        p.items
+                            .iter()
+                            .take(WARM_LIMIT)
+                            .filter_map(thumb_key)
+                            .collect(),
+                    )),
+                    _ => Message::Idle,
+                },
+            )
+        })),
+        Effect::LoadThumbnails { keys, width } => {
+            let services = Arc::clone(services);
+            Task::run(thumbnail_batches(services, keys, width), |batch| {
+                Message::Reply(Reply::Thumbnails(batch))
+            })
+        }
+        Effect::ScrollTo { id, y } => iced::widget::operation::scroll_to(
+            iced::widget::Id::from(id),
+            iced::widget::operation::AbsoluteOffset {
+                x: None,
+                y: Some(y),
+            },
+        ),
         Effect::LoadSession { profile } => {
             let path = services.paths.session();
             blocking(
@@ -205,6 +299,110 @@ pub fn run(effect: Effect, services: &Arc<Services>, window: Option<window::Id>)
             iced::exit()
         }
     }
+}
+
+/// How long arriving thumbnails are gathered before they're handed over.
+const THUMB_BATCH: std::time::Duration = std::time::Duration::from_millis(100);
+/// Requests kept in flight (the core's `ThumbService` limits the real concurrency).
+const THUMB_IN_FLIGHT: usize = 12;
+
+/// One thumbnail, decoded off the UI thread at the width it's drawn, so iced has nothing to
+/// decode or scale (scrolling stays smooth while rows of them appear).
+async fn fetch_thumb(
+    service: Option<Arc<stash_core::thumbs::ThumbService>>,
+    key: ThumbKey,
+    width: u32,
+) -> (ThumbKey, Option<iced::widget::image::Handle>) {
+    let bytes = match service {
+        Some(t) => t.get("scene", &key.0, &key.1).await,
+        None => None,
+    };
+    let Some(bytes) = bytes.filter(|b| b.as_slice() != stash_core::thumbs::PLACEHOLDER) else {
+        return (key, None);
+    };
+    // A few at a time: decoding is CPU work, and the UI thread needs a core while rows scroll in.
+    static DECODES: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(3);
+    let Ok(_slot) = DECODES.acquire().await else {
+        return (key, None);
+    };
+    let decoded =
+        tokio::task::spawn_blocking(move || stash_core::thumbs::decode_rgba(&bytes, width)).await;
+    let handle = match decoded {
+        Ok(Ok((pixels, w, h))) => Some(iced::widget::image::Handle::from_rgba(w, h, pixels)),
+        Ok(Err(reason)) => {
+            tracing::debug!(%reason, "couldn't decode a thumbnail");
+            None
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "thumbnail decode failed");
+            None
+        }
+    };
+    (key, handle)
+}
+
+/// Thumbnails in page order, handed over at most every [`THUMB_BATCH`].
+fn thumbnail_batches(
+    services: Arc<Services>,
+    keys: Vec<ThumbKey>,
+    width: u32,
+) -> impl iced::futures::Stream<Item = Vec<(ThumbKey, Option<iced::widget::image::Handle>)>> {
+    iced::stream::channel(4, async move |mut out| {
+        use iced::futures::stream::FuturesUnordered;
+        use iced::futures::{SinkExt, StreamExt};
+        let service = services.thumbs();
+        let mut queue = keys.into_iter();
+        let mut pending = FuturesUnordered::new();
+        for key in queue.by_ref().take(THUMB_IN_FLIGHT) {
+            pending.push(fetch_thumb(service.clone(), key, width));
+        }
+        let mut batch = Vec::new();
+        let mut since: Option<std::time::Instant> = None;
+        loop {
+            let wait = since.map_or(THUMB_BATCH, |t| THUMB_BATCH.saturating_sub(t.elapsed()));
+            match tokio::time::timeout(wait, pending.next()).await {
+                Ok(Some(result)) => {
+                    if let Some(key) = queue.next() {
+                        pending.push(fetch_thumb(service.clone(), key, width));
+                    }
+                    batch.push(result);
+                    since.get_or_insert_with(std::time::Instant::now);
+                }
+                Ok(None) => {
+                    if !batch.is_empty() {
+                        let _ = out.send(std::mem::take(&mut batch)).await;
+                    }
+                    break;
+                }
+                Err(_) => {}
+            }
+            if since.is_some_and(|t| t.elapsed() >= THUMB_BATCH) && !batch.is_empty() {
+                if out.send(std::mem::take(&mut batch)).await.is_err() {
+                    break;
+                }
+                since = None;
+            }
+        }
+    })
+}
+
+/// A page of scenes through the current profile's cache (the demo's keys and policy).
+async fn scenes_page(
+    services: &Services,
+    query: SceneQuery,
+    page: u32,
+    size: u32,
+) -> Result<ScenePage, AppError> {
+    let key = page_key(&query, page, size);
+    services
+        .read_cached(&key, RefreshPolicy::Auto, false, move |client| {
+            let query = query.clone();
+            async move {
+                stash_core::adapter::scenes::find_scenes_page(&client, &query, page, size).await
+            }
+        })
+        .await
+        .map(|cached| cached.data)
 }
 
 fn save_session(path: &std::path::Path, profile: Uuid, session: &SavedSession) {

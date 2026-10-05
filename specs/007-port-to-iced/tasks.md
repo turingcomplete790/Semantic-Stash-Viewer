@@ -272,10 +272,10 @@ relaunch (spec US2, FR-006, FR-007).
 
 ### Tests for User Story 3
 
-- [ ] T033 [P] [US3] `native-ui/tests/scenes_keyboard.rs`: the grid's keyboard rules (arrows within
+- [X] T033 [P] [US3] `native-ui/tests/scenes_keyboard.rs`: the grid's keyboard rules (arrows within
   the page, edges to the previous or next page, Home/End, `[` `]`, Enter and Ctrl+Enter, list mode
   as one column), as a pure function in `native-ui/src/screens/scenes/keyboard.rs`.
-- [ ] T034 [P] [US3] `native-ui/tests/scenes.rs` (transition tests):
+- [X] T034 [P] [US3] `native-ui/tests/scenes.rs` (transition tests):
   - entering Scenes emits exactly one `LoadScenesPage`, and re-entering a ready page emits none;
   - a result with an old generation is dropped;
   - a page past the end shows the last page;
@@ -284,39 +284,39 @@ relaunch (spec US2, FR-006, FR-007).
   - page sizes are only 20, 40, 50, 60, 120, 250, 500, 1000 (default 50);
   - a ready page emits neighbour prefetch and next-page thumbnail effects;
   - offline with a cached page shows it, without one shows "unreachable".
-- [ ] T035 [P] [US3] `native-ui/tests/scenes_flows.rs` (`iced_test`, fixture pages): `]` / `[`
+- [X] T035 [P] [US3] `native-ui/tests/scenes_flows.rs` (`iced_test`, fixture pages): `]` / `[`
   change page; opening a card and going back returns the exact page, mode, and scroll.
 
 ### Implementation for User Story 3
 
-- [ ] T036 [US3] `native-ui/src/screens/scenes/state.rs`:
+- [X] T036 [US3] `native-ui/src/screens/scenes/state.rs`:
   - `ScenesState` (query, page ≥ 1, page_size, mode, scroll, focused; data `Loading { generation }
     | Ready { page, count, cards } | Unreachable`) and its transitions;
   - effects to `read_cached` the core's `find_scenes_page` (the core's cache keys), plus
     neighbour prefetch.
-- [ ] T037 [US3] `native-ui/src/screens/scenes/thumbs.rs`: the LRU of image handles keyed by scene
-  id and screenshot version, "at most 2,000"; the `LoadThumbnail` effect over `ThumbService`; one
+- [X] T037 [US3] `native-ui/src/screens/scenes/thumbs.rs`: the LRU of image handles keyed by scene
+  id and screenshot version, "at most 2,000" (1,200 after research R16); the `LoadThumbnail` effect over `ThumbService`; one
   placeholder; next-page warming.
-- [ ] T038 [US3] `native-ui/src/screens/scenes/grid.rs` and `card.rs`, designed fresh: responsive
+- [X] T038 [US3] `native-ui/src/screens/scenes/grid.rs` and `card.rs`, designed fresh: responsive
   columns with cards at least 240 px wide; a 16:9 thumbnail; one-line title and details; list rows;
   a visible focus ring; click opens, Ctrl+click and middle-click open in a new tab.
-- [ ] T039 [US3] `native-ui/src/screens/scenes/controls.rs`:
+- [X] T039 [US3] `native-ui/src/screens/scenes/controls.rs`:
   - page controls (position and total, first/previous/next/last, go to page, page size), above
     and below the grid;
   - the sort menu (the core's `SceneSort` labels, direction, random seed) and the grid/list
     toggle;
   - empty and unreachable states.
-- [ ] T040 [US3] `native-ui/src/measure/bench.rs`, Scenes and navigation rows per
+- [X] T040 [US3] `native-ui/src/measure/bench.rs`, Scenes and navigation rows per
   contracts/measurements.md:
   - `nav-first-paint`, `control-press`, `scroll-frame-time`;
   - `scenes-page-change`, with a 1 s glance between changes;
   - `scenes-page-jump`;
   - `scenes-scroll-1000-{grid,list}-cold` (thumbnails arriving) then cached;
   - frame timing from iced's per-frame events.
-- [ ] T041 [US3] *(Only if T040 shows SC-005 failing)* Row windowing in
+- [X] T041 [US3] *(Only if T040 shows SC-005 failing)* Row windowing in
   `native-ui/src/screens/scenes/grid.rs`: build the rows in view plus one screen each side, with
   spacers; re-measure.
-- [ ] T042 [US3] Write US3's rows in `capabilities.md`, run quickstart V3 with the user, and pass
+- [X] T042 [US3] Write US3's rows in `capabilities.md`, run quickstart V3 with the user, and pass
   the gate.
 
 **Checkpoint**: the 1000-card scroll meets its budget cold and cached; return-to-place is exact.

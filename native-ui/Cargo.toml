@@ -11,7 +11,7 @@ publish = false
 [dependencies]
 stash-core = { path = "../crates/stash-core" }
 player = { path = "../crates/player" }
-iced = { version = "0.14", features = ["wgpu", "image", "svg", "tokio", "advanced"] }
+iced = { version = "0.14", features = ["wgpu", "image", "svg", "tokio", "advanced", "lazy"] }
 tokio = { workspace = true }
 tokio-util = "0.7"
 serde = { workspace = true }
