@@ -250,6 +250,7 @@ pub fn view<'a>(state: &'a ScenesState, ctx: &Context<'a>, tab: TabId) -> Elemen
             .id(scroll_id(tab))
             .height(Length::Fill),
             ctx.layout.row_height(state.mode),
+            state.scroll,
             |y| msg(ScenesMsg::Scrolled { y }),
         )
         .auto_scroll(state.auto_scroll, |r| msg(ScenesMsg::AutoScrolled(r)))

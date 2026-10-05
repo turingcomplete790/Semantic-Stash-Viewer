@@ -1,15 +1,24 @@
-//! The session's playback region (007 data model "Session"): the 006 player around mpv. One
-//! player for the app; it outlives tab switches. Every command leaves as an effect.
+//! The session's playback region (007 data model "Session"; T049): the 006 player around mpv. One
+//! player for the app; it outlives tab switches. The tab that started it owns it: the player
+//! shows in that tab's scene, and a now-playing bar shows everywhere else. Every command leaves
+//! as an effect.
 
 use player::{PlayerSnapshot, PlayerStateKind};
 
 use crate::effects::{Effect, PlayerAction};
 use crate::player::controls::{key_action, Action};
 use crate::player::view::{Msg as ControlsMsg, PlayerScreen};
+use crate::shell::TabId;
 
 #[derive(Default)]
 pub struct Playback {
     pub screen: PlayerScreen,
+    /// The tab whose scene is playing.
+    pub owner: Option<TabId>,
+    /// The scene asked for (the snapshot carries it once mpv has it).
+    pub scene_id: Option<String>,
+    /// The current failure has been posted to the notification centre.
+    failure_posted: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -30,17 +39,55 @@ impl Playback {
         self.snapshot().state != PlayerStateKind::Idle
     }
 
+    /// Start `scene_id` for tab `owner`.
+    pub fn open(&mut self, scene_id: String, owner: TabId) -> Vec<Effect> {
+        self.owner = Some(owner);
+        self.scene_id = Some(scene_id.clone());
+        self.failure_posted = false;
+        vec![Effect::OpenScene(scene_id)]
+    }
+
+    /// The scene playing (or opening).
+    pub fn playing_scene(&self) -> Option<&str> {
+        self.snapshot()
+            .scene_id
+            .as_deref()
+            .or(self.scene_id.as_deref())
+    }
+
     pub fn update(&mut self, msg: Msg) -> Vec<Effect> {
         match msg {
             Msg::Snapshot(s) => {
                 let was_active = self.active();
                 let fullscreen = s.fullscreen;
+                let failure = (s.state == PlayerStateKind::Error)
+                    .then(|| (s.title.clone(), s.error.as_ref().map(ToString::to_string)));
                 self.screen.update(ControlsMsg::Snapshot(s));
-                // Playback stopped by any path: leave fullscreen (002 FR-007).
-                if was_active && !self.active() && fullscreen {
-                    return vec![Effect::SetFullscreen(false)];
+                let mut effects = Vec::new();
+                // A failure is shown on the player and posted once (US5's centre lists it).
+                match failure {
+                    Some((title, detail)) if !self.failure_posted => {
+                        self.failure_posted = true;
+                        effects.push(Effect::Notify {
+                            title: match title {
+                                Some(t) => format!("Couldn't play {t}"),
+                                None => "Couldn't play the scene".into(),
+                            },
+                            detail,
+                        });
+                    }
+                    Some(_) => {}
+                    None => self.failure_posted = false,
                 }
-                Vec::new()
+                if was_active && !self.active() {
+                    self.owner = None;
+                    self.scene_id = None;
+                    // Playback stopped by any path: leave fullscreen (002 FR-007).
+                    if fullscreen {
+                        effects.push(Effect::SetFullscreen(false));
+                    }
+                }
+                effects
             }
             Msg::Controls(m) => self.screen.update(m),
             Msg::Close => {

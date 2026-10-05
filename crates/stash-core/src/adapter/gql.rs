@@ -198,6 +198,40 @@ pub struct PlayableFileFields {
     pub size: Int64,
 }
 
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(graphql_type = "Performer")]
+pub struct PerformerName {
+    pub name: String,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(graphql_type = "Tag")]
+pub struct TagName {
+    pub name: String,
+}
+
+/// **Detail tier**: what the scene view shows (007 T048).
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(graphql_type = "Scene")]
+pub struct SceneDetailFields {
+    pub id: cynic::Id,
+    pub title: Option<String>,
+    pub code: Option<String>,
+    pub details: Option<String>,
+    pub director: Option<String>,
+    pub date: Option<String>,
+    pub rating100: Option<i32>,
+    #[cynic(rename = "play_count")]
+    pub play_count: Option<i32>,
+    #[cynic(rename = "o_counter")]
+    pub o_counter: Option<i32>,
+    pub files: Vec<PlayableFileFields>,
+    pub studio: Option<StudioName>,
+    pub performers: Vec<PerformerName>,
+    pub tags: Vec<TagName>,
+    pub paths: ScreenshotPath,
+}
+
 /// **Player tier**: what playback needs (the stream URL is built by the core, never read from
 /// Stash, whose `paths.stream` embeds the API key).
 #[derive(cynic::QueryFragment, Debug, Clone)]

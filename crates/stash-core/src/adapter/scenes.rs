@@ -3,9 +3,9 @@
 use cynic::QueryBuilder;
 
 use super::gql::{
-    schema, CriterionModifier, FindFilterType, PlayableSceneFields, ResolutionCriterionInput,
-    ResolutionEnum, SceneCardFields, SceneFilterType, SceneRowFields, SortDirectionEnum,
-    StringCriterionInput,
+    schema, CriterionModifier, FindFilterType, PlayableFileFields, PlayableSceneFields,
+    ResolutionCriterionInput, ResolutionEnum, SceneCardFields, SceneDetailFields, SceneFilterType,
+    SceneRowFields, SortDirectionEnum, StringCriterionInput,
 };
 use super::{endpoint, StashClient};
 use crate::error::AppError;
@@ -13,7 +13,7 @@ use crate::scenes::paging::{last_page, validate_page_size};
 use crate::scenes::query::{SceneQuery, SortDirection};
 use crate::scenes::{
     self, direct_stream_url, display_title, resolution, screenshot_version, thumb_url, SceneCard,
-    SceneFile, SceneGroup, SceneListItem, ScenePage,
+    SceneDetails, SceneFile, SceneGroup, SceneListItem, ScenePage,
 };
 
 // ---- Recent scenes: the 20 most recently added (002 FR-001) ------------------------------------
@@ -48,6 +48,15 @@ struct PlayableSceneVariables {
 struct PlayableScene {
     #[arguments(id: $id)]
     find_scene: Option<PlayableSceneFields>,
+}
+
+// ---- One scene for its view (detail tier) ------------------------------------------------------
+
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(graphql_type = "Query", variables = "PlayableSceneVariables")]
+struct SceneDetailsQuery {
+    #[arguments(id: $id)]
+    find_scene: Option<SceneDetailFields>,
 }
 
 // ---- One page of scene cards (card tier) ------------------------------------------------------
@@ -381,16 +390,58 @@ pub async fn playable_scene(
         title: display_title(scene.title.as_deref(), Some(&file.basename)),
         stream_url: direct_stream_url(client.base_url(), scene.id.inner()),
         duration_seconds: file.duration,
-        file: SceneFile {
-            container: Some(file.format).filter(|s| !s.is_empty()),
-            video_codec: Some(file.video_codec).filter(|s| !s.is_empty()),
-            audio_codec: Some(file.audio_codec).filter(|s| !s.is_empty()),
-            width: u32::try_from(file.width).ok().filter(|w| *w > 0),
-            height: u32::try_from(file.height).ok().filter(|h| *h > 0),
-            frame_rate: Some(file.frame_rate).filter(|f| *f > 0.0),
-            bit_rate: u64::try_from(file.bit_rate).ok().filter(|b| *b > 0),
-            size: u64::try_from(file.size.0).ok(),
-        },
+        file: scene_file(&file),
+        id: scene.id.into_inner(),
+    })
+}
+
+/// A file's technical facts.
+fn scene_file(file: &PlayableFileFields) -> SceneFile {
+    SceneFile {
+        container: Some(file.format.clone()).filter(|s| !s.is_empty()),
+        video_codec: Some(file.video_codec.clone()).filter(|s| !s.is_empty()),
+        audio_codec: Some(file.audio_codec.clone()).filter(|s| !s.is_empty()),
+        width: u32::try_from(file.width).ok().filter(|w| *w > 0),
+        height: u32::try_from(file.height).ok().filter(|h| *h > 0),
+        frame_rate: Some(file.frame_rate).filter(|f| *f > 0.0),
+        bit_rate: u64::try_from(file.bit_rate).ok().filter(|b| *b > 0),
+        size: u64::try_from(file.size.0).ok(),
+    }
+}
+
+/// One scene as its view shows it (007 T048). Read-only.
+pub async fn scene_details(client: &StashClient, id: &str) -> Result<SceneDetails, AppError> {
+    let data = client
+        .graphql(&SceneDetailsQuery::build(PlayableSceneVariables {
+            id: cynic::Id::new(id),
+        }))
+        .await?;
+    let scene = data
+        .find_scene
+        .ok_or_else(|| AppError::SceneNotFound { id: id.to_owned() })?;
+    let file = scene.files.first();
+    let text = |s: Option<String>| s.filter(|s| !s.trim().is_empty());
+    let count = |n: Option<i32>| n.and_then(|n| u32::try_from(n).ok()).unwrap_or(0);
+    Ok(SceneDetails {
+        title: display_title(scene.title.as_deref(), file.map(|f| f.basename.as_str())),
+        code: text(scene.code),
+        date: text(scene.date),
+        details: text(scene.details),
+        director: text(scene.director),
+        studio: scene.studio.map(|s| s.name),
+        performers: scene.performers.into_iter().map(|p| p.name).collect(),
+        tags: scene.tags.into_iter().map(|t| t.name).collect(),
+        rating100: scene.rating100.and_then(|r| u8::try_from(r).ok()),
+        play_count: count(scene.play_count),
+        o_count: count(scene.o_counter),
+        duration_seconds: file.map(|f| f.duration),
+        file_name: file.map(|f| f.basename.clone()),
+        file: file.map(scene_file),
+        cover_version: scene
+            .paths
+            .screenshot
+            .as_deref()
+            .map_or_else(|| "0".to_owned(), screenshot_version),
         id: scene.id.into_inner(),
     })
 }

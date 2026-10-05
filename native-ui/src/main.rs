@@ -1,5 +1,4 @@
-//! Native UI spike (006): a second build of the viewer drawn with iced instead of a webview. It
-//! reuses `stash-core` and `player` directly; the web build is untouched (FR-001).
+//! Semantic Stash Viewer, drawn with iced (007). It reuses `stash-core` and `player` directly.
 
 use std::sync::OnceLock;
 
@@ -12,12 +11,9 @@ static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 fn main() -> iced::Result {
     measure::record_start();
     measure::install_panic_hook();
-    // The video path imports frames into wgpu's Vulkan device (research R1); the GL fallback
-    // sets `WGPU_BACKEND=gl` explicitly.
-    if std::env::var_os("WGPU_BACKEND").is_none() {
-        // SAFETY: single-threaded here; nothing else reads the environment yet.
-        unsafe { std::env::set_var("WGPU_BACKEND", "vulkan") };
-    }
+    // The video path needs wgpu on Vulkan (research R1), which it prefers on Linux; `cargo run`
+    // and the harness pin it with `WGPU_BACKEND=vulkan` (007 T045). If anything else is chosen,
+    // the player screen says the video path is unavailable.
 
     let Some(paths) = services::Paths::resolve() else {
         eprintln!("can't find the home directory");

@@ -88,6 +88,21 @@ pub enum Effect {
         keys: Vec<ThumbKey>,
         width: u32,
     },
+    /// Read a scene's details through the cache, for the Scene screen in `tab`.
+    LoadSceneDetails {
+        tab: TabId,
+        id: String,
+    },
+    /// Read a scene's cover (its screenshot) through the cache.
+    LoadCover {
+        tab: TabId,
+        id: String,
+    },
+    /// Post to the notification centre (a playback failure).
+    Notify {
+        title: String,
+        detail: Option<String>,
+    },
     /// Scroll a scrollable to `y`.
     ScrollTo {
         id: String,
@@ -119,6 +134,11 @@ pub enum Effect {
     Player(PlayerAction),
     /// Stop playback and the video path, then leave the app.
     Quit,
+    /// The measurement's close-while-playing run: step `n` after a while.
+    MeasureStep {
+        n: u8,
+        after: std::time::Duration,
+    },
 }
 
 /// The result of an effect that reports back.
@@ -139,6 +159,17 @@ pub enum Reply {
     },
     /// Thumbnails that arrived, decoded (`None`: the core had nothing for that scene).
     Thumbnails(Vec<(ThumbKey, Option<iced::widget::image::Handle>)>),
+    SceneDetails {
+        tab: TabId,
+        id: String,
+        /// Boxed: details are large next to the other replies.
+        result: Box<Result<stash_core::scenes::SceneDetails, AppError>>,
+    },
+    Cover {
+        tab: TabId,
+        id: String,
+        cover: Option<iced::widget::image::Handle>,
+    },
     /// Thumbnails worth having before they're shown (the next page's).
     Warm(Vec<ThumbKey>),
     SessionLoaded {
@@ -233,6 +264,55 @@ pub fn run(effect: Effect, services: &Arc<Services>, window: Option<window::Id>)
                 Message::Reply(Reply::Thumbnails(batch))
             })
         }
+        Effect::LoadSceneDetails { tab, id } => {
+            let services = Arc::clone(services);
+            Task::perform(
+                async move {
+                    let key = format!("scene:details:{id}");
+                    let wanted = id.clone();
+                    let result =
+                        services
+                            .read_cached(&key, RefreshPolicy::Auto, false, move |client| {
+                                let id = wanted.clone();
+                                async move {
+                                    stash_core::adapter::scenes::scene_details(&client, &id).await
+                                }
+                            })
+                            .await
+                            .map(|cached| cached.data);
+                    (id, Box::new(result))
+                },
+                move |(id, result)| Message::Reply(Reply::SceneDetails { tab, id, result }),
+            )
+        }
+        Effect::LoadCover { tab, id } => {
+            let services = Arc::clone(services);
+            Task::perform(
+                async move {
+                    let cover = services
+                        .scene_cover(&id)
+                        .await
+                        .map(iced::widget::image::Handle::from_bytes);
+                    (id, cover)
+                },
+                move |(id, cover)| Message::Reply(Reply::Cover { tab, id, cover }),
+            )
+        }
+        Effect::Notify { title, detail } => {
+            services
+                .notifications
+                .post(stash_core::shell::notifications::NewNotification {
+                    key: None,
+                    profile_id: services.current_profile(),
+                    kind: stash_core::shell::notifications::NotificationKind::Playback,
+                    severity: stash_core::shell::notifications::Severity::Error,
+                    title,
+                    detail,
+                    toast: true,
+                    job: None,
+                });
+            Task::none()
+        }
         Effect::ScrollTo { id, y } => iced::widget::operation::scroll_to(
             iced::widget::Id::from(id),
             iced::widget::operation::AbsoluteOffset {
@@ -291,6 +371,9 @@ pub fn run(effect: Effect, services: &Arc<Services>, window: Option<window::Id>)
                 player_command(p, action);
             }
             Task::none()
+        }
+        Effect::MeasureStep { n, after } => {
+            Task::perform(tokio::time::sleep(after), move |()| Message::MeasureStep(n))
         }
         Effect::Quit => {
             if let Some(p) = &services.player {

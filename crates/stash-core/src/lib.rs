@@ -3,6 +3,9 @@
 //! Everything that talks to Stash, and all connection and profile logic, lives here.
 //! This crate must never depend on Tauri (constitution Principle III).
 
+// No unsafe code in the core (constitution C4).
+#![forbid(unsafe_code)]
+
 pub mod adapter;
 pub mod cache;
 pub mod connection;

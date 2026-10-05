@@ -317,6 +317,32 @@ impl Services {
         Ok(scene)
     }
 
+    /// A scene's cover (its screenshot or uploaded cover) through the current profile's cache
+    /// (`cover:<id>`); `None` when Stash has none or it can't be read. Read-only.
+    pub async fn scene_cover(&self, id: &str) -> Option<Vec<u8>> {
+        let key = format!("cover:{id}");
+        let refresher = self
+            .current_profile()
+            .and_then(|profile| self.caches.for_profile(profile));
+        if let Some(bytes) = refresher
+            .as_ref()
+            .and_then(|r| lock(r.cache()).get_bytes(&key))
+        {
+            return Some(bytes);
+        }
+        let (client, _, _) = self.active_client().ok()?;
+        let (bytes, _type) = stash_core::adapter::scenes::scene_screenshot_bytes(&client, id)
+            .await
+            .ok()
+            .flatten()?;
+        if let Some(r) = refresher {
+            if let Err(e) = lock(r.cache()).put_bytes(&key, &bytes) {
+                tracing::warn!(error = %e, "couldn't cache a cover");
+            }
+        }
+        Some(bytes)
+    }
+
     /// The current profile's thumbnail service (one per profile, so its concurrency limit covers
     /// every request).
     pub fn thumbs(self: &Arc<Self>) -> Option<Arc<ThumbService>> {

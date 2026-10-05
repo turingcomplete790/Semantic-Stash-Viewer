@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use gtk::glib;
 use gtk::prelude::*;
-use player::{Player, Renderer};
+use player::{OwnedRenderer, Player};
 
 use super::egl;
 
@@ -84,7 +84,7 @@ pub fn build(player: Arc<Player>) -> gtk::GLArea {
     area.set_hexpand(true);
     area.set_vexpand(true);
 
-    let renderer: Rc<RefCell<Option<Renderer>>> = Rc::new(RefCell::new(None));
+    let renderer: Rc<RefCell<Option<OwnedRenderer>>> = Rc::new(RefCell::new(None));
 
     {
         let renderer = Rc::clone(&renderer);
@@ -98,9 +98,14 @@ pub fn build(player: Arc<Player>) -> gtk::GLArea {
             egl::init(&display);
             gl::load_with(|name| egl::get_proc_address(name).cast_const());
 
-            // SAFETY: the Wayland display outlives the app window and so the renderer.
+            // SAFETY: the area's context is current here and in every callback that renders;
+            // the Wayland display outlives the app window and so the renderer.
             let created = unsafe {
-                player.create_renderer(egl::get_proc_address, egl::wayland_display(&display))
+                OwnedRenderer::create(
+                    &player,
+                    egl::get_proc_address,
+                    egl::wayland_display(&display),
+                )
             };
             match created {
                 Ok(mut r) => {

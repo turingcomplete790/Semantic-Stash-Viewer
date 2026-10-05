@@ -131,6 +131,9 @@ lost, not as a design to copy.
 - [ ] Home page with configurable rows (recently added, recently played, saved filters)
 - [ ] Global search across entity types
 - [ ] Keyboard navigation throughout; groundwork for a 10-foot (remote/controller) mode
+- [ ] Adjustable panel sizes: drag the dividers between panels (e.g. the scene view's picture and
+      its details side panel) and keep the sizes per view; the defaults use the width of
+      widescreen displays (side panels rather than stacked ones)
 
 **Exit criteria:** every entity type can be browsed, filtered, and opened. Scenes play in mpv
 and resume state syncs back. Principle VI's budgets are met on a large library.

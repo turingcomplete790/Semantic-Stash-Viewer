@@ -77,6 +77,8 @@ pub enum ShellMsg {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Up {
     Play(String),
+    /// A tab was closed (playback it owned stops).
+    Closed(TabId),
     ServerMenu,
     Notifications,
     KeyboardHelp,
@@ -183,6 +185,17 @@ impl Shell {
         }
     }
 
+    /// Close a tab, telling the session which (unless it's the last, which stays).
+    fn close_tab(&mut self, id: TabId) -> Step<Up> {
+        match self.index_of(id) {
+            Some(i) if self.tabs.len() > 1 => Step {
+                effects: self.close(i),
+                up: Some(Up::Closed(id)),
+            },
+            _ => Step::none(),
+        }
+    }
+
     fn move_by(&mut self, delta: isize) {
         let to = self.selected as isize + delta;
         if to < 0 || to as usize >= self.tabs.len() {
@@ -201,11 +214,8 @@ impl Shell {
             ShellMsg::Back => self.active_mut().back(),
             ShellMsg::Forward => self.active_mut().forward(),
             ShellMsg::NewTab => self.new_tab(len, Screen::home()),
-            ShellMsg::Close(id) => match self.index_of(id) {
-                Some(i) => self.close(i),
-                None => Vec::new(),
-            },
-            ShellMsg::CloseActive => self.close(self.selected),
+            ShellMsg::Close(id) => return self.close_tab(id),
+            ShellMsg::CloseActive => return self.close_tab(self.active().id),
             ShellMsg::Select(id) => match self.index_of(id) {
                 Some(i) => self.select(i),
                 None => Vec::new(),
@@ -272,6 +282,41 @@ impl Shell {
             })
             .map(|state| state.page_loaded(generation, result, waiting))
             .unwrap_or_default()
+    }
+
+    /// A scene's details arrived for tab `tab`.
+    pub fn scene_details(
+        &mut self,
+        tab: TabId,
+        id: &str,
+        result: Result<stash_core::scenes::SceneDetails, AppError>,
+    ) {
+        if let Some(state) = self.scene_in(tab, id) {
+            state.details_loaded(result);
+        }
+    }
+
+    /// A scene's cover arrived for tab `tab`.
+    pub fn scene_cover(
+        &mut self,
+        tab: TabId,
+        id: &str,
+        cover: Option<iced::widget::image::Handle>,
+    ) {
+        if let Some(state) = self.scene_in(tab, id) {
+            state.cover_loaded(cover);
+        }
+    }
+
+    fn scene_in(&mut self, tab: TabId, id: &str) -> Option<&mut crate::screens::SceneState> {
+        let i = self.index_of(tab)?;
+        self.tabs[i]
+            .history
+            .iter_mut()
+            .find_map(|screen| match screen {
+                Screen::Scene(s) if s.scene_id == id => Some(s),
+                _ => None,
+            })
     }
 
     /// Cached data changed (`*`: all of it): the active screen re-reads in place.

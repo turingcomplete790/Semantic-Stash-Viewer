@@ -67,6 +67,10 @@ pub enum Msg {
     CacheChanged(String),
     /// The window's size changed.
     Layout(Layout),
+    /// The now-playing bar: go to the playing scene's tab.
+    BackToScene,
+    /// The mouse's back (`true`) or forward button.
+    MouseHistory(bool),
 }
 
 /// Events for the app.
@@ -124,6 +128,61 @@ impl Session {
         })
     }
 
+    /// Leaving this session (quit or a server switch): save its tabs and stop playback.
+    pub fn leave(&self) -> Vec<Effect> {
+        let mut effects: Vec<Effect> = self.save_now().into_iter().collect();
+        if self.playback.active() {
+            effects.extend(self.playback_close());
+        }
+        effects
+    }
+
+    fn playback_close(&self) -> Vec<Effect> {
+        let mut effects = vec![Effect::Player(crate::effects::PlayerAction::Close)];
+        if self.playback.snapshot().fullscreen {
+            effects.push(Effect::SetFullscreen(false));
+        }
+        effects
+    }
+
+    /// Whether the player is on screen: fullscreen, or the owner tab showing the playing scene.
+    pub fn player_visible(&self) -> bool {
+        if !self.playback.active() {
+            return false;
+        }
+        if self.playback.snapshot().fullscreen {
+            return true;
+        }
+        let tab = self.shell.active();
+        self.playback.owner == Some(tab.id)
+            && matches!(
+                tab.current(),
+                crate::screens::Screen::Scene(s)
+                    if Some(s.scene_id.as_str()) == self.playback.playing_scene()
+            )
+    }
+
+    /// Whether the now-playing bar shows (something plays, out of sight).
+    pub fn now_playing(&self) -> bool {
+        self.playback.active() && !self.player_visible()
+    }
+
+    fn back_to_scene(&mut self) -> Step<Up> {
+        let (Some(owner), Some(id)) = (
+            self.playback.owner,
+            self.playback.playing_scene().map(str::to_owned),
+        ) else {
+            return Step::none();
+        };
+        let mut step = self.shell(ShellMsg::Select(owner));
+        if !self.player_visible() {
+            // The owner tab moved on from the scene: open it there again.
+            let more = self.shell(ShellMsg::Open(crate::screens::Screen::scene(&id, "")));
+            step.effects.extend(more.effects);
+        }
+        step
+    }
+
     fn unreachable(&self) -> bool {
         matches!(
             self.connection.snapshot.state,
@@ -177,7 +236,17 @@ impl Session {
     fn shell_up(&mut self, step: Step<Up>, up: Option<shell_mod::Up>) -> Step<Up> {
         match up {
             None => step,
-            Some(shell_mod::Up::Play(id)) => step.with(Effect::OpenScene(id)),
+            Some(shell_mod::Up::Play(id)) => {
+                let owner = self.shell.active().id;
+                step.with_all(self.playback.open(id, owner))
+            }
+            Some(shell_mod::Up::Closed(tab)) => {
+                if self.playback.active() && self.playback.owner == Some(tab) {
+                    step.with_all(self.playback_close())
+                } else {
+                    step
+                }
+            }
             Some(shell_mod::Up::ServerMenu) => {
                 self.overlay = Overlay::ServerMenu;
                 step.with(Effect::LoadProfiles)
@@ -198,15 +267,18 @@ impl Session {
             }
             return Step::none();
         }
-        if self.playback.active() {
-            // The player is the innermost level and owns the window while it's open.
+        if self.player_visible() {
+            // The player is the innermost level while it's on screen (002's keys); keys it
+            // doesn't bind fall through to the shell.
             let plain = !mods.control() && !mods.alt() && !mods.logo();
             if plain {
                 if let Some(effects) = self.playback.key(key) {
                     return Step::effects(effects);
                 }
             }
-            return Step::none();
+            if self.playback.snapshot().fullscreen {
+                return Step::none();
+            }
         }
         if let Some(Step { mut effects, up }) = self.shell.screen_key(key, mods) {
             effects.extend(self.thumbnails());
@@ -330,6 +402,32 @@ impl Session {
             Msg::SceneOpened(Ok(())) => Step::none(),
             Msg::SceneOpened(Err(e)) => {
                 tracing::warn!(error = %e, "couldn't open the scene");
+                let m = crate::messages::for_error(&e);
+                Step::effect(Effect::Notify {
+                    title: m.title,
+                    detail: Some(m.detail),
+                })
+            }
+            Msg::BackToScene => self.back_to_scene(),
+            Msg::MouseHistory(back) => {
+                if self.overlay != Overlay::None
+                    || (self.playback.active() && self.playback.snapshot().fullscreen)
+                {
+                    Step::none()
+                } else {
+                    self.shell(if back {
+                        ShellMsg::Back
+                    } else {
+                        ShellMsg::Forward
+                    })
+                }
+            }
+            Msg::Reply(Reply::SceneDetails { tab, id, result }) => {
+                self.shell.scene_details(tab, &id, *result);
+                Step::none()
+            }
+            Msg::Reply(Reply::Cover { tab, id, cover }) => {
+                self.shell.scene_cover(tab, &id, cover);
                 Step::none()
             }
             Msg::AddServer(m) => {
@@ -439,33 +537,98 @@ impl Session {
         }
     }
 
+    /// Title, play/pause, back to the scene, and close, while the player is out of sight.
+    fn now_playing_bar(&self) -> Element<'_, Msg> {
+        let snap = self.playback.snapshot();
+        let title = snap.title.clone().unwrap_or_else(|| "Playing".into());
+        let state = match snap.state {
+            player::PlayerStateKind::Loading => "Opening…",
+            player::PlayerStateKind::Paused => "Paused",
+            player::PlayerStateKind::Ended => "Ended",
+            player::PlayerStateKind::Error => "Couldn't play",
+            _ => "Playing",
+        };
+        let toggle = crate::widgets::icon_button(
+            if snap.paused {
+                crate::widgets::Icon::Play
+            } else {
+                crate::widgets::Icon::Pause
+            },
+            18.0,
+            Some(Msg::Playback(playback::Msg::Controls(
+                crate::player::view::Msg::TogglePause,
+            ))),
+        );
+        container(
+            iced::widget::row![
+                toggle,
+                crate::widgets::one_line(title, 14.0),
+                text(state).size(12).color(theme::MUTED),
+                button(text("Back to scene").size(13))
+                    .style(theme::chip)
+                    .padding([4, 12])
+                    .on_press(Msg::BackToScene),
+                crate::widgets::icon_button(
+                    crate::widgets::Icon::Close,
+                    16.0,
+                    Some(Msg::Playback(playback::Msg::Close)),
+                ),
+            ]
+            .spacing(12)
+            .padding([6, 12])
+            .align_y(iced::Alignment::Center),
+        )
+        .style(theme::bar)
+        .width(iced::Length::Fill)
+        .into()
+    }
+
     pub fn view<'a>(
         &'a self,
         video: Option<&'a Arc<Shared>>,
         video_error: Option<String>,
     ) -> Element<'a, Msg> {
-        let base: Element<'a, Msg> = if self.playback.active() {
+        let player = || {
             self.playback.screen.view(
                 video,
-                video_error,
+                video_error.clone(),
                 |m| Msg::Playback(playback::Msg::Controls(m)),
                 Msg::Playback(playback::Msg::Close),
                 Msg::Playback(playback::Msg::ToggleFullscreen),
             )
-        } else {
-            let indicator = self
-                .connection
-                .indicator(&self.profile.display_name, ShellMsg::ServerMenu);
-            let ctx = Context {
-                profile: &self.profile,
-                connection: &self.connection,
-                thumbs: &self.thumbs,
-                layout: self.shell.layout,
-            };
-            let page: Element<'a, ShellMsg> =
-                column![self.shell.chrome(indicator), self.shell.content(&ctx)].into();
-            page.map(Msg::Shell)
         };
+        let base: Element<'a, Msg> =
+            if self.playback.active() && self.playback.snapshot().fullscreen {
+                player()
+            } else {
+                let indicator = self
+                    .connection
+                    .indicator(&self.profile.display_name, ShellMsg::ServerMenu);
+                let chrome: Element<'a, Msg> = self.shell.chrome(indicator).map(Msg::Shell);
+                let content: Element<'a, Msg> = match self.shell.active().current() {
+                    crate::screens::Screen::Scene(scene) if self.player_visible() => {
+                        crate::screens::scene::layout(
+                            player(),
+                            scene.details_view().map(Msg::Shell),
+                            &self.shell.layout,
+                        )
+                    }
+                    _ => {
+                        let ctx = Context {
+                            profile: &self.profile,
+                            connection: &self.connection,
+                            thumbs: &self.thumbs,
+                            layout: self.shell.layout,
+                        };
+                        self.shell.content(&ctx).map(Msg::Shell)
+                    }
+                };
+                let mut page = column![chrome, content];
+                if self.now_playing() {
+                    page = page.push(self.now_playing_bar());
+                }
+                page.into()
+            };
         let overlay: Option<Element<'a, Msg>> = match &self.overlay {
             Overlay::None => None,
             Overlay::KeyboardHelp => Some(overlays::keyboard_help().map(Msg::Overlay)),

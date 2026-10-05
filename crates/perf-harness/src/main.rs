@@ -258,6 +258,11 @@ fn launch(app: &Path, base: &[(&str, String)], extra: &[(&str, &str)]) -> Result
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .stdin(Stdio::null());
+    // The native app's video path needs wgpu on Vulkan (it doesn't set its own environment);
+    // an explicit choice in the harness's environment wins.
+    if std::env::var_os("WGPU_BACKEND").is_none() {
+        command.env("WGPU_BACKEND", "vulkan");
+    }
     for (k, v) in base {
         command.env(k, v);
     }

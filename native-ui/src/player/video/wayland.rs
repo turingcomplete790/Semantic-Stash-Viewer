@@ -21,21 +21,24 @@ impl WaylandConnection {
     /// Connect to the session's compositor, if this is a Wayland session.
     pub fn connect() -> Option<Self> {
         std::env::var_os("WAYLAND_DISPLAY")?;
-        // SAFETY: loads the system libwayland-client; the two symbols have these C signatures.
-        unsafe {
-            let lib = libloading::Library::new("libwayland-client.so.0").ok()?;
-            let connect: Connect = *lib.get::<Connect>(b"wl_display_connect\0").ok()?;
-            let disconnect: Disconnect = *lib.get::<Disconnect>(b"wl_display_disconnect\0").ok()?;
-            let display = connect(std::ptr::null());
-            if display.is_null() {
-                return None;
-            }
-            Some(Self {
-                display,
-                disconnect,
-                _lib: lib,
-            })
+        // SAFETY: loads the system libwayland-client, whose initialisers have no preconditions.
+        let lib = unsafe { libloading::Library::new("libwayland-client.so.0") }.ok()?;
+        // SAFETY: `wl_display_connect` has this C signature.
+        let connect: Connect = *unsafe { lib.get::<Connect>(b"wl_display_connect\0") }.ok()?;
+        // SAFETY: `wl_display_disconnect` has this C signature.
+        let disconnect: Disconnect =
+            *unsafe { lib.get::<Disconnect>(b"wl_display_disconnect\0") }.ok()?;
+        // SAFETY: a null name means "the default display" (`$WAYLAND_DISPLAY`); `lib` stays
+        // loaded while the function pointers are used (it's kept in `Self`).
+        let display = unsafe { connect(std::ptr::null()) };
+        if display.is_null() {
+            return None;
         }
+        Some(Self {
+            display,
+            disconnect,
+            _lib: lib,
+        })
     }
 
     pub fn as_ptr(&self) -> *mut c_void {
@@ -45,7 +48,8 @@ impl WaylandConnection {
 
 impl Drop for WaylandConnection {
     fn drop(&mut self) {
-        // SAFETY: a display returned by `wl_display_connect`, disconnected once.
+        // SAFETY: a display returned by `wl_display_connect`, disconnected once; the library is
+        // still loaded (`_lib` drops after this).
         unsafe { (self.disconnect)(self.display) };
     }
 }

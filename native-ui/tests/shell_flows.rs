@@ -183,4 +183,14 @@ mod session_level {
         assert_eq!(s.shell.active().current().title(), "Settings");
         assert!(s.save_now().is_some());
     }
+
+    #[test]
+    fn the_mouse_back_and_forward_buttons_move_through_history() {
+        let mut s = ready();
+        let _ = s.update(Msg::Shell(ShellMsg::Section(Section::Scenes)));
+        let _ = s.update(Msg::MouseHistory(true));
+        assert_eq!(s.shell.active().current().title(), "Home");
+        let _ = s.update(Msg::MouseHistory(false));
+        assert_eq!(s.shell.active().current().title(), "Scenes");
+    }
 }

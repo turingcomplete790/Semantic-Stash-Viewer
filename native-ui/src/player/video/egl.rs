@@ -38,17 +38,22 @@ pub fn get_proc_address(name: &str) -> *mut c_void {
 }
 
 /// A current, surfaceless GL context. Dropping it releases and destroys the context.
+///
+/// Not `Send`: it's made current on the thread that creates it, and GL objects made in it are
+/// freed (on drop) assuming it's still current there.
 pub struct SideContext {
     egl: &'static Egl,
     pub display: egl::Display,
     context: egl::Context,
+    _not_send: std::marker::PhantomData<*const ()>,
 }
 
 impl SideContext {
     /// Create the context and make it current on this thread.
     pub fn new() -> Result<Self, VideoError> {
         let egl = instance()?;
-        // SAFETY: the surfaceless platform takes no native display.
+        // SAFETY: the surfaceless platform takes no native display (null), and the attribute list
+        // is terminated.
         let display = unsafe {
             egl.get_platform_display(
                 PLATFORM_SURFACELESS_MESA,
@@ -85,7 +90,8 @@ impl SideContext {
             CORE_PROFILE_BIT,
             egl::NONE,
         ];
-        // SAFETY: EGL_NO_CONFIG_KHR (null) is valid with EGL_KHR_no_config_context, checked above.
+        // SAFETY: EGL_NO_CONFIG_KHR (null) is valid with EGL_KHR_no_config_context, checked
+        // above.
         let no_config = unsafe { egl::Config::from_ptr(std::ptr::null_mut()) };
         let context = egl
             .create_context(display, no_config, None, &attribs)
@@ -98,6 +104,7 @@ impl SideContext {
             egl,
             display,
             context,
+            _not_send: std::marker::PhantomData,
         })
     }
 
@@ -112,5 +119,48 @@ impl Drop for SideContext {
         let _ = self.egl.destroy_context(self.display, self.context);
         // The display is left initialised: libEGL shares it per process, and terminating it here
         // would pull it from under any other user (it's released at exit).
+    }
+}
+
+/// Where mpv renders (007 T044): the side GL context, current on the render thread, and mpv's
+/// own Wayland connection for VA-API. A renderer made here borrows it, so it can't outlive the
+/// context or the connection.
+pub struct RenderTarget {
+    ctx: SideContext,
+    wayland: Option<super::wayland::WaylandConnection>,
+}
+
+impl RenderTarget {
+    /// Create the context (current on this thread from now on) and connect to Wayland.
+    pub fn new() -> Result<Self, VideoError> {
+        let ctx = SideContext::new()?;
+        let wayland = super::wayland::WaylandConnection::connect();
+        if wayland.is_none() {
+            tracing::warn!("no Wayland connection for mpv; hardware decoding may copy frames");
+        }
+        Ok(Self { ctx, wayland })
+    }
+
+    pub fn context(&self) -> &SideContext {
+        &self.ctx
+    }
+
+    /// mpv's render context, drawing with this target.
+    pub fn create_renderer<'a>(
+        &'a self,
+        owner: &'a player::RenderOwner,
+    ) -> Result<player::Renderer<'a>, VideoError> {
+        // SAFETY: the side context was made current on this thread in `new` and stays current
+        // (nothing else is made current here, and it isn't `Send`), and the renderer borrows
+        // `self`, so it's only used while the context and the Wayland display it was given live.
+        unsafe {
+            owner.create_renderer(
+                get_proc_address,
+                self.wayland
+                    .as_ref()
+                    .map(super::wayland::WaylandConnection::as_ptr),
+            )
+        }
+        .map_err(|e| VideoError::Player(e.to_string()))
     }
 }

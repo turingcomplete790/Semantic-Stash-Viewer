@@ -332,17 +332,17 @@ unsafe-code gate (spec US4, FR-009, FR-014).
 
 ### Hardening first (research R11)
 
-- [ ] T043 [US4] `crates/player/src/render.rs` and `session.rs`: give `Mpv` an owner that outlives
+- [X] T043 [US4] `crates/player/src/render.rs` and `session.rs`: give `Mpv` an owner that outlives
   every render context, so `RenderContext` borrows it without the `transmute` to `'static`. Keep
   `create_renderer`'s preconditions documented under `# Safety`. The player's tests pass.
-- [ ] T044 [US4] `native-ui/src/player/video/`:
+- [X] T044 [US4] `native-ui/src/player/video/`:
   - owning types with `Drop` for the EGL image, GL texture and framebuffer, and exported Vulkan
     image, grouped in a per-generation frame set freed together on the render thread;
   - a `RenderTarget` (side context plus Wayland connection) that `create_renderer` takes by
     reference;
   - `vk_frames.rs`'s large block split into one-purpose functions with one unsafe operation per
     block and a `// SAFETY:` note on each.
-- [ ] T045 [US4] Lints:
+- [X] T045 [US4] Lints:
   - `#![forbid(unsafe_code)]` in `crates/stash-core/src/lib.rs`;
   - deny `clippy::undocumented_unsafe_blocks`, `clippy::multiple_unsafe_ops_per_block`, and
     `unsafe_op_in_unsafe_fn` in `native-ui` and `player`;
@@ -352,7 +352,7 @@ unsafe-code gate (spec US4, FR-009, FR-014).
 
 ### Tests for User Story 4
 
-- [ ] T046 [P] [US4] `native-ui/tests/playback.rs` (transition tests):
+- [X] T046 [P] [US4] `native-ui/tests/playback.rs` (transition tests):
   - `OpenScene` → `Opening` → `Playing`, with the owner tab recorded;
   - switching tabs keeps `Playing` and shows the now-playing bar elsewhere;
   - closing the owner tab closes the player;
@@ -362,23 +362,23 @@ unsafe-code gate (spec US4, FR-009, FR-014).
   - a server switch closes playback.
 
   006's `tests/controls.rs` and `tests/video_slots.rs` stay.
-- [ ] T047 [P] [US4] `native-ui/tests/scene.rs` (transition tests): entering a Scene emits
+- [X] T047 [P] [US4] `native-ui/tests/scene.rs` (transition tests): entering a Scene emits
   `LoadSceneDetails`; a restored tab shows its title before details arrive; Play emits
   `OpenScene`; a details failure shows its message.
 
 ### Implementation for User Story 4
 
-- [ ] T048 [US4] `native-ui/src/screens/scene.rs`, designed fresh: title, cover (the core's
+- [X] T048 [US4] `native-ui/src/screens/scene.rs`, designed fresh: title, cover (the core's
   screenshot through the cache), details, Play; the player view embedded when this tab owns
   playback.
-- [ ] T049 [US4] `native-ui/src/session/playback.rs`: the playback region around 006's
+- [X] T049 [US4] `native-ui/src/session/playback.rs`: the playback region around 006's
   `PlayerScreen`. The video widget is in the tree only in the owner tab's active screen; the
   now-playing bar (title, play/pause, back to the scene) appears in other tabs; fullscreen is a
   sub-state.
-- [ ] T050 [US4] `native-ui/src/measure/bench.rs`: `tab-switch-20-tabs` (with `videoSized`),
+- [X] T050 [US4] `native-ui/src/measure/bench.rs`: `tab-switch-20-tabs` (with `videoSized`),
   `now-playing-appears`, and `back-to-scene`. The playback run (006) still reports `rendered_fps`
   and `displayed_fps`.
-- [ ] T051 [US4] Write US4's rows in `capabilities.md`, run quickstart V4 with the user (every
+- [X] T051 [US4] Write US4's rows in `capabilities.md`, run quickstart V4 with the user (every
   codec, every control and key), and pass the gate with the new lints.
 
 **Checkpoint**: playback works from the grid inside the shell; the video path meets the unsafe-code

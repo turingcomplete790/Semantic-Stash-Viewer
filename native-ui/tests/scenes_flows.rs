@@ -142,6 +142,10 @@ fn opening_a_card_and_going_back_returns_the_exact_place() {
             ),
         };
         let mut ui = simulator(s.shell.content(&ctx));
+        // Let the grid settle first (its first event restores the remembered scroll).
+        let _ = ui.simulate([iced::Event::Mouse(iced::mouse::Event::CursorMoved {
+            position: iced::Point::new(10.0, 10.0),
+        })]);
         ui.click("Scene 3").expect("the card is on screen");
         ui.into_messages().collect()
     };
@@ -180,4 +184,40 @@ fn ctrl_click_opens_in_a_new_tab() {
         "Scenes",
         "the grid stays in its tab"
     );
+}
+
+#[test]
+fn a_rebuilt_grid_starts_where_its_state_says() {
+    // Going back from a scene rebuilds the grid; the scrollable must start at the remembered
+    // position, or the rows built around it sit below an empty band (the hole V4 found).
+    let mut s = session_on_scenes();
+    let _ = s.update(Msg::Shell(ShellMsg::Scenes(ScenesMsg::Mode(Mode::List))));
+    let _ = s.update(Msg::Shell(ShellMsg::Scenes(ScenesMsg::Scrolled {
+        y: 2000.0,
+    })));
+    let layout = semantic_stash_viewer_native::screens::scenes::layout::Layout::new(1100.0, 900.0);
+    s.shell.layout = layout;
+    let thumbs = Thumbs::default();
+    let connection = Connection::default();
+    let ctx = Context {
+        profile: &s.profile,
+        connection: &connection,
+        thumbs: &thumbs,
+        layout,
+    };
+    let mut ui = iced_test::simulator::Simulator::with_size(
+        iced::Settings::default(),
+        (1100.0, 760.0),
+        s.shell.content(&ctx),
+    );
+    // Any event lets the grid settle (the first one restores the position).
+    ui.point_at(iced::Point::new(500.0, 400.0));
+    let _ = ui.simulate([iced::Event::Mouse(iced::mouse::Event::CursorMoved {
+        position: iced::Point::new(500.0, 400.0),
+    })]);
+    // Row 2000 / 82 ≈ 24: scene 26 is in view, scene 1 isn't.
+    let row = layout.row_height(Mode::List);
+    let visible = (2000.0 / row).floor() as u32 + 2;
+    ui.click(format!("Scene {visible}").as_str())
+        .expect("the remembered rows are on screen");
 }

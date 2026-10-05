@@ -269,6 +269,29 @@ impl Player {
     }
 
     /// Stop playback and release audio/video (FR-007).
+    /// Stop playback and wait, up to `timeout`, until mpv has unloaded the file (it's idle).
+    /// Returns whether it got there. A host calls this before freeing the render context:
+    /// freeing it while a file plays races mpv tearing down its decoder, and with hardware
+    /// decoding that crashed inside libavcodec (007 V4, quitting while fullscreen).
+    pub fn stop_and_wait(&self, timeout: std::time::Duration) -> bool {
+        self.close();
+        let deadline = Instant::now() + timeout;
+        loop {
+            if self
+                .inner
+                .mpv
+                .get_property::<bool>("idle-active")
+                .unwrap_or(true)
+            {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
     pub fn close(&self) {
         let _ = self.inner.mpv.command("stop", &[]);
         self.inner.update(|s| {

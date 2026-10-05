@@ -64,6 +64,8 @@ pub enum Message {
     WindowMode(window::Mode),
     CloseRequested,
     MeasureDone,
+    /// A step of the close-while-playing run.
+    MeasureStep(u8),
     /// A window frame (the UI bench's clock).
     Frame(std::time::Instant),
 }
@@ -182,6 +184,7 @@ impl App {
                 }
                 Vec::new()
             }
+            Message::MeasureStep(n) => self.measure_step(n),
             Message::Frame(now) => {
                 let (Some(bench), State::Session(session)) = (self.bench.as_mut(), &mut self.state)
                 else {
@@ -208,13 +211,50 @@ impl App {
         self.run_effects(effects)
     }
 
+    /// The close-while-playing run (`SSV_MEASURE_QUIT_WHILE_PLAYING`, plus
+    /// `SSV_MEASURE_CLOSE_PLAYER` to use the player's close button first): close the player,
+    /// play again, close it again, then close the window while playing.
+    fn measure_step(&mut self, n: u8) -> Vec<Effect> {
+        let player_first = std::env::var_os("SSV_MEASURE_CLOSE_PLAYER").is_some();
+        let next = |n: u8, secs: u64| Effect::MeasureStep {
+            n,
+            after: Duration::from_secs(secs),
+        };
+        let State::Session(session) = &mut self.state else {
+            return Vec::new();
+        };
+        match (n, player_first) {
+            (0, true) | (2, true) => {
+                tracing::info!(step = n, "measure: closing the player");
+                let mut e = session
+                    .update(session::Msg::Playback(session::playback::Msg::Close))
+                    .effects;
+                e.push(next(n + 1, 3));
+                e
+            }
+            (1, true) | (3, true) => {
+                tracing::info!(step = n, "measure: playing again");
+                let id = measure::quit_while_playing().unwrap_or_default();
+                let mut e = session
+                    .update(session::Msg::Shell(crate::shell::ShellMsg::Play(id)))
+                    .effects;
+                e.push(next(n + 1, 5));
+                e
+            }
+            _ => {
+                tracing::info!("measure: closing the window");
+                self.quit_effects()
+            }
+        }
+    }
+
     fn quit_effects(&mut self) -> Vec<Effect> {
         if let Some(mut v) = self.video.take() {
             v.stop();
         }
         let mut effects = Vec::new();
         if let State::Session(session) = &self.state {
-            effects.extend(session.save_now());
+            effects.extend(session.leave());
         }
         effects.push(Effect::Quit);
         effects
@@ -243,8 +283,8 @@ impl App {
             // Leave this session for another saved server (001 US4).
             tracing::info!(to = %id, known = session.servers.len(), "switching server");
             if let Some(profile) = session.servers.iter().find(|p| p.id == *id).cloned() {
-                // Each server keeps its own tabs.
-                effects.extend(session.save_now());
+                // Each server keeps its own tabs; playback stops with the session.
+                effects.extend(session.leave());
                 let (mut next, entry) = Session::enter(profile, false);
                 next.shell.layout = self.layout;
                 self.state = State::Session(Box::new(next));
@@ -255,6 +295,33 @@ impl App {
         if let Some(session::Up::FirstConnected) = up {
             if !self.interactive_marked {
                 self.interactive_marked = true;
+                if let Some(id) = measure::quit_while_playing() {
+                    effects.extend(
+                        session
+                            .update(session::Msg::Shell(crate::shell::ShellMsg::Open(
+                                crate::screens::Screen::scene(&id, "quit test"),
+                            )))
+                            .effects,
+                    );
+                    effects.extend(
+                        session
+                            .update(session::Msg::Shell(crate::shell::ShellMsg::Play(id)))
+                            .effects,
+                    );
+                    if std::env::var_os("SSV_MEASURE_FULLSCREEN").is_some() {
+                        effects.extend(
+                            session
+                                .update(session::Msg::Playback(
+                                    session::playback::Msg::ToggleFullscreen,
+                                ))
+                                .effects,
+                        );
+                    }
+                    effects.push(Effect::MeasureStep {
+                        n: 0,
+                        after: Duration::from_secs(6),
+                    });
+                }
                 if measure::mark_interactive() {
                     effects.extend(self.quit_effects());
                 } else if measure::bench_requested() {
@@ -297,6 +364,18 @@ impl App {
                 ) => Some(Message::Key(key, modifiers)),
                 (iced::Event::Keyboard(keyboard::Event::ModifiersChanged(m)), _) => {
                     Some(Message::Modifiers(m))
+                }
+                // The mouse's back and forward buttons move through the tab's history.
+                (iced::Event::Mouse(iced::mouse::Event::ButtonPressed(button)), _) => {
+                    match button {
+                        iced::mouse::Button::Back => {
+                            Some(Message::Session(session::Msg::MouseHistory(true)))
+                        }
+                        iced::mouse::Button::Forward => {
+                            Some(Message::Session(session::Msg::MouseHistory(false)))
+                        }
+                        _ => None,
+                    }
                 }
                 _ => None,
             }),

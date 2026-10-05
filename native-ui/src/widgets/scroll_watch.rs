@@ -42,6 +42,8 @@ pub struct AutoScrolled {
 pub struct ScrollWatch<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer> {
     content: Element<'a, Message, Theme, Renderer>,
     step: f32,
+    /// Where the scrollable starts when this widget is first built (the saved position).
+    restore: f32,
     on_scroll: Box<dyn Fn(f32) -> Message + 'a>,
     auto: Option<(AutoScroll, OnAutoScrolled<'a, Message>)>,
 }
@@ -49,15 +51,18 @@ pub struct ScrollWatch<'a, Message, Theme = iced::Theme, Renderer = iced::Render
 type OnAutoScrolled<'a, Message> = Box<dyn Fn(AutoScrolled) -> Message + 'a>;
 
 /// Watch `content`'s first scrollable; report its offset when it moves into another `step`-sized
-/// band, and when it settles.
+/// band, and when it settles. When first built, the scrollable is moved to `restore` (the
+/// position the state remembers), so the two can't disagree however the view was rebuilt.
 pub fn scroll_watch<'a, Message, Theme, Renderer>(
     content: impl Into<Element<'a, Message, Theme, Renderer>>,
     step: f32,
+    restore: f32,
     on_scroll: impl Fn(f32) -> Message + 'a,
 ) -> ScrollWatch<'a, Message, Theme, Renderer> {
     ScrollWatch {
         content: content.into(),
         step: step.max(1.0),
+        restore: restore.max(0.0),
         on_scroll: Box::new(on_scroll),
         auto: None,
     }
@@ -86,6 +91,8 @@ struct Run {
 
 #[derive(Default)]
 struct State {
+    /// The first event has been seen (the saved position restored).
+    started: bool,
     band: Option<i64>,
     offset: f32,
     /// When the offset last changed, while it hasn't been reported settled.
@@ -223,8 +230,20 @@ where
             _ => None,
         };
 
-        // The bench's scroll: one step per frame.
+        // First event since this widget was built: put the scrollable where the state says it
+        // is. (Restoring through a separate task could run before the rebuilt view existed,
+        // leaving the scrollable at the top while the rows built were the remembered ones: an
+        // empty band where the grid should be.)
         let mut set = None;
+        let first = {
+            let state = tree.state.downcast_mut::<State>();
+            let first = !state.started;
+            state.started = true;
+            first
+        };
+        if first && self.auto.is_none() {
+            set = Some(self.restore);
+        }
         if let (Some(now), Some((auto, done))) = (now, self.auto.as_ref()) {
             let state = tree.state.downcast_mut::<State>();
             if state.finished != Some(auto.id) {
@@ -291,6 +310,16 @@ where
 
         let state = tree.state.downcast_mut::<State>();
         let band = (offset / self.step).floor() as i64;
+        if first {
+            state.offset = offset;
+            state.band = Some(band);
+            // The scrollable couldn't go all the way (the content is shorter now): report where
+            // it is.
+            if (offset - self.restore).abs() > 0.5 {
+                shell.publish((self.on_scroll)(offset));
+            }
+            return;
+        }
         if offset != state.offset {
             state.offset = offset;
             state.moving_since = Some(Instant::now());

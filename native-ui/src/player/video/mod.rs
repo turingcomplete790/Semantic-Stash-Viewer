@@ -124,6 +124,7 @@ pub fn frames() -> impl iced::futures::Stream<Item = ()> {
 /// exist while a file plays).
 pub struct VideoSurface {
     shared: Arc<Shared>,
+    player: Arc<Player>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -135,10 +136,11 @@ impl VideoSurface {
             to_render: Mutex::new(None),
             error: Mutex::new(None),
         });
-        let (tx, thread) = render_thread::spawn(player, Arc::clone(&shared))?;
+        let (tx, thread) = render_thread::spawn(Arc::clone(&player), Arc::clone(&shared))?;
         *lock(&shared.to_render) = Some(tx);
         Ok(Self {
             shared,
+            player,
             thread: Some(thread),
         })
     }
@@ -149,7 +151,17 @@ impl VideoSurface {
 
     /// Stop the render thread: it frees mpv's render context, then its GL objects and context
     /// (teardown order, SC-010). The frame images go with iced's renderer.
+    ///
+    /// Playback is stopped first, and mpv given time to unload the file: freeing the render
+    /// context while a file plays races mpv's decoder teardown (a crash in libavcodec with
+    /// hardware decoding, 007 V4).
     pub fn stop(&mut self) {
+        if self.thread.is_none() {
+            return;
+        }
+        if !self.player.stop_and_wait(std::time::Duration::from_secs(2)) {
+            tracing::warn!("mpv didn't stop within 2 s; freeing its render context anyway");
+        }
         self.shared.send(Event::Stop);
         *lock(&self.shared.to_render) = None;
         if let Some(t) = self.thread.take() {

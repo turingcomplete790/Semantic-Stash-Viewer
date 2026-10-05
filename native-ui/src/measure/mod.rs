@@ -58,6 +58,12 @@ pub fn measure_scenes() -> Option<Vec<String>> {
     })
 }
 
+/// `SSV_MEASURE_QUIT_WHILE_PLAYING=<scene id>`: play the scene in the UI once connected, then
+/// close the window while it plays (the window close button's path, 007 V4).
+pub fn quit_while_playing() -> Option<String> {
+    var("SSV_MEASURE_QUIT_WHILE_PLAYING")
+}
+
 /// The long playback (`SSV_MEASURE_LONG`, `SSV_MEASURE_LONG_SECS`, default 300 s as the web build).
 pub fn measure_long() -> Option<(String, u64)> {
     let id = var("SSV_MEASURE_LONG")?;

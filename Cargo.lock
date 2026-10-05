@@ -4903,6 +4903,7 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "libmpv2",
+ "ouroboros",
  "serde",
  "specta",
  "tempfile",

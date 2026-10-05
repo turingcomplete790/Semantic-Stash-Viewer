@@ -261,3 +261,22 @@ Remaining (2026-10-05): grid scrolling misses 1–3% of frames with thumbnails c
 machine in use. Section navigation, tab switching, control presses, page change, and page jump
 are far inside their budgets.
 
+
+## R17. The video path under the unsafe-code gate (T043–T045, 2026-10-05)
+
+- **mpv's render context** borrows a `RenderOwner` (`player::render`), so the borrow checker keeps
+  it from outliving mpv; the `transmute` to `'static` is gone. The demo's GTK callbacks store an
+  `OwnedRenderer`, built with `ouroboros` (already in the tree through iced's `lazy`).
+- **The render thread** holds a `RenderTarget` (side GL context, current on that thread and not
+  `Send`, plus mpv's Wayland connection); `create_renderer` on it is safe because the renderer
+  borrows it. GL and EGL objects (EGL image, texture, framebuffer) are owning types freed on drop,
+  borrowing the context, grouped in a per-generation `FrameSet`.
+- **Vulkan allocation** is a sequence of one-purpose functions with a `RawFrame` guard that frees
+  the image and memory on any early return until ownership passes to wgpu.
+- **Lints**: `player` and `native-ui` deny `unsafe_op_in_unsafe_fn`,
+  `clippy::undocumented_unsafe_blocks`, and `clippy::multiple_unsafe_ops_per_block`;
+  `stash-core` forbids unsafe code. Remaining `unsafe` is only at the FFI edges: libmpv (render
+  context creation), EGL/GL, Vulkan/wgpu-hal, libwayland, and `setlocale`.
+- **Backend**: the app no longer sets `WGPU_BACKEND` itself (`set_var` is unsafe). wgpu prefers
+  Vulkan on Linux; `.cargo/config.toml` and the harness pin `vulkan` without overriding an explicit
+  choice.

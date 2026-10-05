@@ -1,5 +1,6 @@
-//! mpv's render thread (006 T015, research R1). It owns the side GL context, the GL framebuffers
-//! over the shared frame images, and mpv's render context. mpv's update callback wakes it; it
+//! mpv's render thread (006 T015, research R1). It owns the render target (side GL context and
+//! Wayland connection), the GL framebuffers over the shared frame images, and mpv's render
+//! context. mpv's update callback wakes it; it
 //! renders into a free slot, waits for the GPU, marks the slot ready, and tells the UI.
 
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -8,9 +9,8 @@ use std::thread::JoinHandle;
 
 use player::Player;
 
-use super::egl::{get_proc_address, SideContext};
-use super::gl_frames::GlFrame;
-use super::wayland::WaylandConnection;
+use super::egl::RenderTarget;
+use super::gl_frames::FrameSet;
 use super::{lock, DmabufFrame, Shared, VideoError};
 
 pub(super) enum Event {
@@ -55,29 +55,20 @@ fn run(
     wake: Sender<Event>,
     ready: &Sender<Result<(), VideoError>>,
 ) {
-    let ctx = match SideContext::new() {
-        Ok(ctx) => ctx,
+    let target = match RenderTarget::new() {
+        Ok(t) => t,
         Err(e) => {
             let _ = ready.send(Err(e));
             return;
         }
     };
-    // mpv's own Wayland connection, for VA-API (see `wayland.rs`); dropped after the renderer.
-    let wayland = WaylandConnection::connect();
-    if wayland.is_none() {
-        tracing::warn!("no Wayland connection for mpv; hardware decoding may copy frames");
-    }
-    // SAFETY: the context is current on this thread, and the Wayland display (if any) outlives
-    // the renderer: it's dropped after it, at the end of this function.
-    let mut renderer = match unsafe {
-        player.create_renderer(
-            get_proc_address,
-            wayland.as_ref().map(WaylandConnection::as_ptr),
-        )
-    } {
+    // The renderer borrows `owner` (mpv stays alive while it exists) and `target` (the context
+    // and Wayland display stay alive while it exists).
+    let owner = player.render_owner();
+    let mut renderer = match target.create_renderer(&owner) {
         Ok(r) => r,
         Err(e) => {
-            let _ = ready.send(Err(VideoError::Player(e.to_string())));
+            let _ = ready.send(Err(e));
             return;
         }
     };
@@ -86,8 +77,7 @@ fn run(
     });
     let _ = ready.send(Ok(()));
 
-    let mut frames: Vec<GlFrame> = Vec::new();
-    let mut generation = 0u64;
+    let mut frames = FrameSet::empty();
     while let Ok(first) = rx.recv() {
         // Take everything queued: a burst of wake-ups renders once, the newest allocation wins,
         // and a stop ends the loop.
@@ -102,16 +92,12 @@ fn run(
         if stop {
             break;
         }
-        if let Some((g, dmabufs)) = allocate {
-            release(&ctx, std::mem::take(&mut frames));
-            match dmabufs
-                .iter()
-                .map(|d| GlFrame::import(&ctx, d))
-                .collect::<Result<Vec<_>, _>>()
-            {
+        if let Some((generation, dmabufs)) = allocate {
+            // The old generation's frames are freed first.
+            frames = FrameSet::empty();
+            match FrameSet::import(target.context(), generation, &dmabufs) {
                 Ok(imported) => {
                     frames = imported;
-                    generation = g;
                     // Redraw at the new size even if mpv is paused.
                     wake = true;
                 }
@@ -122,34 +108,34 @@ fn run(
             }
         }
         if wake {
-            render(&renderer, shared, &frames, generation);
+            render(&renderer, shared, &frames);
         }
     }
-    // Teardown order (SC-010): mpv's render context before the GL objects and the context.
+    // Teardown order (SC-010): mpv's render context, then the GL objects, then (as `target`
+    // goes out of scope) the context and the Wayland connection.
     drop(renderer);
-    release(&ctx, frames);
-    drop(wayland);
+    drop(frames);
 }
 
 /// Render one frame into a free slot, if the slots are this generation's.
-fn render(renderer: &player::Renderer, shared: &Shared, frames: &[GlFrame], generation: u64) {
+fn render(renderer: &player::Renderer<'_>, shared: &Shared, frames: &FrameSet<'_>) {
     let slot = {
         let mut ring = lock(&shared.ring);
-        if ring.generation() == generation && !frames.is_empty() {
+        if ring.generation() == frames.generation && !frames.frames.is_empty() {
             ring.begin_render()
         } else {
             None
         }
     };
     let Some(i) = slot else { return };
-    let frame = &frames[i];
+    let frame = &frames.frames[i];
     let rendered = renderer.render(
-        i32::try_from(frame.fbo).unwrap_or(0),
+        i32::try_from(frame.fbo()).unwrap_or(0),
         i32::try_from(frame.width).unwrap_or(0),
         i32::try_from(frame.height).unwrap_or(0),
     );
-    // SAFETY: plain GL call on the current context. The frame must be complete before Vulkan
-    // samples it (no cross-API fence yet, research R1).
+    // SAFETY: plain GL call on the side context, current on this thread. The frame must be
+    // complete before Vulkan samples it (no cross-API fence yet, research R1).
     unsafe { gl::Finish() };
     lock(&shared.ring).finish_render(i);
     match rendered {
@@ -158,11 +144,5 @@ fn render(renderer: &player::Renderer, shared: &Shared, frames: &[GlFrame], gene
             renderer.report_swap();
         }
         Err(e) => tracing::warn!(error = %e, "mpv render failed"),
-    }
-}
-
-fn release(ctx: &SideContext, frames: Vec<GlFrame>) {
-    for f in frames {
-        f.release(ctx);
     }
 }

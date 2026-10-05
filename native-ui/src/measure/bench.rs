@@ -37,6 +37,16 @@ enum Act {
     Jump,
     /// Close every tab the bench opened.
     CloseBenchTabs,
+    /// Open a scene from the active Scenes page (the first two minutes or longer) in this tab and
+    /// play it, muted.
+    PlayFirst,
+    StopPlayback,
+    /// Select a tab that isn't the playing one.
+    SelectOther,
+    /// The now-playing bar's "Back to scene".
+    BackToScene,
+    /// Select the playing tab (as a tab switch).
+    SelectOwner,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -51,6 +61,8 @@ enum Cond {
     Cards(usize),
     /// Every card on the page has its thumbnail.
     AllThumbs,
+    /// The player is playing.
+    Playing,
 }
 
 #[derive(Debug, Clone)]
@@ -75,6 +87,10 @@ enum Op {
     ReportThumbs,
     /// Print the 1000-card page's size (the Testing library may hold fewer scenes).
     ReportCards,
+    /// Note the frames shown so far (before switching tabs).
+    VideoMark,
+    /// If the playing tab is showing, wait (a few frames) for a new video frame on screen.
+    VideoCheck,
     Done,
 }
 
@@ -90,6 +106,8 @@ enum Wait {
     Sleep(Instant),
     /// The scrollable is scrolling itself; its timings arrive as a message.
     Scrolling,
+    /// Waiting this many more frames for a video frame to be shown.
+    Video(u32),
 }
 
 pub struct Bench {
@@ -106,6 +124,11 @@ pub struct Bench {
     seed: u32,
     /// Tabs open before the bench, so it can close its own.
     first_bench_tab: usize,
+    /// Frames shown when the last `VideoMark` ran.
+    video_mark: u64,
+    /// Switches to the playing tab, and how many showed a new video frame.
+    video_checked: u32,
+    video_sized: u32,
 }
 
 fn script() -> Vec<Op> {
@@ -153,7 +176,15 @@ fn script() -> Vec<Op> {
     }
     ops.push(Report("press"));
 
-    // 20 tabs open, then a fixed pseudo-random walk over them.
+    // A scene playing in this tab (muted), then 20 tabs open and a fixed pseudo-random walk
+    // over them.
+    ops.extend([
+        shell(ShellMsg::Section(Section::Scenes)),
+        Until(Cond::Ready, ms(15_000)),
+        Op::Act(A::PlayFirst),
+        Until(Cond::Playing, ms(20_000)),
+        Frames(30),
+    ]);
     let kinds = [Section::Scenes, Section::Home, Section::Settings];
     for i in 0..19 {
         ops.extend([
@@ -163,16 +194,45 @@ fn script() -> Vec<Op> {
     }
     ops.push(Frames(4));
     let mut seed = 7usize;
-    for _ in 0..40 {
+    for i in 0..40 {
         seed = (seed * 13 + 5) % 20;
+        // Every fifth switch goes to the playing tab (the walk alone may never land there).
+        let switch = if i % 5 == 4 {
+            Op::Act(A::SelectOwner)
+        } else {
+            shell(ShellMsg::SelectIndex(seed))
+        };
         ops.extend([
+            VideoMark,
             Start,
-            shell(ShellMsg::SelectIndex(seed)),
+            switch,
             Frames(2),
             Sample("tabs"),
+            VideoCheck,
         ]);
     }
-    ops.extend([Report("tabs"), Op::Act(A::CloseBenchTabs), Frames(2)]);
+    ops.push(Report("tabs"));
+    // The now-playing bar appears on leaving the playing tab; "Back to scene" returns to it.
+    ops.extend([Op::Act(A::BackToScene), Frames(4)]);
+    for _ in 0..10 {
+        ops.extend([
+            Start,
+            Op::Act(A::SelectOther),
+            Frames(2),
+            Sample("now-playing"),
+            Start,
+            Op::Act(A::BackToScene),
+            Frames(2),
+            Sample("back"),
+        ]);
+    }
+    ops.extend([
+        Report("now-playing"),
+        Report("back"),
+        Op::Act(A::StopPlayback),
+        Op::Act(A::CloseBenchTabs),
+        Frames(2),
+    ]);
     if only_scroll {
         ops.clear();
         ops.push(Frames(10));
@@ -293,6 +353,9 @@ impl Bench {
             scroll_id: 0,
             seed: 11,
             first_bench_tab: session.shell.tabs.len(),
+            video_mark: 0,
+            video_checked: 0,
+            video_sized: 0,
         }
     }
 
@@ -310,6 +373,9 @@ impl Bench {
     }
 
     fn holds(&self, cond: Cond, session: &Session) -> bool {
+        if let Cond::Playing = cond {
+            return session.playback.snapshot().state == player::PlayerStateKind::Playing;
+        }
         let Some(s) = Self::scenes(session) else {
             return false;
         };
@@ -319,6 +385,7 @@ impl Bench {
         let changed = || Self::first_card(session) != self.remembered;
         match cond {
             Cond::Ready => true,
+            Cond::Playing => unreachable!("checked before the Scenes screen"),
             Cond::Cards(n) => s.cards().len() >= n.min(s.count().unwrap_or(0) as usize),
             Cond::CardsShown => changed(),
             Cond::AllThumbs => s
@@ -358,6 +425,49 @@ impl Bench {
                     target,
                 ))))
             }
+            Act::PlayFirst => {
+                // One long enough to keep playing through the tab rows.
+                let Some(card) = Self::scenes(session).and_then(|s| {
+                    s.cards()
+                        .iter()
+                        .find(|c| c.duration_seconds.unwrap_or(0.0) >= 120.0)
+                        .or_else(|| s.cards().first())
+                        .cloned()
+                }) else {
+                    return Vec::new();
+                };
+                let mut effects = session
+                    .update(session::Msg::Shell(ShellMsg::Open(Screen::scene(
+                        &card.id,
+                        &card.title,
+                    ))))
+                    .effects;
+                effects.extend(
+                    session
+                        .update(session::Msg::Shell(ShellMsg::Play(card.id)))
+                        .effects,
+                );
+                effects.push(Effect::Player(crate::effects::PlayerAction::SetMuted(true)));
+                return effects;
+            }
+            Act::StopPlayback => {
+                session.update(session::Msg::Playback(session::playback::Msg::Close))
+            }
+            Act::SelectOther => {
+                let owner = session.playback.owner;
+                match session.shell.tabs.iter().find(|t| Some(t.id) != owner) {
+                    Some(t) => {
+                        let id = t.id;
+                        session.update(session::Msg::Shell(ShellMsg::Select(id)))
+                    }
+                    None => Step::none(),
+                }
+            }
+            Act::BackToScene => session.update(session::Msg::BackToScene),
+            Act::SelectOwner => match session.playback.owner {
+                Some(id) => session.update(session::Msg::Shell(ShellMsg::Select(id))),
+                None => Step::none(),
+            },
             Act::CloseBenchTabs => {
                 let mut effects = Vec::new();
                 while session.shell.tabs.len() > self.first_bench_tab.max(1) {
@@ -406,6 +516,17 @@ impl Bench {
                     return (effects, false);
                 }
                 self.wait = Wait::None;
+            }
+            Wait::Video(left) => {
+                if crate::player::video::frame_counts().1 > self.video_mark {
+                    self.video_sized += 1;
+                    self.wait = Wait::None;
+                } else if left > 1 {
+                    self.wait = Wait::Video(left - 1);
+                    return (effects, false);
+                } else {
+                    self.wait = Wait::None;
+                }
             }
             Wait::Scrolling => {
                 if self.scrolled.is_none() {
@@ -456,12 +577,25 @@ impl Bench {
                         "nav" => "nav-first-paint",
                         "press" => "control-press",
                         "tabs" => "tab-switch-20-tabs",
+                        "now-playing" => "now-playing-appears",
+                        "back" => "back-to-scene",
                         "page-change" => "scenes-page-change",
                         "page-jump" => "scenes-page-jump",
                         other => other,
                     };
                     let samples = self.samples.remove(name).unwrap_or_default();
-                    report(line, super::summary(&samples, 0));
+                    let mut value = super::summary(&samples, 0);
+                    let playing = session.playback.active();
+                    match name {
+                        "tabs" => {
+                            value["playing"] = playing.into();
+                            value["videoSized"] =
+                                format!("{}/{}", self.video_sized, self.video_checked).into();
+                        }
+                        "now-playing" => value["playing"] = playing.into(),
+                        _ => {}
+                    }
+                    report(line, value);
                 }
                 Op::Scroll(duration) => {
                     self.scroll_id += 1;
@@ -497,6 +631,17 @@ impl Bench {
                             "ms": (self.started.elapsed().as_secs_f64() * 1000.0).round(),
                         }),
                     );
+                }
+                Op::VideoMark => {
+                    self.video_mark = crate::player::video::frame_counts().1;
+                }
+                Op::VideoCheck => {
+                    if session.playback.owner == Some(session.shell.active().id) {
+                        self.video_checked += 1;
+                        // A 24–30 fps video shows a new frame within about 40 ms.
+                        self.wait = Wait::Video(12);
+                        return (effects, false);
+                    }
                 }
                 Op::ReportCards => {
                     let n = Self::scenes(session).map_or(0, |s| s.cards().len());

@@ -4,10 +4,11 @@
 //! effects. Home is complete here; Scenes, Scene, and Settings fill in with US3 and US4.
 
 pub mod home;
+pub mod scene;
 pub mod scenes;
 
-use iced::widget::{button, center, column, container, row, text, Space};
-use iced::{Alignment, Element, Length};
+use iced::widget::{button, column, container, row, text, Space};
+use iced::{Element, Length};
 use serde::{Deserialize, Serialize};
 use stash_core::profiles::ServerProfile;
 
@@ -26,6 +27,7 @@ pub struct Context<'a> {
     pub layout: scenes::layout::Layout,
 }
 
+pub use scene::SceneState;
 pub use scenes::ScenesState;
 
 /// The navigation bar's sections.
@@ -41,13 +43,6 @@ pub enum Mode {
     #[default]
     Grid,
     List,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SceneState {
-    pub scene_id: String,
-    /// Shown as the tab's title before the details load.
-    pub title: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -101,10 +96,7 @@ impl Screen {
     }
 
     pub fn scene(id: &str, title: &str) -> Self {
-        Screen::Scene(SceneState {
-            scene_id: id.to_owned(),
-            title: title.to_owned(),
-        })
+        Screen::Scene(SceneState::new(id, title))
     }
 
     pub fn settings(page: SettingsPage) -> Self {
@@ -144,6 +136,7 @@ impl Screen {
         match self {
             Screen::Home(_) => Screen::home(),
             Screen::Scenes(s) => Screen::Scenes(s.persistent()),
+            Screen::Scene(s) => Screen::Scene(s.persistent()),
             other => other.clone(),
         }
     }
@@ -154,6 +147,7 @@ impl Screen {
         match self {
             Screen::Home(h) if h.needs_load() => vec![Effect::LoadSummary { tab }],
             Screen::Scenes(s) => s.enter(tab),
+            Screen::Scene(s) => s.enter(tab),
             _ => Vec::new(),
         }
     }
@@ -163,6 +157,7 @@ impl Screen {
         match self {
             Screen::Home(h) => h.needs_load(),
             Screen::Scenes(s) => s.needs_load(),
+            Screen::Scene(s) => s.needs_load(),
             _ => false,
         }
     }
@@ -172,15 +167,7 @@ impl Screen {
         match self {
             Screen::Home(h) => h.view(ctx),
             Screen::Scenes(s) => scenes::view(s, ctx, tab),
-            Screen::Scene(s) => center(
-                column![
-                    text(s.title.clone()).size(24),
-                    button(text("Play")).on_press(ShellMsg::Play(s.scene_id.clone())),
-                ]
-                .spacing(12)
-                .align_x(Alignment::Center),
-            )
-            .into(),
+            Screen::Scene(s) => s.view(&ctx.layout),
             Screen::Settings(s) => settings_view(s),
         }
     }
