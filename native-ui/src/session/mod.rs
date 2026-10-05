@@ -8,7 +8,7 @@ pub mod snapshot;
 use std::sync::Arc;
 
 use iced::keyboard::{Key, Modifiers};
-use iced::widget::{button, center, column, container, opaque, stack, text};
+use iced::widget::{button, column, container, mouse_area, opaque, stack, text, Space};
 use iced::Element;
 use stash_core::connection::snapshot::{ConnectionSnapshot, SessionState};
 use stash_core::profiles::{ProfileDraft, ServerProfile};
@@ -36,6 +36,8 @@ pub struct Session {
     pub shell: Shell,
     /// Thumbnails for every tab.
     pub thumbs: Thumbs,
+    /// The notification centre's entries and toasts.
+    pub notifications: crate::shell::notifications::Notifications,
     /// Held modifier keys (Ctrl+click opens in a new tab).
     modifiers: Modifiers,
     ever_connected: bool,
@@ -71,6 +73,7 @@ pub enum Msg {
     BackToScene,
     /// The mouse's back (`true`) or forward button.
     MouseHistory(bool),
+    Notifications(crate::shell::notifications::Msg),
 }
 
 /// Events for the app.
@@ -89,6 +92,7 @@ impl Session {
     /// this server's tabs.
     pub fn enter(profile: ServerProfile, launch: bool) -> (Self, Vec<Effect>) {
         let (shell, shell_effects) = Shell::new();
+        let profile_id = profile.id;
         let mut effects = vec![
             Effect::Connect {
                 profile: profile.id,
@@ -109,6 +113,7 @@ impl Session {
                 overlay: Overlay::None,
                 shell,
                 thumbs: Thumbs::default(),
+                notifications: crate::shell::notifications::Notifications::for_profile(profile_id),
                 modifiers: Modifiers::empty(),
                 ever_connected: false,
                 restored: false,
@@ -255,8 +260,13 @@ impl Session {
                 self.overlay = Overlay::KeyboardHelp;
                 step
             }
-            // The notification centre arrives with US5.
-            Some(shell_mod::Up::Notifications) => step,
+            Some(shell_mod::Up::Notifications) => {
+                self.overlay = Overlay::Notifications;
+                step.with_all(
+                    self.notifications
+                        .update(crate::shell::notifications::Msg::Opened),
+                )
+            }
         }
     }
 
@@ -375,7 +385,12 @@ impl Session {
                 self.restored = true;
                 match saved.and_then(Shell::restore) {
                     Some((shell, mut effects)) => {
+                        // The restored shell draws in this window: keep its size (a fresh
+                        // shell's default left the grid building rows for a smaller window
+                        // after a server switch, with an empty band below them).
+                        let layout = self.shell.layout;
                         self.shell = shell;
+                        self.shell.layout = layout;
                         // Restored Home screens pick up a summary that's already here.
                         if let Some(info) = self.connection.snapshot.server.clone() {
                             self.shell.server_info(&info);
@@ -409,6 +424,23 @@ impl Session {
                 })
             }
             Msg::BackToScene => self.back_to_scene(),
+            Msg::Notifications(crate::shell::notifications::Msg::Close) => {
+                self.overlay = Overlay::None;
+                Step::none()
+            }
+            Msg::Notifications(m) => {
+                let opened = self.overlay == Overlay::Notifications;
+                let changed = matches!(m, crate::shell::notifications::Msg::Changed(_));
+                let mut effects = self.notifications.update(m);
+                // New entries while the panel is open have been seen.
+                if opened && changed {
+                    effects.extend(
+                        self.notifications
+                            .update(crate::shell::notifications::Msg::Opened),
+                    );
+                }
+                Step::effects(effects)
+            }
             Msg::MouseHistory(back) => {
                 if self.overlay != Overlay::None
                     || (self.playback.active() && self.playback.snapshot().fullscreen)
@@ -601,10 +633,16 @@ impl Session {
             if self.playback.active() && self.playback.snapshot().fullscreen {
                 player()
             } else {
-                let indicator = self
-                    .connection
-                    .indicator(&self.profile.display_name, ShellMsg::ServerMenu);
-                let chrome: Element<'a, Msg> = self.shell.chrome(indicator).map(Msg::Shell);
+                // The bell and the connection indicator at the bar's end.
+                let right: Element<'a, ShellMsg> = iced::widget::row![
+                    self.notifications.bell(ShellMsg::Notifications),
+                    self.connection
+                        .indicator(&self.profile.display_name, ShellMsg::ServerMenu),
+                ]
+                .spacing(6)
+                .align_y(iced::Alignment::Center)
+                .into();
+                let chrome: Element<'a, Msg> = self.shell.chrome(right).map(Msg::Shell);
                 let content: Element<'a, Msg> = match self.shell.active().current() {
                     crate::screens::Screen::Scene(scene) if self.player_visible() => {
                         crate::screens::scene::layout(
@@ -632,6 +670,7 @@ impl Session {
         let overlay: Option<Element<'a, Msg>> = match &self.overlay {
             Overlay::None => None,
             Overlay::KeyboardHelp => Some(overlays::keyboard_help().map(Msg::Overlay)),
+            Overlay::Notifications => Some(self.notifications.panel().map(Msg::Notifications)),
             Overlay::KeyPrompt(prompt) => {
                 Some(overlays::key_prompt(prompt, &self.profile).map(Msg::Overlay))
             }
@@ -659,9 +698,45 @@ impl Session {
                 .map(Msg::Overlay),
             ),
         };
-        match overlay {
-            None => base,
-            Some(panel) => stack![base, opaque(center(panel))].into(),
+        let mut layers = stack![base];
+        if let Some(panel) = overlay {
+            // Behind an overlay: a backdrop that closes it when clicked (the page itself doesn't
+            // react while an overlay is open). The panel is opaque, so clicks inside it stay
+            // with it.
+            layers = layers.push(opaque(
+                mouse_area(
+                    container(Space::new())
+                        .width(iced::Length::Fill)
+                        .height(iced::Length::Fill)
+                        .style(|_| {
+                            container::Style::default().background(iced::Background::Color(
+                                iced::Color::from_rgba(0.0, 0.0, 0.0, 0.25),
+                            ))
+                        }),
+                )
+                .on_press(Msg::Overlay(overlays::Msg::Close)),
+            ));
+            let placed = if self.overlay == Overlay::Notifications {
+                // The notification centre opens under the bell.
+                container(opaque(panel))
+                    .padding(iced::Padding {
+                        top: 48.0,
+                        right: 12.0,
+                        bottom: 12.0,
+                        left: 12.0,
+                    })
+                    .width(iced::Length::Fill)
+                    .height(iced::Length::Fill)
+                    .align_right(iced::Length::Fill)
+            } else {
+                container(opaque(panel)).center(iced::Length::Fill)
+            };
+            layers = layers.push(placed);
         }
+        // Toasts float over everything without taking focus or blocking the page around them.
+        if let Some(toasts) = self.notifications.toast_layer() {
+            layers = layers.push(toasts.map(Msg::Notifications));
+        }
+        layers.into()
     }
 }

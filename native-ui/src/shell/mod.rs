@@ -2,6 +2,7 @@
 //! tabs, and the active tab's screen. Overlays sit above it in the session (`overlays`).
 
 pub mod keymap;
+pub mod notifications;
 pub mod overlays;
 pub mod tab;
 
@@ -392,8 +393,8 @@ impl Shell {
         }
     }
 
-    /// The navigation bar and the tab strip. `right` goes at the bar's end (the connection
-    /// indicator).
+    /// The navigation bar and the tab strip. `right` goes at the bar's end (the bell and the
+    /// connection indicator).
     pub fn chrome<'a>(&'a self, right: Element<'a, ShellMsg>) -> Element<'a, ShellMsg> {
         column![self.nav_bar(right), self.tab_strip()].into()
     }
@@ -427,7 +428,6 @@ impl Shell {
                 section(Section::Scenes, Icon::Scenes, "Scenes"),
                 section(Section::Settings, Icon::Settings, "Settings"),
                 Space::new().width(Length::Fill),
-                icon_button(Icon::Bell, 18.0, Some(ShellMsg::Notifications)),
                 right,
             ]
             .spacing(4)

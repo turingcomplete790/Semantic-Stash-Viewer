@@ -186,7 +186,7 @@ fn settings_view(state: &SettingsState) -> Element<'_, ShellMsg> {
     }
     let body: Element<'_, ShellMsg> = match state.page {
         SettingsPage::Keyboard => keymap::help_list(),
-        page => text(format!("{} arrives with US4.", page.label()))
+        page => text(format!("{} arrives with US6 (Settings).", page.label()))
             .color(theme::MUTED)
             .into(),
     };

@@ -21,6 +21,7 @@ tracing = { workspace = true }
 thiserror = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
+chrono = { workspace = true }
 # The video path (research R1): the Vulkan side through iced's own wgpu (wgpu-hal 27 uses ash
 # 0.38), mpv's side GL context through libEGL loaded at runtime, and the `gl` loader the web build
 # already uses.

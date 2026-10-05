@@ -41,6 +41,14 @@ pub enum PlayerAction {
     Close,
 }
 
+/// A change to the notification centre, asked for by the UI.
+#[derive(Debug, Clone, PartialEq)]
+pub enum NotificationAction {
+    MarkRead(Vec<String>),
+    Dismiss(String),
+    DismissAll,
+}
+
 /// Work a transition asks for.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Effect {
@@ -102,6 +110,14 @@ pub enum Effect {
     Notify {
         title: String,
         detail: Option<String>,
+    },
+    /// Mark read or dismiss entries in the notification centre.
+    Notifications(NotificationAction),
+    /// Hide a toast after a while (`stamp`: the entry's version that toasted).
+    ExpireToast {
+        id: String,
+        stamp: String,
+        after: std::time::Duration,
     },
     /// Scroll a scrollable to `y`.
     ScrollTo {
@@ -312,6 +328,21 @@ pub fn run(effect: Effect, services: &Arc<Services>, window: Option<window::Id>)
                     job: None,
                 });
             Task::none()
+        }
+        Effect::Notifications(action) => {
+            match action {
+                NotificationAction::MarkRead(ids) => services.notifications.mark_read(&ids),
+                NotificationAction::Dismiss(id) => services.notifications.dismiss(&id),
+                NotificationAction::DismissAll => services.notifications.dismiss_all(),
+            }
+            Task::none()
+        }
+        Effect::ExpireToast { id, stamp, after } => {
+            Task::perform(tokio::time::sleep(after), move |()| {
+                Message::Session(crate::session::Msg::Notifications(
+                    crate::shell::notifications::Msg::ToastExpired { id, stamp },
+                ))
+            })
         }
         Effect::ScrollTo { id, y } => iced::widget::operation::scroll_to(
             iced::widget::Id::from(id),

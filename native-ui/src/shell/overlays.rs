@@ -1,5 +1,5 @@
 //! Overlays above the session (007 data model "Shell"): one at a time, Escape closes it. US1 adds
-//! the key prompt and the server menu, US2 keyboard help; US5 adds notifications.
+//! the key prompt and the server menu, US2 keyboard help, US5 the notification centre.
 
 use iced::widget::{button, column, container, row, text, text_input, Space};
 use iced::{Alignment, Element, Length};
@@ -26,6 +26,8 @@ pub enum Overlay {
     AddServer(ServerForm),
     /// Every keyboard shortcut (F1 or ?).
     KeyboardHelp,
+    /// The notification centre (the bell).
+    Notifications,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

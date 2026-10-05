@@ -194,3 +194,37 @@ mod session_level {
         assert_eq!(s.shell.active().current().title(), "Scenes");
     }
 }
+
+mod restore_keeps_the_window {
+    use semantic_stash_viewer_native::effects::Reply;
+    use semantic_stash_viewer_native::screens::scenes::layout::Layout;
+    use semantic_stash_viewer_native::screens::Section;
+    use semantic_stash_viewer_native::session::{Msg, Session};
+    use semantic_stash_viewer_native::shell::{Shell, ShellMsg};
+    use stash_core::profiles::ServerProfile;
+
+    #[test]
+    fn a_restored_shell_keeps_the_window_size() {
+        let p = ServerProfile {
+            id: uuid::Uuid::new_v4(),
+            display_name: "Production".into(),
+            base_url: "http://localhost:9999/".parse().expect("url"),
+            strict_tls: false,
+            api_key: None,
+            created_at: chrono::Utc::now(),
+            last_used_at: None,
+        };
+        let (mut saved, _) = Shell::new();
+        let _ = saved.update(ShellMsg::Section(Section::Scenes));
+        let (mut s, _) = Session::enter(p.clone(), false);
+        // A server switch hands the new session the window's size before its tabs are read.
+        let window = Layout::new(3440.0, 1440.0);
+        s.shell.layout = window;
+        let _ = s.update(Msg::Reply(Reply::SessionLoaded {
+            profile: p.id,
+            saved: Some(saved.capture()),
+        }));
+        assert_eq!(s.shell.active().current().title(), "Scenes");
+        assert_eq!(s.shell.layout, window);
+    }
+}

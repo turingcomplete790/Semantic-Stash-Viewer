@@ -61,6 +61,7 @@ pub enum Message {
     Resized(iced::Size),
     Modifiers(keyboard::Modifiers),
     CacheChanged(String),
+    Notifications(Vec<stash_core::shell::notifications::Notification>),
     WindowMode(window::Mode),
     CloseRequested,
     MeasureDone,
@@ -165,6 +166,9 @@ impl App {
             }
             Message::Modifiers(m) => self.session(session::Msg::Modifiers(m)),
             Message::CacheChanged(key) => self.session(session::Msg::CacheChanged(key)),
+            Message::Notifications(list) => self.session(session::Msg::Notifications(
+                crate::shell::notifications::Msg::Changed(list),
+            )),
             Message::Resized(size) => {
                 self.layout = crate::screens::scenes::layout::Layout::new(size.width, size.height);
                 let effects = self.session(session::Msg::Layout(self.layout));
@@ -356,6 +360,7 @@ impl App {
             window::close_requests().map(|_| Message::CloseRequested),
             window::resize_events().map(|(_, size)| Message::Resized(size)),
             Subscription::run(cache_stream).map(Message::CacheChanged),
+            Subscription::run(notifications_stream).map(Message::Notifications),
             // Key events a focused widget captured (typing in a field) never reach the machine.
             iced::event::listen_with(|event, status, _window| match (event, status) {
                 (
@@ -470,6 +475,23 @@ fn cache_stream() -> impl iced::futures::Stream<Item = String> {
                     let _ = output.send("*".to_owned()).await;
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    })
+}
+
+/// The notification centre's list, whenever it changes (and once at the start).
+fn notifications_stream(
+) -> impl iced::futures::Stream<Item = Vec<stash_core::shell::notifications::Notification>> {
+    iced::stream::channel(4, async |mut output| {
+        use iced::futures::SinkExt;
+        let mut rx = services().notifications.subscribe();
+        let first = rx.borrow().clone();
+        let _ = output.send(first).await;
+        while rx.changed().await.is_ok() {
+            let list = rx.borrow_and_update().clone();
+            if output.send(list).await.is_err() {
+                break;
             }
         }
     })

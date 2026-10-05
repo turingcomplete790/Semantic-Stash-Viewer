@@ -393,17 +393,17 @@ failures, and live Stash jobs (spec US5, FR-010).
 
 **Independent Test**: quickstart V5.
 
-- [ ] T052 [P] [US5] `native-ui/tests/notifications.rs` (transition tests):
+- [X] T052 [P] [US5] `native-ui/tests/notifications.rs` (transition tests):
   - a lost connection makes one entry that updates when it returns;
   - the badge counts unread and active entries;
   - toasts expire and never take focus;
   - mark read, dismiss, and dismiss all;
   - a running job shows progress and finishes.
-- [ ] T053 [US5] `native-ui/src/shell/notifications.rs`: the Notifications overlay, the badge on the
+- [X] T053 [US5] `native-ui/src/shell/notifications.rs`: the Notifications overlay, the badge on the
   navigation bar's bell, and the toast layer (a `stack` layer without focus), all fed by the core's
   `NotificationCenter` `watch`; jobs from the `JobsWatcher` (T011); playback failures posted by the
   playback region.
-- [ ] T054 [US5] Write US5's rows in `capabilities.md`, run quickstart V5 with the user, and pass
+- [X] T054 [US5] Write US5's rows in `capabilities.md`, run quickstart V5 with the user, and pass
   the gate.
 
 ---
