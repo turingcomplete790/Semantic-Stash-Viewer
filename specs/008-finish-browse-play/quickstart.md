@@ -1,0 +1,71 @@
+# Quickstart: validating Finish Browse and Play (008)
+
+Prerequisites: the native app built (`cargo build -p semantic-stash-viewer-native`); the Testing
+instance on :9998 (its saved profile is `localhost:9998`) for anything that writes play history;
+Production (`localhost:9999`) read-only. A few saved scene filters made in Testing's web UI
+(include one with performers, one with tags and a resolution, and a default filter).
+
+## Query budget (run first, automated)
+
+```bash
+cargo test -p stash-core --test graphql_operations   # selection snapshots and tier rules
+cargo test -p stash-core --test query_budget         # request counts per action (mock server)
+cargo run -p perf-harness -- --profile "localhost:9998" --quick   # adds the gql-* audit rows
+```
+
+Expected: snapshots and counts pass; every `gql-*` row within its budget
+([contracts/query-budget.md](contracts/query-budget.md)): one request per page, one per scene
+page, none for cached pickers, none for chips only passed over.
+
+## V1: Find (US1)
+
+Search a known title; add performer and resolution filters; check the count and the first 100
+against Testing's web UI for the same criteria. Apply each saved filter; open a new Scenes tab
+and check the default filter applies. From a scene page, choose a performer, a tag, and a studio
+(and Ctrl+click one). Restart: the tab's search, chips, page, and scroll come back. Open the
+filter menu and check the Semantic group shows its placeholders.
+The 10 SC-001 queries (checked automatically by the live test, and by eye against Testing's web
+UI): search text only; one performer; one tag with sub-tags (depth); one studio; resolution at
+least 1080p; duration between 10 and 30 minutes; organized; rating at least 4 stars; one custom
+field; and the 3 saved filters. Check the Tags picker: semantic tags grouped by type, each type
+in its default colour, and the `isTrait: 0` tag among ordinary, uncoloured tags. Do the whole of V1 once with the keyboard only. Open the performer picker on
+Production (read-only): it opens at once after the first time and narrows as you type.
+
+## V2: Scene page (US2)
+
+Open scenes with many performers, with markers, with several files, and with almost no metadata;
+compare with the web UI's scene page. Hover a performer, tag, and studio chip (details card);
+sweep across a row of chips quickly (nothing loads). Open "All files" and "Galleries". Choose a
+marker (playback starts there). Tag chips show their type's colour; the variant tag shows its
+canonical tag's colour.
+
+On Testing only (it writes Stash's UI configuration): open Settings → Tag colours, check the
+seven default rules and their tag counts, change the Role colour, add a rule for another tag
+flag, reorder two rules, and save. Chips recolour at once; Testing's `configuration { ui }`
+holds `semanticStashViewer.tagColours` and nothing else in the UI configuration changed. Reset to
+the defaults. Disconnect and save: the page says the colours weren't saved and keeps the old ones.
+
+## V3: Resume and history (US3, Testing only)
+
+Play a scene for 2 minutes, stop; within 5 s the web UI shows the resume point and time watched;
+reopen it (resumes there, "start from the beginning" offered). Watch to the end (resume cleared).
+End viewings by tab close, scene change, server switch, quit, and pulling the network (then
+reconnect): every one reaches Stash. Kill the app mid-viewing: Stash has the history to within a
+minute. Turn "Save play history" off: nothing changes in the web UI. Jump between markers with
+the chapter keys.
+
+## V4: Previews (US4)
+
+Hover cards (preview starts within the budget, stops on leave); wall mode on a 250 page (stills;
+only the hovered one animates); a scene without previews (still stays); hover the seek bar of a
+scene with sprites (thumbnail and time).
+
+## V5: Fallback (US5, Testing)
+
+A file mpv can't decode (prepare one on Testing): the error offers "Play transcoded"; it plays
+with a "Transcoded" badge, and the log has the scene and reason. Normal scenes never transcode.
+
+## Gate
+
+`cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
+`cargo test --workspace`, and the harness with every 007 row still passing (SC-009).
