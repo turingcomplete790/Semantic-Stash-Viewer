@@ -17,12 +17,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # libmpv for the player, libturbojpeg for thumbnails, and Mesa's software Vulkan
-      # (lavapipe) with EGL so the UI's headless tests can draw (007).
+      # libmpv for the player; cmake and nasm to build libjpeg-turbo 3 (Ubuntu ships 2.1, too old
+      # for the thumbnail crate); Mesa's software Vulkan (lavapipe) with EGL so the UI's headless
+      # tests can draw (007).
       - name: Linux dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libmpv-dev ffmpeg libturbojpeg0-dev mesa-vulkan-drivers libegl1 libwayland-client0
+          sudo apt-get install -y libmpv-dev ffmpeg cmake nasm mesa-vulkan-drivers libegl1 libwayland-client0
 
       - uses: dtolnay/rust-toolchain@stable
         with:

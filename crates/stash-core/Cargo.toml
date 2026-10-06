@@ -23,7 +23,6 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls", "j
 cynic = "3.14"
 tokio-util = "0.7"
 semver = "1"
-# Scene screenshots cross the UI bridge as data URLs (004 restored scene tabs).
 # View cache (003 research R1): SQLite compiled in, no system library.
 rusqlite = { version = "0.40", features = ["bundled"] }
 # Free disk space for the cache's size limit (003 research R1b); already in the tree.
@@ -33,9 +32,10 @@ rustix = { version = "1", features = ["fs"] }
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
 rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "std"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
-# Scene thumbnails (005 research R5): libjpeg-turbo DCT-scaled decode and encode, linked from the
-# system library (WebKitGTK and ffmpeg already depend on it; CI installs libturbojpeg0-dev).
-turbojpeg = { version = "1", default-features = false, features = ["pkg-config"] }
+# Scene thumbnails (005 research R5): libjpeg-turbo DCT-scaled decode and encode. Linked from the
+# system library when it's 3.0 or newer (ffmpeg already depends on it); otherwise built from source
+# with CMake (Ubuntu 24.04 ships 2.1, so CI builds it; needs cmake and nasm).
+turbojpeg = { version = "1", default-features = false, features = ["pkg-config", "cmake"] }
 # SIMD resizing to the thumbnail width.
 fast_image_resize = "5"
 # Non-JPEG covers (uploaded or scraped PNG/WebP) only.
