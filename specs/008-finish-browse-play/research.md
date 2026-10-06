@@ -206,9 +206,11 @@ semantic-tagging plugin's README; and what 006–007 built.
   (`configureUISetting`, which replaces just that key) instead of a write per tag.
 - **Reading cost**: none extra. The rules arrive in the `UiConfig` request the viewer already
   makes; the tags they match arrive in the vocabulary request.
-- **Plugin parity**: the plugin's `loadTagCategoryMaps` (`src/ui/page-and-registration.js`) runs
-  the same per-flag aliased query to colour by type, with fixed `TAG_CATEGORY_COLORS`; the
-  default rules follow its priority order. The plugin can read the same UI-configuration key to
+- **Plugin parity** (design documents, constitution Principle II): the roadmap's "Preserve the
+  lessons from the existing plugin" (find semantic tags with narrowly scoped custom-field
+  filters) and Milestone 1D §4 (the seven tag types, coloured by type) define what this reads;
+  the plugin implements the same per-flag query today. The default rules follow the plugin's
+  current type priority, an implementation note since the documents don't rank types. The plugin can read the same UI-configuration key to
   share the colours. A scrubbed fixture of the real vocabulary result (Production, read-only)
   checks the parsing.
 - **Alternatives**: a colour custom field on every tag (rejected by the user: finding coloured

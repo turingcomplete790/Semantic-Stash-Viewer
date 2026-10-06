@@ -27,8 +27,9 @@ Stash's UI configuration (`configuration { ui }`), key `semanticStashViewer.tagC
 
 ## Default rules (when the key is absent)
 
-In the plugin's priority order (`TAG_CATEGORY_PRIORITY` in `src/ui/page-and-registration.js`,
-highest first), colours from the RPG palette (constitution Principle XI):
+The seven tag types of the design documents (roadmap Milestone 1D §4), in the plugin's current
+type priority (an implementation note: the documents don't rank types), highest first, with
+colours from the RPG palette (constitution Principle XI):
 
 | Order | Type | Field | Colour |
 |---|---|---|---|
@@ -69,6 +70,7 @@ highest first), colours from the RPG palette (constitution Principle XI):
 
 ## Plugin adoption
 
-The plugin colours by type today with its own `TAG_CATEGORY_COLORS`. To show the same colours it
+The design documents colour chips by type (roadmap Milestone 1D §4), and the plugin does so
+today with fixed colours of its own. To show the same colours it
 reads `semanticStashViewer.tagColours` from the UI configuration (one read, no tag scan) and falls
 back to its own colours when the key is absent.

@@ -45,7 +45,7 @@ Jellyfin server.
 ## Requirements
 
 - Stash **v0.31.1** or newer
-- Linux with a Vulkan driver (Mesa RADV, ANV, or NVIDIA) and libmpv; Wayland or X11
+- Linux with a Vulkan driver (Mesa RADV, ANV, or NVIDIA), libmpv, and RocksDB; Wayland or X11
 - Windows and macOS are planned where iced and mpv allow
 
 ## Development
@@ -56,6 +56,8 @@ Jellyfin server.
 - libmpv with its development headers: `mpv` on Arch/Manjaro, `libmpv-dev` on Debian/Ubuntu.
   VA-API drivers are optional but give hardware decoding.
 - libturbojpeg (`libjpeg-turbo` on Arch/Manjaro, `libturbojpeg0-dev` on Debian/Ubuntu)
+- RocksDB with its development headers: `rocksdb` on Arch/Manjaro, `librocksdb-dev` on
+  Debian/Ubuntu. The semantic engine's on-disk store (Oxigraph) keeps its index there as a cache.
 - A Vulkan driver and libEGL (part of Mesa on most systems)
 
 ### Run

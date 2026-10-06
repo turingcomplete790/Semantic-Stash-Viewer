@@ -3,8 +3,9 @@
 Semantic Stash Viewer is an opinionated, native desktop frontend for the
 [Stash](https://github.com/stashapp/stash) media server, built entirely in Rust with the iced
 toolkit. Its goals:
-(1) bring every feature of the evolving `semantic-tagging` Stash plugin
-(`~/Projects/Stash-Plugins/semantic-tagging/`) to a first-class client; (2) deliver a
+(1) build the semantic model described in the `semantic-tagging` plugin's design documents
+(`~/Projects/Stash-Plugins/semantic-tagging/`) around a semantic search engine, and deliver the
+plugin's features (and the ones its documents plan) through that engine; (2) deliver a
 responsive, near-native browsing experience with optimized GraphQL usage and mpv as the one
 media player for video and images, avoiding the Stash web UI's expensive transcoding; and (3) cover every capability of the
 default Stash web UI, so the viewer can fully replace it. A user points it at any Stash endpoint
@@ -17,9 +18,9 @@ users use a Jellyfin server.
 
 - Stash owns media, scenes, images, galleries, performers, tags, metadata, and persistence. The
   viewer MUST NOT introduce its own authoritative database for library data.
-- Every write (tag assignments, semantic relationships, timeline entries, archetype recipes,
-  ratings, metadata edits) MUST be persisted to Stash through its GraphQL API — typically as tags
-  or `custom_fields` on Tags, Scenes, Images, and Performers.
+- Every write (tag assignments, semantic relationships, timeline entries, Variations, the
+  archetype hierarchy, ratings, metadata edits) MUST be persisted to Stash through its GraphQL
+  API — typically as tags or `custom_fields` on Tags, Scenes, Images, and Performers.
 - Local storage is permitted only for caches, derived indexes, UI preferences, and connection
   profiles. Any local cache MUST be safely discardable: deleting it may cost time, never data.
 - The viewer MUST NOT require a server-side component beyond a stock Stash instance (plus the
@@ -29,28 +30,46 @@ users use a Jellyfin server.
 truth creates sync bugs and lock-in; a client that is a pure lens on Stash can be installed,
 removed, or run on several machines without risk.
 
-### II. Semantic-Tagging Parity & Data Compatibility (NON-NEGOTIABLE)
+### II. The Semantic Model Comes from the Plugin's Design Documents (NON-NEGOTIABLE)
 
-- The semantic-tagging plugin is the reference implementation and its on-Stash data format is a
-  shared contract. The viewer MUST read and write the exact same tag flags and `custom_fields`
-  schemas (e.g. Pluggables, Actions + variations, Roles + categories, Traits, Labels / Field
-  Rules, Mise-en-scène, Timeline slots and Stages, performer-to-performer pairings, Archetypes
-  with parents-only adjacency, Looks) so that the plugin and the viewer can operate on the same
-  library concurrently without corrupting each other's data.
-- Data-scope rules from the plugin MUST be preserved: Scene/Image-scoped data (Roles, Actions,
-  Pluggables, Timeline) stays on the Scene/Image; performer-global data (Traits, Labels) stays on
-  the performer; archetype hierarchy stays parents-only with children derived in memory.
-- Any schema divergence MUST be deliberate, documented in the feature spec, and accompanied by a
-  migration or compatibility shim — never an accidental side effect.
-- The plugin keeps evolving. Each feature spec touching semantic data MUST name the plugin
-  module(s) it mirrors (e.g. `src/ui/timeline.js`, `src/semantic/graph.js`) so parity can be
-  re-checked when the plugin changes. A parity gap is tracked work, not an acceptable end state.
-- Semantic vocabulary, graph model, and query semantics (Semantic Search Matrix, Quick Pairings,
-  graph SELECT/WHERE/FILTER queries, and the roadmap's SPARQL-inspired direction) MUST produce
-  the same results as the plugin for the same library state.
+- **Design documents, not code.** The semantic features are defined by the semantic-tagging
+  plugin's design documents (today `README.md`, `semantic-query-engine-roadmap.md`, and
+  `archetype-system-plan.md` in the plugin repository, plus any the owner adds). The viewer
+  builds what those documents describe; it MUST NOT port the plugin's JavaScript implementation,
+  which started as a small role-and-action tagger and is being decoupled and reworked toward the
+  same documents.
+- **Living documents.** The documents change (for example the Variation, Label, and Archetype
+  reform of Milestone 1D). Each feature spec touching semantic data MUST cite the document
+  sections it builds on and the plugin commit (or date) it read them at, so the work can be
+  re-checked when they change. Where the plugin's code and its documents disagree, the documents
+  win, and the disagreement is noted for the plugin.
+- **One data contract.** What the documents put in Stash is a shared contract: the viewer MUST read
+  and write the same tag flags and `custom_fields` as the documents (and the plugin, where it
+  implements them) so both can work on the same library concurrently without corrupting each
+  other's data. The documents hold the current list; at this amendment it includes per-type tag
+  flags (`plugtag`, `isAction`, `isRole`, `isTrait`, `isLabel`, `isMiseEnScene`, `isVariation`,
+  as 0/1 values), Variations as real tags carrying their own reverse-indexed `custom_fields`,
+  common variants (`variantOfTagId`), Label formulas, Timeline data, and Archetypes as
+  performers with parents-only adjacency.
+- **Data scopes** are kept as the documents define them (for example scene- and image-scoped
+  Roles, Actions, Pluggables, and Timeline data; performer-global Traits and Labels; a
+  Variation's facts on its own tag; archetype children derived in memory).
+- Any divergence from the contract MUST be deliberate, documented in the feature spec, and come
+  with a migration or compatibility shim — never an accidental side effect.
+- **Tag colours** are part of the shared semantic data. The plugin colours semantic tags by type
+  today; the viewer colours tags by **colour rules** keyed on tag flags (Principle XI), with a
+  distinct default colour for each semantic type, stored in Stash in a documented format the
+  plugin can read, so both show the same colours for the same library. Colours MUST NOT be
+  written onto tags.
+- **Query semantics** (semantic search, the Search Matrix, Quick Pairings, recommendations, Label
+  evaluation, archetype inheritance, and the SPARQL-style queries the roadmap plans) MUST follow
+  the documents' definitions, so the same library state gives the same answers in the viewer
+  and in a plugin that implements the same documents.
 
-**Rationale**: The viewer's reason to exist is to be the best home for semantic tagging. If the
-two diverge, the user loses the ability to use either one safely.
+**Rationale**: The viewer's reason to exist is to be the best home for semantic tagging. The
+plugin's code reflects where it started, not where it is going; its documents are the design both
+are converging on. Sharing the data contract keeps the two safe to use side by side, and building
+from the documents keeps the viewer from inheriting the plugin's early shortcuts.
 
 ### III. Brain/UI Separation
 
@@ -60,8 +79,8 @@ two diverge, the user loses the ability to use either one safely.
 - The UI MUST reach Stash only through the core's typed, asynchronous API (calls that return typed
   results, run off the UI thread, and come back to the UI as messages); it MUST NOT issue its own
   GraphQL requests or open its own connections to Stash.
-- Layering inside the core mirrors the plugin: a single Stash adapter owns all network I/O; the
-  semantic engine consumes the adapter; the UI consumes the engine. Cross-layer shortcuts are
+- Layering inside the core: a single Stash adapter owns all network I/O; the semantic index and
+  engine (Principle XII) consume the adapter; the UI consumes the core. Cross-layer shortcuts are
   violations.
 - Core modules MUST be unit-testable headlessly (no window or GPU, and ideally no running Stash,
   via recorded/fixture GraphQL responses).
@@ -80,7 +99,9 @@ no command layer or generated bindings to keep in sync.
 - Every GraphQL operation MUST select only the fields the consuming view needs; shared fragments
   are defined per view tier (card, detail, editor) rather than one "fetch everything" fragment.
 - Queries against semantic vocabulary MUST be narrowly scoped using tag flags / `custom_fields`
-  filters; the viewer MUST NOT load the entire Stash tag universe when only the bounded semantic
+  filters evaluated by Stash: semantic tags of a type are found with "flag is not null" (and
+  ordinary tags with "every flag is null"), never by loading every tag and testing flags locally.
+  The viewer MUST NOT load the entire Stash tag universe when only the bounded semantic
   vocabulary is needed.
 - **Paged lists**: list and grid views of library items MUST be paged: one page of results at a
   time, with page navigation (previous, next, first, last, and jump to a page), the total count,
@@ -198,6 +219,10 @@ and strict checking stays available per server.
   combine screens, or improve workflows, but a capability MUST NOT be silently dropped.
 - Parity never means imitation. Where the web UI's design is weak, the viewer SHOULD redesign it
   rather than copy it; the gallery viewer is the prime example and follows Principle X.
+- Parity is a floor, not a ceiling: capabilities the web UI lacks (tag colours, Principle XI; the
+  semantic engine, Principle XII; the
+  semantic features, Principle II; mixed galleries, Principle X) are welcome, under the same
+  principles as everything else.
 - Server administration settings (Stash's System/Settings pages) are in scope unless a feature
   spec explicitly defers them, stating why and linking them to the web UI instead.
 - Capabilities MUST be built on Stash's public GraphQL API, following Principles I and IV. Each
@@ -274,6 +299,89 @@ collections mix photo sets and videos of the same shoot or subject. A native cli
 media player can present them together, which is a reason to choose this viewer over the web UI.
 Designing it fresh, instead of porting Stash's viewer, avoids inheriting its problems.
 
+### XI. Visual Identity & Tag Colours
+
+- **App palette**: the app uses one defined palette (dark blue base; rosewood, yale blue,
+  cerulean, frosted blue, and icy aqua accents, as set by the user in 007), applied through the
+  theme, never hard-coded per screen.
+- **Semantic features wear a light RPG theme.** The semantic manager and the semantic-tagging
+  features (Roles, Actions, Traits, Labels, Pluggables, Variations, Mise-en-scène, the Timeline,
+  Archetypes, semantic search and the Search Matrix) MUST be lightly themed with the RPG palette below: accents,
+  panel frames, headers, and highlights within those features, not a reskin of the whole app.
+  Text MUST stay legible (at least 4.5:1 contrast for body text) on both palettes.
+
+  | Role | Colours |
+  |---|---|
+  | Shadows and panels (dark to light) | `#0d0a05` `#1c1508` `#2e2010` `#4a3420` |
+  | Leather and parchment | `#7a5c38` `#b08858` `#d4b880` `#f0e0b0` |
+  | Gold (emphasis, selection) | `#c8952a` |
+  | Greens (positive, growth) | `#7dd87a` `#3a9e50` |
+  | Blues (information, links) | `#5b8fd4` `#2a5090` |
+  | Red (danger, conflict) | `#d44040` |
+  | Purple (rare, arcane) | `#8840c0` |
+  | Light text | `#e8e0c8` |
+
+- **Role-playing icons**: because semantic tagging is built on roles and relationships, the
+  semantic manager's icons MUST be a consistent role-playing-inspired set (for example shields,
+  scrolls, crowns, masks, swords, bonds), drawn the same way as the app's other icons (vector, tinted
+  by the theme) and carrying their licence notices. Icons outside the semantic features keep the
+  app's general set.
+- **Tag colours come from colour rules, not from tags.** A colour rule pairs a tag flag (a tag
+  custom field such as `isRole`) with a colour; a tag takes the colour of the first rule, in the
+  user's order, whose flag it has set. Every semantic type MUST have a default rule with its own
+  colour from the RPG palette, and the user MUST be able to change colours, add rules for other
+  flags, reorder, and reset them in Settings.
+  - **Storage**: the rules are library data, stored in Stash per Principle I (the UI
+    configuration, under the viewer's own key), never only on one machine. Colours MUST NOT be
+    written onto individual tags.
+  - **Lookup**: the tags a rule colours MUST be found with a server-side "flag is not null" filter
+    (Principle IV), never by reading every tag to find colours. Reading rules and matches MUST
+    add no request per tag or per chip.
+  - **Display**: wherever a tag appears (chips on cards and scene pages, filter chips and pickers,
+    the Timeline, the semantic manager) it MUST show its rule's colour, with chip text kept
+    legible (dark or light text chosen for at least 4.5:1 contrast).
+
+**Rationale**: colour-coded tags are how the user reads semantic data at a glance, a capability
+the plugin already relies on and the web UI lacks. A light, consistent RPG identity makes the
+semantic features recognisable as their own space without making the rest of the app feel like a
+game, and keeping colours in Stash means every client shows the same thing. Colours belong to
+flags because flags are what Stash can filter on cheaply: a rule finds exactly its tags with one
+"not null" filter and changing a colour is one small write, while a colour on every tag would need
+a scan to find and a write per tag to change.
+
+### XII. The Semantic Engine Is the Foundation
+
+- The core MUST build a **semantic search engine**: a graph of semantic facts derived from Stash
+  (scenes, images, performers, tags, and the relationships the design documents define), queried
+  with a SPARQL-style language as the plugin's roadmap describes (`SELECT` with variables and
+  joins first; `CONSTRUCT` and rules later).
+- **Features are clients of the engine.** Semantic search, the Search Matrix, Quick Pairings,
+  recommendations, Label evaluation, and archetype inheritance MUST be expressed as engine
+  queries (or rules), not as separate hand-written filters per feature. A feature that needs a
+  fact the engine lacks adds it to the engine.
+- **A derived index** (Principle I): the engine's store is built from Stash, kept up to date as
+  Stash changes, and safe to delete (rebuilt on demand). It never becomes the source of truth,
+  and writes still go to Stash.
+- **Built on an existing engine: Oxigraph, with Redland as the fallback.** The viewer embeds
+  **Oxigraph** (Rust; SPARQL 1.1 Query and Update, SPARQL 1.2 behind a feature) rather than writing
+  its own engine. **Redland** (librdf with Rasqal, C, through FFI under the unsafe-code gate) is
+  the fallback, used only if Oxigraph proves unable to meet this principle or Principle VI's
+  budgets, and only by an amendment that records why. The engine sits behind a core interface so
+  it can be replaced without touching features. It runs in-process: no server to install
+  (Principle I).
+- **Disk store as a cache.** Oxigraph's on-disk store (RocksDB) MAY keep the engine's index
+  between launches so it isn't rebuilt every time the app starts. It is a cache under Principle I:
+  kept in the cache folder, one per server profile and never shared across servers, rebuilt when
+  missing, damaged, or from an older format, and cleared with the app's other caches.
+- **Fast and incremental**: building and querying run off the UI thread; the first build shows
+  progress and can be cancelled (Principle VI); later updates are incremental, fetched with the
+  lean, flag-filtered queries of Principle IV.
+
+**Rationale**: The plugin began as a simple tagger and grew feature by feature, each with its own
+filtering code; its roadmap concludes that a semantic layer with one query engine is the right
+shape. Rust can host a real RDF/SPARQL engine in-process, so the viewer builds that foundation
+first and lets every semantic feature, including the plugin's, sit on top of it.
+
 ## Technology & Platform Constraints
 
 - **Native UI**: the whole application is Rust. The UI is built with **iced** (0.14 or later),
@@ -295,24 +403,29 @@ Designing it fresh, instead of porting Stash's viewer, avoids inheriting its pro
   ratification). It provides `custom_fields` on Tags, Scenes, Images, and Performers. The viewer
   MUST check the server version on connect and refuse to proceed, with a clear message, when the
   server is older. Raising the minimum is a MINOR amendment to this constitution.
+- **Semantic engine**: Oxigraph, embedded and in-process, with its RocksDB disk store as a
+  rebuildable cache (RocksDB is a system requirement, like libmpv); Redland (librdf, Rasqal) is the
+  fallback, through FFI under the unsafe-code rules below (Principle XII).
 - **Dependencies**: each new crate MUST be justified in the plan (what it replaces, its size, its
   maintenance status). Prefer mature, widely used crates, and crates already in the dependency tree.
-- **Transition from the Tauri build**: the Tauri/webview build (features 001–005) is frozen. It
-  receives no new features, stays buildable as the reference until the native build covers its
-  features (connection and profiles, cache, app shell, Scenes, playback), and is then removed.
-  Specs 001–005 keep their user-facing requirements; their implementation plans are superseded.
+- **Transition from the Tauri build**: the Tauri/webview build (features 001–005) was replaced
+  by the native app and removed in feature 007. Specs 001–005 keep their user-facing
+  requirements; their implementation plans are superseded.
 
 ## Development Workflow & Quality Gates
 
 - **Spec-driven flow**: features proceed through `/speckit-specify` → `/speckit-plan` →
   `/speckit-tasks` → `/speckit-implement`. Every plan MUST include a Constitution Check that
-  explicitly addresses Principles I–X, and any deviation MUST be recorded in the plan's
+  explicitly addresses Principles I–XII, and any deviation MUST be recorded in the plan's
   Complexity Tracking table with justification.
-- **Parity check**: specs touching semantic data MUST cite the semantic-tagging plugin modules
-  they mirror and describe how compatibility with the plugin's data is verified (Principle II).
+- **Parity check**: specs touching semantic data MUST cite the design-document sections they
+  build on (with the plugin commit or date they were read at) and describe how compatibility
+  with the shared data contract is verified (Principle II).
 - **Testing**:
   - Rust core: unit tests for the adapter (against recorded GraphQL fixtures), semantic parsing,
     index building, query evaluation, and archetype inheritance.
+  - Engine: query tests over fixture graphs, including the worked examples in the design
+    documents, so a document's example query and its expected answer are a test.
   - Compatibility tests: fixtures captured from a real library tagged by the plugin MUST
     round-trip through the viewer's read → write path unchanged.
   - Integration/E2E tests against a disposable Stash instance for connection, auth, and write
@@ -358,11 +471,11 @@ Designing it fresh, instead of porting Stash's viewer, avoids inheriting its pro
   - MINOR — a principle or section is added, or guidance is materially expanded.
   - PATCH — clarifications, wording, or typo fixes with no change in meaning.
 - **Compliance review**: every `/speckit-plan` Constitution Check and every code review MUST
-  verify compliance with Principles I–X. Unjustified violations block merge. Justified
+  verify compliance with Principles I–XII. Unjustified violations block merge. Justified
   exceptions are recorded in the plan's Complexity Tracking and revisited when the related
   feature is next touched.
-- **Periodic review**: when the semantic-tagging plugin gains a significant new feature or data
-  structure, Principle II's parity expectations MUST be re-evaluated and parity work added to the
-  backlog.
+- **Periodic review**: when the plugin's design documents gain a significant new feature or data
+  structure (or change an existing one), Principle II's expectations MUST be re-evaluated and the
+  work added to the backlog.
 
-**Version**: 4.1.0 | **Ratified**: 2026-09-23 | **Last Amended**: 2026-10-03
+**Version**: 5.0.0 | **Ratified**: 2026-09-23 | **Last Amended**: 2026-10-06

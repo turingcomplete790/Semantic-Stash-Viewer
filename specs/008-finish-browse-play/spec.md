@@ -573,18 +573,33 @@ error offers the fallback, that choosing it plays the transcoded stream with a v
 - **Semantic tag flags** are the plugin's per-type tag custom fields (`plugtag`, `isTrait`,
   `isRole`, `isAction`, `isLabel`, `isMiseEnScene`, `isVariation`) and the common-variant link
   `variantOfTagId`; this feature reads them and writes none. Recommending semantic tags from a
-  scene's ordinary tags is Phase 4. The plugin colours by type today (`TAG_CATEGORY_COLORS` in
-  `src/ui/page-and-registration.js`), the same model as the colour rules; it can read
+  scene's ordinary tags is Phase 4. The design documents colour tag chips by type (roadmap
+  Milestone 1D §4), the same model as the colour rules; the plugin can read
   `semanticStashViewer.tagColours` from the UI configuration to show the same colours
   (constitution Principle II).
-- **Plugin parity** (constitution Principle II): this feature mirrors these semantic-tagging
-  plugin modules (`/home/bbulder/Projects/Stash-Plugins/semantic-tagging/src/`):
-  `ui/page-and-registration.js` (the per-type flag query, type priority, and chip colouring),
-  `ui/shared.js` (common variants via `variantOfTagId`, the recommendation engine Phase 4 will
-  mirror), and the per-type flag readers in `ui/traits.js`, `ui/roles.js`, `ui/actions.js`,
-  `ui/labels.js`, `ui/pluggables.js`, `ui/mise-en-scene.js`, and `ui/variations.js` (a flag is set
-  when it is `1`, `"1"`, `true`, or `"true"`). Compatibility is verified with a scrubbed fixture
-  of the vocabulary query's result captured read-only from Production (ids, flags, and variant
-  links kept; names replaced), parsed by the core's tests.
+- **Plugin parity** (constitution Principle II): this feature builds on these sections of the
+  semantic-tagging plugin's design documents
+  (`/home/bbulder/Projects/Stash-Plugins/semantic-tagging/`), read at commit `3c82c85` plus the
+  working-tree edits present on 2026-10-06:
+  - `semantic-query-engine-roadmap.md`, "Preserve the lessons from the existing plugin": semantic
+    tag categories are marked with custom-field flags and found with narrowly scoped
+    custom-field filters, never by loading every tag (FR-003c).
+  - `semantic-query-engine-roadmap.md`, Milestone 1D §2 "Looks → Variation" and §4 "Variation
+    joins every other tag type's shared tooling": the seven per-type flags (`plugtag`,
+    `isAction`, `isRole`, `isTrait`, `isLabel`, `isMiseEnScene`, `isVariation`), Variation as a
+    full peer type, and per-type chip colouring (FR-003c, FR-003d).
+  - `semantic-query-engine-roadmap.md`, Milestone 1C "Tag Recommendations & Common Variants":
+    `variantOfTagId` on the variant tag pointing at its canonical tag, and the recommendations
+    Phase 4 builds on the scene's ordinary tags (FR-003c, FR-003d).
+  - `semantic-query-engine-roadmap.md`, Milestones 2–4 (query engine, general search, matrix
+    integration): the semantic filters shown here only as placeholders (FR-003b).
+
+  Two details the documents don't state come from the plugin's current behaviour and are
+  recorded as implementation notes, not design sources: a flag counts as set when it is `1`,
+  `"1"`, `true`, or `"true"` (the documents and the owner say flags are 0/1), and the default
+  colour-rule order follows the plugin's current type priority. Compatibility with the shared
+  data contract is verified with a scrubbed fixture of the vocabulary query's result captured
+  read-only from Production (ids, flags, and variant links kept; names replaced), parsed by the
+  core's tests.
 - **Out of scope**: all editing (scene metadata, ratings, O-counter, markers, organized flag, bulk
   edit), saving or deleting saved filters, the tagger, and generating previews or sprites.
