@@ -39,12 +39,20 @@ impl Playback {
         self.snapshot().state != PlayerStateKind::Idle
     }
 
-    /// Start `scene_id` for tab `owner`.
+    /// Start `scene_id` for tab `owner`, from the beginning.
     pub fn open(&mut self, scene_id: String, owner: TabId) -> Vec<Effect> {
+        self.open_at(scene_id, owner, None)
+    }
+
+    /// Start `scene_id` for tab `owner` at `start` seconds (a resume point or a marker).
+    pub fn open_at(&mut self, scene_id: String, owner: TabId, start: Option<f64>) -> Vec<Effect> {
         self.owner = Some(owner);
         self.scene_id = Some(scene_id.clone());
         self.failure_posted = false;
-        vec![Effect::OpenScene(scene_id)]
+        vec![Effect::OpenScene {
+            id: scene_id,
+            start,
+        }]
     }
 
     /// The scene playing (or opening).

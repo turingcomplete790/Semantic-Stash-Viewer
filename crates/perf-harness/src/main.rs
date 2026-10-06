@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-use report::{summarise, Check, Measurement, Report, Unit};
+use report::{gql_measurements, summarise, Check, GqlRow, Measurement, Report, Unit};
 
 const LAUNCH_TIMEOUT: Duration = Duration::from_secs(300);
 const LONG_PLAYBACK_SECS: u32 = 60;
@@ -157,6 +157,7 @@ fn run(options: &Options) -> Result<Report, String> {
     measurements.push(cold_start("cold-start-cleared", None, &cleared));
     measurements.extend(bench_measurements(&bench));
     measurements.extend(scenes_measurements(&bench));
+    measurements.extend(gql_rows(&bench));
     measurements.extend(playback_measurements(&playback));
     measurements.extend(resource_measurements(&bench, &playback));
 
@@ -504,6 +505,34 @@ fn from_bench(
         .or_else(|| launch.invalid())
         .or_else(|| line.is_none().then(|| "not measured".to_owned()));
     Measurement::new(name, Unit::Ms, budget, check, summary, invalid)
+}
+
+/// The live query-budget audit (008 contracts/query-budget.md): one `gql` line per scenario.
+fn gql_rows(launch: &Launch) -> Vec<Measurement> {
+    launch
+        .lines
+        .iter()
+        .filter(|l| l.get("bench").and_then(Value::as_str) == Some("gql"))
+        .filter_map(|l| {
+            let row = l.get("row").and_then(Value::as_str)?.to_owned();
+            let requests = l
+                .get("requests")
+                .and_then(Value::as_object)
+                .map_or(0, |ops| ops.values().filter_map(Value::as_u64).sum::<u64>());
+            let ms = l
+                .get("ms")
+                .and_then(Value::as_array)
+                .map(|v| v.iter().filter_map(Value::as_f64).collect())
+                .unwrap_or_default();
+            Some(GqlRow {
+                row,
+                requests: usize::try_from(requests).unwrap_or(usize::MAX),
+                bytes: number(l, "bytes").map_or(0, |b| b as usize),
+                ms,
+            })
+        })
+        .flat_map(|row| gql_measurements(&row, launch.invalid()))
+        .collect()
 }
 
 fn bench_measurements(launch: &Launch) -> Vec<Measurement> {

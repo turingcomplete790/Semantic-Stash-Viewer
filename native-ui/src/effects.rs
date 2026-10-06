@@ -163,7 +163,11 @@ pub enum Effect {
     /// Enter or leave fullscreen.
     SetFullscreen(bool),
     /// Look up a scene and start playing it.
-    OpenScene(String),
+    /// Open a scene in the player, at `start` seconds (a resume point or marker) or the beginning.
+    OpenScene {
+        id: String,
+        start: Option<f64>,
+    },
     /// A playback control.
     Player(PlayerAction),
     /// Stop playback and the video path, then leave the app.
@@ -309,7 +313,7 @@ pub fn run(effect: Effect, services: &Arc<Services>, window: Option<window::Id>)
             let services = Arc::clone(services);
             Task::perform(
                 async move {
-                    let key = format!("scene:details:{id}");
+                    let key = stash_core::cache::keys::scene_details(&id);
                     let wanted = id.clone();
                     let result =
                         services
@@ -472,10 +476,10 @@ pub fn run(effect: Effect, services: &Arc<Services>, window: Option<window::Id>)
                 None => Task::none(),
             }
         }
-        Effect::OpenScene(id) => {
+        Effect::OpenScene { id, start } => {
             let services = Arc::clone(services);
             Task::perform(
-                async move { services.open_scene(&id).await.map(|_| ()) },
+                async move { services.open_scene(&id, start).await.map(|_| ()) },
                 |result| Message::Reply(Reply::SceneOpened(result)),
             )
         }

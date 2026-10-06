@@ -6,6 +6,7 @@
 //! profile's base URL, never taken from Stash's `paths.stream` (which embeds the API key when
 //! authentication is on).
 
+pub mod filter;
 pub mod paging;
 pub mod query;
 

@@ -82,6 +82,21 @@ fn a_broken_or_old_file_is_set_aside_and_the_app_starts_fresh() {
 }
 
 #[test]
+fn a_version_1_file_from_007_starts_fresh() {
+    assert_eq!(VERSION, 2, "008 saves Scenes tabs in version 2");
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("session.json");
+    let profile = Uuid::new_v4();
+    let v1 = format!(r#"{{"version":1,"sessions":{{"{profile}":{{"selected":0,"tabs":[]}}}}}}"#);
+    std::fs::write(&path, v1).expect("write");
+    assert!(
+        snapshot::load(&path, profile).is_none(),
+        "no migration from 007"
+    );
+    assert!(dir.path().join("session.json.bad").exists());
+}
+
+#[test]
 fn limits_apply_when_saving() {
     let (mut s, _) = Shell::new();
     for _ in 0..60 {

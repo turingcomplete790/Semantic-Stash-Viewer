@@ -1,0 +1,5 @@
+query UiConfig {
+  configuration {
+    ui
+  }
+}

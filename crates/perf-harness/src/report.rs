@@ -14,6 +14,8 @@ pub enum Unit {
     Percent,
     /// Megabytes of memory.
     Mb,
+    /// Kilobytes of response payload (`gql-*` rows).
+    Kb,
 }
 
 impl Unit {
@@ -28,6 +30,7 @@ impl Unit {
             Unit::Count => "",
             Unit::Percent => "%",
             Unit::Mb => "MB",
+            Unit::Kb => "KB",
         }
     }
 }
@@ -179,6 +182,78 @@ pub struct Report {
     #[serde(default = "web_app")]
     pub app: String,
     pub measurements: Vec<Measurement>,
+}
+
+/// The request budget of each live audit row (008 contracts/query-budget.md "Live audit rows"):
+/// the most GraphQL requests the scenario may send. Rows not listed are reported as info.
+pub const GQL_BUDGETS: &[(&str, f64)] = &[
+    ("gql-page-50", 1.0),
+    ("gql-page-1000", 1.0),
+    ("gql-filter-apply", 1.0),
+    ("gql-scene-page", 1.0),
+    ("gql-scene-files", 1.0),
+    ("gql-scene-galleries", 1.0),
+    ("gql-chip-rest", 1.0),
+    ("gql-chip-sweep", 0.0),
+    ("gql-picker-cold", 1.0),
+    ("gql-picker-cached", 0.0),
+    ("gql-vocabulary-cold", 1.0),
+    ("gql-tags-picker-cold", 2.0),
+    ("gql-tag-colours-save", 2.0),
+    ("gql-viewing-10min-writes", 12.0),
+];
+
+/// One scenario's recorded requests, as the UI bench prints them
+/// (`{"bench": "gql", "row", "requests": {operation: count}, "bytes", "ms": [...]}`).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct GqlRow {
+    pub row: String,
+    pub requests: usize,
+    pub bytes: usize,
+    pub ms: Vec<f64>,
+}
+
+/// A scenario's three rows: its request count against the budget, its response size (flagged when
+/// more than 20% larger than the previous report), and the server time per request.
+pub fn gql_measurements(row: &GqlRow, invalid: Option<String>) -> Vec<Measurement> {
+    let budget = GQL_BUDGETS
+        .iter()
+        .find(|(name, _)| *name == row.row)
+        .map(|(_, b)| *b);
+    #[allow(clippy::cast_precision_loss)]
+    let requests = row.requests as f64;
+    #[allow(clippy::cast_precision_loss)]
+    let kb = row.bytes as f64 / 1024.0;
+    let time = if row.ms.is_empty() {
+        // No requests is a valid outcome (a cached picker); there's just no time to report.
+        Measurement::from_samples(
+            &format!("{}-server-time", row.row),
+            Unit::Ms,
+            None,
+            &[0.0],
+            invalid.clone(),
+        )
+    } else {
+        Measurement::new(
+            &format!("{}-server-time", row.row),
+            Unit::Ms,
+            None,
+            Check::Median,
+            summarise(&row.ms),
+            invalid.clone(),
+        )
+    };
+    vec![
+        Measurement::from_samples(&row.row, Unit::Count, budget, &[requests], invalid.clone()),
+        Measurement::from_samples(
+            &format!("{}-payload", row.row),
+            Unit::Kb,
+            None,
+            &[kb],
+            invalid,
+        ),
+        time,
+    ]
 }
 
 fn web_app() -> String {
@@ -411,6 +486,65 @@ mod tests {
         let json = serde_json::to_string(&r).expect("json");
         let back: Report = serde_json::from_str(&json).expect("round trip");
         assert_eq!(back, r);
+    }
+
+    #[test]
+    fn a_gql_row_over_budget_fails_and_payload_growth_is_flagged() {
+        let row = GqlRow {
+            row: "gql-scene-page".into(),
+            requests: 2,
+            bytes: 12 * 1024,
+            ms: vec![10.0, 20.0, 30.0],
+        };
+        let rows = gql_measurements(&row, None);
+        assert_eq!(rows[0].name, "gql-scene-page");
+        assert_eq!(
+            rows[0].result,
+            Outcome::Fail,
+            "2 requests against a budget of 1"
+        );
+        assert_eq!(rows[1].name, "gql-scene-page-payload");
+        assert_eq!(rows[1].median, 12.0);
+        assert_eq!(rows[2].median, 20.0);
+
+        let mut now = report(gql_measurements(
+            &GqlRow {
+                bytes: 15 * 1024,
+                ..row.clone()
+            },
+            None,
+        ));
+        now.compare(Some(&report(rows)));
+        assert!(
+            now.measurements[1].regressed,
+            "25% larger payload is flagged"
+        );
+    }
+
+    #[test]
+    fn a_cached_scenario_with_no_requests_passes_its_zero_budget() {
+        let rows = gql_measurements(
+            &GqlRow {
+                row: "gql-picker-cached".into(),
+                ..GqlRow::default()
+            },
+            None,
+        );
+        assert_eq!(rows[0].result, Outcome::Pass);
+        assert_eq!(rows[2].result, Outcome::Info);
+    }
+
+    #[test]
+    fn an_unlisted_row_is_info() {
+        let rows = gql_measurements(
+            &GqlRow {
+                row: "gql-something-new".into(),
+                requests: 3,
+                ..GqlRow::default()
+            },
+            None,
+        );
+        assert_eq!(rows[0].result, Outcome::Info);
     }
 
     #[test]

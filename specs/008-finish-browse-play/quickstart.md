@@ -2,8 +2,28 @@
 
 Prerequisites: the native app built (`cargo build -p semantic-stash-viewer-native`); the Testing
 instance on :9998 (its saved profile is `localhost:9998`) for anything that writes play history;
-Production (`localhost:9999`) read-only. A few saved scene filters made in Testing's web UI
-(include one with performers, one with tags and a resolution, and a default filter).
+Production (`localhost:9999`) read-only.
+
+Test data on Testing (seeded 2026-10-06 through its GraphQL API in the web UI's own formats; ids
+only):
+
+| What | Id(s) |
+|---|---|
+| Performers "SSV Test Performer A" / "B" (A on scenes 181–190, B on 185–195) | 2 / 3 |
+| Ordinary tag (all of scenes 181–195); parent tag; child tag (even-numbered scenes) | 6; 7; 8 |
+| `isTrait: 1` tag; `plugtag: 1` tag (scene 187) | 9; 10 |
+| Common variant (`variantOfTagId` → 9); `isTrait: 0` tag; `ssvTestFlag: 1` tag (scenes 185–186) | 11; 12; 13 |
+| Scene with markers (10–20 s, 60 s, 120 s) | 185 |
+| Scene with several files | 23 |
+| Scenes with sprites and animated previews generated | 185, 192 (194 queued) |
+| Scenes with the custom field `ssvSceneFlag: 1` | 181, 183 |
+| Saved filters: "SSV performer A"; "SSV parent tag + 1080p" (depth: all); "SSV scene custom field" | 1; 2; 3 |
+| Default scene filter (`defaultFilters.scenes`): performer B, title ascending | – |
+
+The plugin compatibility fixture is `crates/stash-core/tests/fixtures/semantic/vocabulary.json`:
+the `SemanticVocabulary` result captured read-only from Production on 2026-10-06, with names and
+aliases replaced by `tag-<id>` and only the semantic flags and `variantOfTagId` kept (it includes
+real flags set to 0).
 
 ## Query budget (run first, automated)
 

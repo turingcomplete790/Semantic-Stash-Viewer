@@ -1,23 +1,32 @@
 //! The Stash adapter: the **only** module in the workspace allowed to make network calls
 //! (constitution Principle III). Everything else reaches Stash through `StashClient`.
 
+pub mod activity;
+pub mod chips;
+pub mod choices;
+pub mod filters;
 pub mod gql;
 pub mod health;
 pub mod jobs;
+pub mod operations;
 pub mod probe;
+pub mod record;
 pub mod scenes;
+pub mod semantic;
 
 use std::error::Error as _;
 
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use url::Url;
 
 use crate::connection::failure::ConnectFailure;
 use crate::error::AppError;
 use crate::profiles::model::display_url;
+use record::{operation_name_in, Recorder, RequestKind, RequestRecord};
 
 /// Overall budget for a single connection attempt (FR-006).
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -32,6 +41,7 @@ pub struct StashClient {
     base_url: Url,
     strict_tls: bool,
     api_key: Option<String>,
+    recorder: Option<Arc<dyn Recorder>>,
 }
 
 impl StashClient {
@@ -61,7 +71,31 @@ impl StashClient {
             base_url,
             strict_tls,
             api_key,
+            recorder: None,
         })
+    }
+
+    /// The same client, reporting every request it sends to `recorder` (008 research R2).
+    #[must_use]
+    pub fn with_recorder(self, recorder: Arc<dyn Recorder>) -> Self {
+        Self {
+            recorder: Some(recorder),
+            ..self
+        }
+    }
+
+    /// Report one GET of a resource `kind` (`thumbnail`, `preview`, `sprite`, …; never the URL)
+    /// to the recorder, if there is one.
+    pub(crate) fn record_get(&self, kind: &str, response_bytes: usize, started: Instant) {
+        if let Some(recorder) = &self.recorder {
+            recorder.record(RequestRecord {
+                operation: kind.to_owned(),
+                kind: RequestKind::Get,
+                request_bytes: 0,
+                response_bytes,
+                duration: started.elapsed(),
+            });
+        }
     }
 
     pub fn base_url(&self) -> &Url {
@@ -131,13 +165,27 @@ impl StashClient {
         R: DeserializeOwned,
         V: Serialize,
     {
-        let response = self
-            .graphql_request(true)
-            .json(operation)
-            .send()
-            .await
-            .map_err(|e| AppError::from(self.classify_transport_error(&e)))?;
-        let status = response.status();
+        let body = serde_json::to_vec(operation).map_err(|e| AppError::Internal {
+            message: format!("could not encode the request: {e}"),
+        })?;
+        let name = operation
+            .operation_name
+            .as_deref()
+            .or_else(|| operation_name_in(&operation.query))
+            .unwrap_or("anonymous");
+        let request_bytes = body.len();
+        let started = Instant::now();
+        let result = self.graphql_bytes(body).await;
+        if let Some(recorder) = &self.recorder {
+            recorder.record(RequestRecord {
+                operation: name.to_owned(),
+                kind: RequestKind::GraphQl,
+                request_bytes,
+                response_bytes: result.as_ref().map_or(0, |(_, bytes)| bytes.len()),
+                duration: started.elapsed(),
+            });
+        }
+        let (status, bytes) = result?;
         if status == reqwest::StatusCode::UNAUTHORIZED {
             return Err(if self.has_api_key() {
                 ConnectFailure::ApiKeyRejected
@@ -152,7 +200,7 @@ impl StashClient {
             });
         }
         let parsed: cynic::GraphQlResponse<R> =
-            response.json().await.map_err(|e| AppError::Internal {
+            serde_json::from_slice(&bytes).map_err(|e| AppError::Internal {
                 message: format!("unexpected response from Stash: {e}"),
             })?;
         if let Some(error) = parsed.errors.as_ref().and_then(|errors| errors.first()) {
@@ -163,6 +211,26 @@ impl StashClient {
         parsed.data.ok_or_else(|| AppError::Internal {
             message: "Stash returned no data".into(),
         })
+    }
+
+    /// POST an encoded GraphQL body; the HTTP status and the whole response body.
+    async fn graphql_bytes(
+        &self,
+        body: Vec<u8>,
+    ) -> Result<(reqwest::StatusCode, Vec<u8>), AppError> {
+        let response = self
+            .graphql_request(true)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(body)
+            .send()
+            .await
+            .map_err(|e| AppError::from(self.classify_transport_error(&e)))?;
+        let status = response.status();
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|e| AppError::from(self.classify_transport_error(&e)))?;
+        Ok((status, bytes.to_vec()))
     }
 
     /// Classify a transport-level error (no HTTP response was received).

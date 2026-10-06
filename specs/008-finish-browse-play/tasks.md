@@ -44,17 +44,17 @@ tests first and check that they fail.
 
 **Purpose**: module skeletons and test data on Testing.
 
-- [ ] T001 Create `crates/stash-core/graphql/operations/` with a `README.md` (one golden `.graphql`
+- [X] T001 Create `crates/stash-core/graphql/operations/` with a `README.md` (one golden `.graphql`
   file per named operation; how to regenerate with `UPDATE_GOLDEN=1`) and the first golden file
   `ScenesPage.graphql` holding the current `find_scenes_page` operation text from
   `crates/stash-core/src/adapter/scenes.rs`
-- [ ] T002 [P] Add empty modules and register them: `crates/stash-core/src/adapter/{filters,choices,
+- [X] T002 [P] Add empty modules and register them: `crates/stash-core/src/adapter/{filters,choices,
   chips,activity,semantic}.rs` in `crates/stash-core/src/adapter/mod.rs`;
   `crates/stash-core/src/scenes/filter/mod.rs` in `crates/stash-core/src/scenes/mod.rs`;
   `crates/stash-core/src/semantic.rs`, `crates/stash-core/src/previews.rs`,
   `crates/stash-core/src/sprites.rs`, and `crates/stash-core/src/playback/{mod,history}.rs` in
   `crates/stash-core/src/lib.rs`
-- [ ] T003 [P] Prepare Testing (`localhost:9998`) through its web UI, and record the ids (not
+- [X] T003 [P] Prepare Testing (`localhost:9998`) through its web UI, and record the ids (not
   titles or paths) in [quickstart.md](quickstart.md) under "Prerequisites": three saved scene
   filters (one with performers, one with tags plus a resolution, one with a custom field), a
   default scene filter, a scene with markers, a scene with several files, a scene with sprites
@@ -77,31 +77,31 @@ the session file version, and the player's start position.
 
 **⚠️ CRITICAL**: no user story work can begin until this phase is complete.
 
-- [ ] T004 Add a request recorder to `StashClient` in `crates/stash-core/src/adapter/mod.rs`: a
+- [X] T004 Add a request recorder to `StashClient` in `crates/stash-core/src/adapter/mod.rs`: a
   `RequestRecord { operation: String, request_bytes: usize, response_bytes: usize, duration:
   Duration, kind: GraphQl | Get }`, a `Recorder` trait (`fn record(&self, RequestRecord)`), and
   `StashClient::with_recorder(Arc<dyn Recorder>)`; record every call through
   `StashClient::graphql` (operation name from the Cynic operation) and every plain GET (operation
   name is the URL path's kind, for example `thumbnail`, `preview`, `sprite`, never the full URL)
-- [ ] T005 Create `crates/stash-core/tests/query_budget.rs` with a mock-server helper that installs a
+- [X] T005 Create `crates/stash-core/tests/query_budget.rs` with a mock-server helper that installs a
   counting recorder and asserts `(operation, count)` lists per action; first case: showing one
   Scenes page records exactly `[("ScenesPage", 1)]`
-- [ ] T006 Create `crates/stash-core/tests/graphql_operations.rs`: for each named operation, build
+- [X] T006 Create `crates/stash-core/tests/graphql_operations.rs`: for each named operation, build
   its query text and compare it with `crates/stash-core/graphql/operations/<Name>.graphql`
   (rewrite the file when `UPDATE_GOLDEN=1`); start with `ScenesPage`. Add the writes rule: no
   golden file other than `SaveActivity.graphql`, `AddPlay.graphql`, and `SaveTagColours.graphql`
   may contain `mutation` (FR-018)
-- [ ] T007 Add tier rules to `crates/stash-core/tests/graphql_operations.rs`: card and chip tier
+- [X] T007 Add tier rules to `crates/stash-core/tests/graphql_operations.rs`: card and chip tier
   operations (`ScenesPage`, `PerformerCard`, `TagCard`, `StudioCard`, every `ChoiceList*`) MUST NOT
   select `paths.stream`, `sceneStreams`, `scene_markers`, `galleries`, `files.path`,
   `files.fingerprints`, or `image_path`, and only `TagCard` may select `description`;
   `SceneDetails` MUST NOT select `galleries`, `sceneStreams`, `paths.stream`, or any file `path`;
   no operation except `SemanticVocabulary` may select `custom_fields`
-- [ ] T008 [P] Add cache key constructors in `crates/stash-core/src/cache/mod.rs` for the new keys:
+- [X] T008 [P] Add cache key constructors in `crates/stash-core/src/cache/mod.rs` for the new keys:
   `choices:<kind>`, `semantic:vocabulary`, `scene:details:<id>`, `scene:files:<id>`,
   `scene:galleries:<id>`, `chip:<kind>:<id>`, `ui:settings`, `saved-filters:scenes`,
   `preview:<id>`, `sprite:<id>`, with a unit test that keys from different kinds never collide
-- [ ] T009 [P] Implement `UiConfig` in `crates/stash-core/src/adapter/filters.rs`: one
+- [X] T009 [P] Implement `UiConfig` in `crates/stash-core/src/adapter/filters.rs`: one
   `configuration { ui }` read returning `UiSettings { default_scene_filter: Option<raw saved
   filter JSON>, minimum_play_percent: f64 (default 0), web_track_activity: bool, colour_rules:
   Vec<ColourRule> }` (keys `defaultFilters.scenes`, `minimumPlayPercent`, `trackActivity`,
@@ -112,15 +112,15 @@ the session file version, and the player's start position.
   most once per session plus the cache's quiet refresh (so a changed default filter reaches new
   tabs); golden file `UiConfig.graphql`; tests in `crates/stash-core/tests/query_budget.rs` (1
   cold, 0 cached; missing keys give the defaults)
-- [ ] T010 [P] Bump the session file to version 2 in `native-ui/src/session/snapshot.rs`
+- [X] T010 [P] Bump the session file to version 2 in `native-ui/src/session/snapshot.rs`
   (`VERSION = 2`; a version 1 file starts fresh with Home, no migration) with a test in
   `native-ui/tests/snapshot.rs`
-- [ ] T011 [P] Add an optional start position to the player's open request in
+- [X] T011 [P] Add an optional start position to the player's open request in
   `crates/player/src/commands.rs` and `crates/player/src/session.rs` (mpv `start` option on load;
   `None` starts at 0; a start beyond the duration starts at 0), carried through the `native-ui`
   play effect in `native-ui/src/effects.rs` and `native-ui/src/session/playback.rs`; test in
   `native-ui/tests/playback.rs`
-- [ ] T012 Wire the recorder into the bench: `native-ui/src/measure/bench.rs` installs a recorder
+- [X] T012 Wire the recorder into the bench: `native-ui/src/measure/bench.rs` installs a recorder
   when measuring and writes per-scenario `gql-*` records (requests, response bytes, server time
   median and p95); `crates/perf-harness/src/report.rs` gains `gql-*` rows with a request budget
   each (fail when exceeded) and flags a payload more than 20% larger than the previous report's

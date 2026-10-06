@@ -57,6 +57,16 @@ pub struct OpenRequest {
     pub strict_tls: bool,
     /// Demuxer cache for this file, or `None` for mpv's defaults (research R5c).
     pub cache: Option<CacheLimits>,
+    /// Where to start, in seconds (a resume point or a marker, 008 research R7); `None` starts at
+    /// the beginning. Pass it through [`start_position`] first.
+    pub start_seconds: Option<f64>,
+}
+
+/// The start to open a file at: `requested`, unless it isn't a usable time or lies at or past the
+/// end of a file `duration` seconds long (the file was replaced since the resume point was saved),
+/// in which case playback starts at the beginning. A `duration` of 0 means unknown.
+pub fn start_position(requested: Option<f64>, duration: f64) -> Option<f64> {
+    requested.filter(|s| s.is_finite() && *s > 0.0 && (duration <= 0.0 || *s < duration))
 }
 
 /// Demuxer cache limits: `demuxer-max-bytes` and `demuxer-max-back-bytes`.
@@ -246,9 +256,14 @@ impl Player {
             (DEFAULT_CACHE.0.to_owned(), DEFAULT_CACHE.1.to_owned()),
             |c| (c.forward_bytes.to_string(), c.back_bytes.to_string()),
         );
+        // `start` persists across files in mpv, so every open sets it (to `none` for the start).
+        let start = request
+            .start_seconds
+            .map_or_else(|| "none".to_owned(), |s| format!("{s:.3}"));
         let result = inner
             .mpv
             .set_property("http-header-fields", header.as_str())
+            .and_then(|()| inner.mpv.set_property("start", start.as_str()))
             .and_then(|()| {
                 inner
                     .mpv

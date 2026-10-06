@@ -62,20 +62,20 @@ struct SceneDetailsQuery {
 // ---- One page of scene cards (card tier) ------------------------------------------------------
 
 #[derive(cynic::QueryVariables, Debug)]
-struct ScenesPageVariables {
-    filter: FindFilterType,
+pub(crate) struct ScenesPageVariables {
+    pub(crate) filter: FindFilterType,
 }
 
 #[derive(cynic::QueryFragment, Debug)]
 #[cynic(graphql_type = "FindScenesResultType")]
-struct SceneCards {
+pub(crate) struct SceneCards {
     count: i32,
     scenes: Vec<SceneCardFields>,
 }
 
 #[derive(cynic::QueryFragment, Debug)]
 #[cynic(graphql_type = "Query", variables = "ScenesPageVariables")]
-struct FindScenesPage {
+pub(crate) struct ScenesPage {
     #[arguments(filter: $filter)]
     find_scenes: SceneCards,
 }
@@ -165,7 +165,7 @@ async fn fetch_scenes_page(
         }),
     };
     let data = client
-        .graphql(&FindScenesPage::build(ScenesPageVariables { filter }))
+        .graphql(&ScenesPage::build(ScenesPageVariables { filter }))
         .await?;
     let found = data.find_scenes;
     Ok((u32::try_from(found.count).unwrap_or(u32::MAX), found.scenes))
@@ -467,12 +467,14 @@ async fn screenshot_bytes(
     if let Ok(mut segments) = url.path_segments_mut() {
         segments.push("screenshot");
     }
+    let started = std::time::Instant::now();
     let response = client
         .get_with_key(url)
         .send()
         .await
         .map_err(|e| AppError::from(client.classify_transport_error(&e)))?;
     if !response.status().is_success() {
+        client.record_get("screenshot", 0, started);
         return Ok(None);
     }
     let content_type = response
@@ -486,11 +488,13 @@ async fn screenshot_bytes(
         .content_length()
         .is_some_and(|len| len > max_bytes as u64)
     {
+        client.record_get("screenshot", 0, started);
         return Ok(None);
     }
     let bytes = response.bytes().await.map_err(|e| AppError::Internal {
         message: format!("couldn't read the screenshot: {e}"),
     })?;
+    client.record_get("screenshot", bytes.len(), started);
     if bytes.len() > max_bytes {
         return Ok(None);
     }

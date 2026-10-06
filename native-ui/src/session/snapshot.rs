@@ -12,8 +12,10 @@ use uuid::Uuid;
 use crate::screens::Screen;
 use crate::shell::Shell;
 
-/// Bumped whenever the saved shape of the state tree changes. No migrations.
-pub const VERSION: u32 = 1;
+/// Bumped whenever the saved shape of the state tree changes. No migrations: a file from another
+/// version is set aside and the app starts with a fresh Home tab. Version 2 (008): Scenes tabs
+/// gain search, filter criteria, the applied saved filter, and wall mode.
+pub const VERSION: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SavedSession {

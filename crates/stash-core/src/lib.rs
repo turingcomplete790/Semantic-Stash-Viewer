@@ -11,9 +11,13 @@ pub mod cache;
 pub mod connection;
 pub mod error;
 pub mod jobs;
+pub mod playback;
+pub mod previews;
 pub mod profiles;
 pub mod scenes;
+pub mod semantic;
 pub mod shell;
+pub mod sprites;
 pub mod thumbs;
 
 pub use error::AppError;

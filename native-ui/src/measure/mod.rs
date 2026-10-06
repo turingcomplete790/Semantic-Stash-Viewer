@@ -48,6 +48,53 @@ pub fn bench_requested() -> bool {
     var("SSV_DEBUG_BENCH").is_some()
 }
 
+/// Every request the app sends while the bench runs (008 research R2), for its `gql` lines.
+/// `None` outside a bench run: nothing is recorded then.
+pub fn request_log() -> Option<std::sync::Arc<stash_core::adapter::record::RequestLog>> {
+    static LOG: OnceLock<Option<std::sync::Arc<stash_core::adapter::record::RequestLog>>> =
+        OnceLock::new();
+    LOG.get_or_init(|| bench_requested().then(stash_core::adapter::record::RequestLog::new))
+        .clone()
+}
+
+/// Print the requests recorded since the last call as one live audit row
+/// (`{"bench": "gql", "row", "requests": {operation: count}, "bytes", "ms": [...]}`), and start a
+/// new one. GETs (thumbnails, previews) are counted apart from GraphQL requests.
+pub fn emit_gql_row(row: &str) {
+    use stash_core::adapter::record::RequestKind;
+    let Some(log) = request_log() else {
+        return;
+    };
+    let records = log.take();
+    let mut requests = serde_json::Map::new();
+    let mut gets = serde_json::Map::new();
+    let mut bytes = 0usize;
+    let mut ms = Vec::new();
+    for r in &records {
+        let counts = match r.kind {
+            RequestKind::GraphQl => {
+                bytes += r.response_bytes;
+                ms.push((r.duration.as_secs_f64() * 1000.0 * 10.0).round() / 10.0);
+                &mut requests
+            }
+            RequestKind::Get => &mut gets,
+        };
+        let n = counts
+            .get(&r.operation)
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        counts.insert(r.operation.clone(), (n + 1).into());
+    }
+    emit(&serde_json::json!({
+        "bench": "gql",
+        "row": row,
+        "requests": requests,
+        "gets": gets,
+        "bytes": bytes,
+        "ms": ms,
+    }));
+}
+
 /// Scene ids for the playback run (`SSV_MEASURE`).
 pub fn measure_scenes() -> Option<Vec<String>> {
     var("SSV_MEASURE").map(|ids| {

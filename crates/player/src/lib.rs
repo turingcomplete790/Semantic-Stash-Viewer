@@ -23,6 +23,8 @@ pub mod tracks;
 pub use commands::{FrameDirection, PlayerCommand};
 pub use error::PlayerError;
 pub use render::{GetProcAddress, RenderOwner, Renderer};
-pub use session::{CacheLimits, OpenRequest, Player, PlayerConfig, MAX_SPEED, MIN_SPEED};
+pub use session::{
+    start_position, CacheLimits, OpenRequest, Player, PlayerConfig, MAX_SPEED, MIN_SPEED,
+};
 pub use snapshot::{PlayerSnapshot, PlayerStateKind, PlayerStats};
 pub use tracks::{Track, TrackKind};

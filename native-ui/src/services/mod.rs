@@ -208,11 +208,14 @@ impl Services {
             .get(id)
             .cloned()
             .ok_or(AppError::ProfileNotFound { id })?;
-        let client = StashClient::new(
+        let mut client = StashClient::new(
             profile.base_url.clone(),
             profile.strict_tls,
             profile.api_key.clone(),
         )?;
+        if let Some(log) = crate::measure::request_log() {
+            client = client.with_recorder(log);
+        }
         Ok((client, profile.api_key, profile.strict_tls))
     }
 
@@ -277,7 +280,11 @@ impl Services {
     }
 
     /// Look up a scene and play its direct stream (never a transcode, Principle V).
-    pub async fn open_scene(&self, scene_id: &str) -> Result<PlayableScene, AppError> {
+    pub async fn open_scene(
+        &self,
+        scene_id: &str,
+        start: Option<f64>,
+    ) -> Result<PlayableScene, AppError> {
         let player = Arc::clone(self.player()?);
         let (_, api_key, strict_tls) = self.active_client()?;
         if !matches!(self.manager.snapshot().state, SessionState::Connected) {
@@ -313,6 +320,7 @@ impl Services {
             api_key,
             strict_tls,
             cache,
+            start_seconds: player::start_position(start, scene.duration_seconds),
         });
         Ok(scene)
     }

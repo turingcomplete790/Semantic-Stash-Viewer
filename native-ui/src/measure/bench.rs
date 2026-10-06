@@ -90,6 +90,10 @@ enum Op {
     /// Ask the harness to sample the process tree's memory and CPU for this long (the app holds
     /// still meanwhile).
     ProcSample(&'static str, u64),
+    /// Forget the requests recorded so far (before a `gql` scenario).
+    GqlReset,
+    /// Print the requests since `GqlReset` as this live audit row (contracts/query-budget.md).
+    Gql(&'static str),
     /// Note the frames shown so far (before switching tabs).
     VideoMark,
     /// If the playing tab is showing, wait (a few frames) for a new video frame on screen.
@@ -293,8 +297,10 @@ fn script() -> Vec<Op> {
     ops.extend([
         shell(ShellMsg::Scenes(ScenesMsg::Page(1))),
         Until(Cond::Ready, ms(15_000)),
+        GqlReset,
         shell(ShellMsg::Scenes(ScenesMsg::PageSize(1000))),
         Until(Cond::Cards(1000), ms(15_000)),
+        Gql("gql-page-1000"),
         ReportCards,
     ]);
     for (mode, cold, warm) in [
@@ -648,6 +654,12 @@ impl Bench {
                         }),
                     );
                 }
+                Op::GqlReset => {
+                    if let Some(log) = super::request_log() {
+                        log.take();
+                    }
+                }
+                Op::Gql(row) => super::emit_gql_row(row),
                 Op::VideoMark => {
                     self.video_mark = crate::player::video::frame_counts().1;
                 }

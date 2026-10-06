@@ -48,7 +48,10 @@ fn playing() -> Session {
     }));
     let _ = s.update(Msg::Shell(ShellMsg::Open(Screen::scene("7", "Seven"))));
     let effects = s.update(Msg::Shell(ShellMsg::Play("7".into()))).effects;
-    assert!(effects.contains(&Effect::OpenScene("7".into())));
+    assert!(effects.contains(&Effect::OpenScene {
+        id: "7".into(),
+        start: None
+    }));
     let _ = observe(&mut s, snapshot(PlayerStateKind::Loading, false));
     let _ = observe(&mut s, snapshot(PlayerStateKind::Playing, false));
     s
@@ -165,4 +168,24 @@ fn a_failure_is_shown_and_posted() {
 fn leaving_the_session_closes_playback() {
     let s = playing();
     assert!(s.leave().contains(&Effect::Player(PlayerAction::Close)));
+}
+
+#[test]
+fn opening_at_a_position_carries_the_start_to_the_player() {
+    let mut p = playback::Playback::default();
+    assert_eq!(
+        p.open_at("7".into(), 1, Some(90.0)),
+        vec![Effect::OpenScene {
+            id: "7".into(),
+            start: Some(90.0)
+        }]
+    );
+    assert_eq!(
+        p.open("8".into(), 1),
+        vec![Effect::OpenScene {
+            id: "8".into(),
+            start: None
+        }],
+        "a plain Play starts at the beginning"
+    );
 }
