@@ -272,6 +272,25 @@ impl Services {
         }
     }
 
+    /// Save the tag colour rules (the one settings write, 008 FR-003g) and patch the cached UI
+    /// settings with what Stash now holds, so no read follows.
+    pub async fn save_tag_colours(
+        &self,
+        rules: Vec<stash_core::semantic::ColourRule>,
+    ) -> Result<stash_core::adapter::filters::UiSettings, AppError> {
+        let (client, _, _) = self.active_client()?;
+        let settings = stash_core::adapter::filters::save_tag_colours(&client, &rules).await?;
+        if let Some(r) = self
+            .current_profile()
+            .and_then(|id| self.caches.for_profile(id))
+        {
+            if let Err(e) = lock(r.cache()).put(stash_core::cache::keys::UI_SETTINGS, &settings) {
+                tracing::warn!(error = %e, "couldn't update the cached UI settings");
+            }
+        }
+        Ok(settings)
+    }
+
     pub fn player(&self) -> Result<&Arc<Player>, AppError> {
         self.player.as_ref().ok_or_else(|| AppError::Internal {
             message: "the video player isn't available (libmpv failed to start; see the log)"

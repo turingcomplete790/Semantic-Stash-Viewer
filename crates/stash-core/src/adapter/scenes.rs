@@ -4,8 +4,8 @@ use cynic::QueryBuilder;
 
 use super::gql::{
     schema, CriterionModifier, FindFilterType, PlayableFileFields, PlayableSceneFields,
-    ResolutionCriterionInput, ResolutionEnum, SceneCardFields, SceneDetailFields, SceneFilterType,
-    SceneRowFields, SortDirectionEnum, StringCriterionInput,
+    ResolutionCriterionInput, ResolutionEnum, SceneCardFields, SceneFilterType, SceneRowFields,
+    SortDirectionEnum, StringCriterionInput,
 };
 use super::{endpoint, StashClient};
 use crate::error::AppError;
@@ -13,7 +13,7 @@ use crate::scenes::paging::{last_page, validate_page_size};
 use crate::scenes::query::{SceneQuery, SortDirection};
 use crate::scenes::{
     self, direct_stream_url, display_title, resolution, screenshot_version, thumb_url, SceneCard,
-    SceneDetails, SceneFile, SceneGroup, SceneListItem, ScenePage,
+    SceneFile, SceneGroup, SceneListItem, ScenePage,
 };
 
 // ---- Recent scenes: the 20 most recently added (002 FR-001) ------------------------------------
@@ -48,15 +48,6 @@ struct PlayableSceneVariables {
 struct PlayableScene {
     #[arguments(id: $id)]
     find_scene: Option<PlayableSceneFields>,
-}
-
-// ---- One scene for its view (detail tier) ------------------------------------------------------
-
-#[derive(cynic::QueryFragment, Debug)]
-#[cynic(graphql_type = "Query", variables = "PlayableSceneVariables")]
-struct SceneDetailsQuery {
-    #[arguments(id: $id)]
-    find_scene: Option<SceneDetailFields>,
 }
 
 // ---- One page of scene cards (card tier) ------------------------------------------------------
@@ -400,7 +391,7 @@ pub async fn playable_scene(
 }
 
 /// A file's technical facts.
-fn scene_file(file: &PlayableFileFields) -> SceneFile {
+pub(crate) fn scene_file(file: &PlayableFileFields) -> SceneFile {
     SceneFile {
         container: Some(file.format.clone()).filter(|s| !s.is_empty()),
         video_codec: Some(file.video_codec.clone()).filter(|s| !s.is_empty()),
@@ -413,59 +404,8 @@ fn scene_file(file: &PlayableFileFields) -> SceneFile {
     }
 }
 
-/// One scene as its view shows it (007 T048). Read-only.
-pub async fn scene_details(client: &StashClient, id: &str) -> Result<SceneDetails, AppError> {
-    let data = client
-        .graphql(&SceneDetailsQuery::build(PlayableSceneVariables {
-            id: cynic::Id::new(id),
-        }))
-        .await?;
-    let scene = data
-        .find_scene
-        .ok_or_else(|| AppError::SceneNotFound { id: id.to_owned() })?;
-    let file = scene.files.first();
-    let text = |s: Option<String>| s.filter(|s| !s.trim().is_empty());
-    let count = |n: Option<i32>| n.and_then(|n| u32::try_from(n).ok()).unwrap_or(0);
-    Ok(SceneDetails {
-        title: display_title(scene.title.as_deref(), file.map(|f| f.basename.as_str())),
-        code: text(scene.code),
-        date: text(scene.date),
-        details: text(scene.details),
-        director: text(scene.director),
-        studio: scene.studio.map(|s| scenes::Named {
-            id: s.id.into_inner(),
-            name: s.name,
-        }),
-        performers: scene
-            .performers
-            .into_iter()
-            .map(|p| scenes::Named {
-                id: p.id.into_inner(),
-                name: p.name,
-            })
-            .collect(),
-        tags: scene
-            .tags
-            .into_iter()
-            .map(|t| scenes::Named {
-                id: t.id.into_inner(),
-                name: t.name,
-            })
-            .collect(),
-        rating100: scene.rating100.and_then(|r| u8::try_from(r).ok()),
-        play_count: count(scene.play_count),
-        o_count: count(scene.o_counter),
-        duration_seconds: file.map(|f| f.duration),
-        file_name: file.map(|f| f.basename.clone()),
-        file: file.map(scene_file),
-        cover_version: scene
-            .paths
-            .screenshot
-            .as_deref()
-            .map_or_else(|| "0".to_owned(), screenshot_version),
-        id: scene.id.into_inner(),
-    })
-}
+/// One scene as its view shows it (008 US2; the detail tier).
+pub use super::scene_page::scene_details;
 
 /// Thumbnail sources are resized right away, so large uploaded covers are fine (005 R5).
 const MAX_THUMB_SOURCE_BYTES: usize = 16 * 1024 * 1024;

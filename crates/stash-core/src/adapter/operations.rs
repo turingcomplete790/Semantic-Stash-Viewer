@@ -4,14 +4,18 @@
 //! checks the tier and writes rules (contracts/query-budget.md). Variables don't change the text,
 //! so placeholder values are used to build each one.
 
-use cynic::QueryBuilder;
+use cynic::{MutationBuilder, QueryBuilder};
 
+use super::chips::{ChipVariables, PerformerCard, StudioCard, TagCard};
 use super::choices::{
     all_by_name, ordinary_tags_filter, ChoiceListGalleries, ChoiceListGroups, ChoiceListPerformers,
     ChoiceListStudios, ChoiceListTags, ChoiceVariables, TagChoiceVariables,
 };
-use super::filters::{SavedFiltersVariables, SavedSceneFilters, UiConfig};
+use super::filters::{
+    SaveTagColours, SaveTagColoursVariables, SavedFiltersVariables, SavedSceneFilters, UiConfig,
+};
 use super::gql::FindFilterType;
+use super::scene_page::{SceneDetails, SceneFiles, SceneGalleries, SceneIdVariables};
 use super::scenes::{ScenesPage, ScenesPageVariables};
 
 /// Which budget tier an operation belongs to; the tier decides which fields it may select.
@@ -46,6 +50,36 @@ pub fn documents() -> Vec<OperationDocument> {
                 scene_filter: None,
             })
             .query,
+        },
+        OperationDocument {
+            name: "SceneDetails",
+            tier: Tier::Detail,
+            query: SceneDetails::build(scene_id()).query,
+        },
+        OperationDocument {
+            name: "SceneFiles",
+            tier: Tier::Other,
+            query: SceneFiles::build(scene_id()).query,
+        },
+        OperationDocument {
+            name: "SceneGalleries",
+            tier: Tier::Other,
+            query: SceneGalleries::build(scene_id()).query,
+        },
+        OperationDocument {
+            name: "PerformerCard",
+            tier: Tier::Chip,
+            query: PerformerCard::build(chip_id()).query,
+        },
+        OperationDocument {
+            name: "TagCard",
+            tier: Tier::Chip,
+            query: TagCard::build(chip_id()).query,
+        },
+        OperationDocument {
+            name: "StudioCard",
+            tier: Tier::Chip,
+            query: StudioCard::build(chip_id()).query,
         },
         OperationDocument {
             name: "ChoiceListPerformers",
@@ -91,11 +125,32 @@ pub fn documents() -> Vec<OperationDocument> {
             tier: Tier::Other,
             query: UiConfig::build(()).query,
         },
+        OperationDocument {
+            name: "SaveTagColours",
+            tier: Tier::Other,
+            query: SaveTagColours::build(SaveTagColoursVariables {
+                key: String::new(),
+                value: None,
+            })
+            .query,
+        },
     ]
 }
 
 fn choice() -> ChoiceVariables {
     ChoiceVariables {
         filter: all_by_name(),
+    }
+}
+
+fn scene_id() -> SceneIdVariables {
+    SceneIdVariables {
+        id: cynic::Id::new("0"),
+    }
+}
+
+fn chip_id() -> ChipVariables {
+    ChipVariables {
+        id: cynic::Id::new("0"),
     }
 }

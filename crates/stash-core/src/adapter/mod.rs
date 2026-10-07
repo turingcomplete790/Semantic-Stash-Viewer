@@ -11,6 +11,7 @@ pub mod jobs;
 pub mod operations;
 pub mod probe;
 pub mod record;
+pub mod scene_page;
 pub mod scenes;
 pub mod semantic;
 

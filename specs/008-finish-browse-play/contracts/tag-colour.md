@@ -47,7 +47,9 @@ colours from the RPG palette (constitution Principle XI):
   plugin's test). `0`, `"0"`, `false`, or null don't match.
 - A common variant (`variantOfTagId`) that matches no rule itself takes its canonical tag's colour.
 - A tag matching no rule has the app's normal chip style.
-- Chip text is `#0d0a05` or `#e8e0c8`, whichever has at least 4.5:1 contrast with the colour.
+- Chip text is `#0d0a05` or `#e8e0c8`, whichever contrasts more; when neither reaches 4.5:1 (the
+palette's red `#d44040` reaches 4.33 and purple `#8840c0` 4.498), pure black or white, whichever
+contrasts more (red: black 4.61; purple: white 5.93).
 
 ## Reading (no extra requests)
 

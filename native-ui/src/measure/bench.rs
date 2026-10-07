@@ -29,7 +29,8 @@ pub const SCROLL_SPEED: f32 = 64.0 * 60.0;
 /// A message for the session.
 #[derive(Debug, Clone)]
 enum Act {
-    Shell(ShellMsg),
+    /// Boxed: shell messages are large next to the other actions.
+    Shell(Box<ShellMsg>),
     CloseOverlay,
     /// Forget the thumbnails in memory (they come back from the disk cache): a cold scroll.
     ClearThumbs,
@@ -52,6 +53,12 @@ enum Act {
     /// Forget the library's in-memory lists (the disk cache keeps them): the next picker reads
     /// them again.
     ForgetLists,
+    /// Rest the pointer on the open scene page's first performer chip.
+    RestFirstChip,
+    /// Sweep across the open scene page's tag chips without resting.
+    SweepChips,
+    /// Save the colour rules Stash already has (Testing only: nothing changes there).
+    SaveSameColours,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -64,6 +71,14 @@ enum Cond {
     CardsShown,
     /// The open picker's list (and, for tags, the vocabulary) is here.
     PickerReady,
+    /// The active scene page's details are here.
+    SceneReady,
+    /// Its "All files" section is here.
+    FilesReady,
+    /// Its galleries are here.
+    GalleriesReady,
+    /// The resting chip's card is here.
+    CardReady,
     /// The semantic vocabulary is here.
     VocabularyReady,
     /// At least this many cards are showing.
@@ -152,7 +167,7 @@ pub struct Bench {
 
 fn script() -> Vec<Op> {
     use Op::*;
-    let shell = |m: ShellMsg| Op::Act(A::Shell(m));
+    let shell = |m: ShellMsg| Op::Act(A::Shell(Box::new(m)));
     let ms = Duration::from_millis;
     // `SSV_BENCH_ONLY=scroll`: only the 1000-card scroll (for profiling it).
     let only_scroll = super::var("SSV_BENCH_ONLY").as_deref() == Some("scroll");
@@ -373,6 +388,43 @@ fn script() -> Vec<Op> {
         close,
         Frames(2),
     ]);
+
+    // The scene page (008 US2): a seeded Testing scene with performers, tags, and markers.
+    let scene_id = super::var("SSV_BENCH_SCENE").unwrap_or_else(|| "185".into());
+    ops.extend([
+        Sleep(ms(1000)),
+        GqlReset,
+        shell(ShellMsg::Open(Screen::scene(&scene_id, ""))),
+        Until(Cond::SceneReady, ms(15_000)),
+        Sleep(ms(1000)),
+        Gql("gql-scene-page"),
+        GqlReset,
+        shell(ShellMsg::Scene(
+            crate::screens::scene::SceneMsg::ToggleFiles,
+        )),
+        Until(Cond::FilesReady, ms(15_000)),
+        Gql("gql-scene-files"),
+        GqlReset,
+        shell(ShellMsg::Scene(
+            crate::screens::scene::SceneMsg::ToggleGalleries,
+        )),
+        Until(Cond::GalleriesReady, ms(15_000)),
+        Gql("gql-scene-galleries"),
+        GqlReset,
+        Op::Act(A::SweepChips),
+        Sleep(ms(800)),
+        Gql("gql-chip-sweep"),
+        GqlReset,
+        Op::Act(A::RestFirstChip),
+        Until(Cond::CardReady, ms(15_000)),
+        Gql("gql-chip-rest"),
+        GqlReset,
+        Op::Act(A::SaveSameColours),
+        Sleep(ms(1500)),
+        Gql("gql-tag-colours-save"),
+        shell(ShellMsg::Back),
+        Frames(2),
+    ]);
     if only_scroll {
         ops.truncate(1);
         ops.extend([
@@ -484,6 +536,29 @@ impl Bench {
         if let Cond::VocabularyReady = cond {
             return session.library.vocabulary.ready().is_some();
         }
+        if let Cond::SceneReady | Cond::FilesReady | Cond::GalleriesReady | Cond::CardReady = cond {
+            use crate::screens::scene::{Details, Section};
+            let Screen::Scene(scene) = session.shell.active().current() else {
+                return false;
+            };
+            return match cond {
+                Cond::SceneReady => matches!(scene.details, Details::Ready(_)),
+                Cond::FilesReady => {
+                    matches!(scene.files, Section::Ready { .. } | Section::Failed(_))
+                }
+                Cond::GalleriesReady => {
+                    matches!(scene.galleries, Section::Ready { .. } | Section::Failed(_))
+                }
+                _ => scene.chip_hover.as_ref().is_some_and(|(chip, _, rested)| {
+                    *rested
+                        && session
+                            .library
+                            .chips
+                            .get(&(chip.kind, chip.id.clone()))
+                            .is_some_and(|c| c.ready().is_some())
+                }),
+            };
+        }
         let Some(s) = Self::scenes(session) else {
             return false;
         };
@@ -509,9 +584,13 @@ impl Bench {
         let changed = || Self::first_card(session) != self.remembered;
         match cond {
             Cond::Ready => true,
-            Cond::Playing | Cond::PickerReady | Cond::VocabularyReady => {
-                unreachable!("checked above")
-            }
+            Cond::Playing
+            | Cond::PickerReady
+            | Cond::VocabularyReady
+            | Cond::SceneReady
+            | Cond::FilesReady
+            | Cond::GalleriesReady
+            | Cond::CardReady => unreachable!("checked above"),
             Cond::Cards(n) => s.cards().len() >= n.min(s.count().unwrap_or(0) as usize),
             Cond::CardsShown => changed(),
             Cond::AllThumbs => s
@@ -535,7 +614,7 @@ impl Bench {
 
     fn act(&mut self, act: Act, session: &mut Session) -> Vec<Effect> {
         let step = match act {
-            Act::Shell(m) => session.update(session::Msg::Shell(m)),
+            Act::Shell(m) => session.update(session::Msg::Shell(*m)),
             Act::CloseOverlay => session.update(session::Msg::Overlay(overlays::Msg::Close)),
             Act::ClearThumbs => {
                 session.thumbs = Thumbs::default();
@@ -547,6 +626,59 @@ impl Bench {
             Act::ForgetLists => {
                 session.library.choices.clear();
                 Step::none()
+            }
+            Act::RestFirstChip => {
+                use crate::screens::scene::{ChipRef, Details, SceneMsg};
+                let chip = match session.shell.active().current() {
+                    Screen::Scene(s) => match &s.details {
+                        Details::Ready(d) => d.performers.first().map(|p| ChipRef {
+                            kind: stash_core::adapter::chips::ChipKind::Performer,
+                            id: p.id.clone(),
+                        }),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                // A fresh card: forget what this session already has.
+                session.library.chips.clear();
+                match chip {
+                    Some(c) => {
+                        session.update(session::Msg::Shell(ShellMsg::Scene(SceneMsg::ChipEnter(c))))
+                    }
+                    None => Step::none(),
+                }
+            }
+            Act::SweepChips => {
+                use crate::screens::scene::{ChipRef, Details, SceneMsg};
+                let chips: Vec<ChipRef> = match session.shell.active().current() {
+                    Screen::Scene(s) => match &s.details {
+                        Details::Ready(d) => d
+                            .tags
+                            .iter()
+                            .map(|t| ChipRef {
+                                kind: stash_core::adapter::chips::ChipKind::Tag,
+                                id: t.id.clone(),
+                            })
+                            .collect(),
+                        _ => Vec::new(),
+                    },
+                    _ => Vec::new(),
+                };
+                session.library.chips.clear();
+                let mut effects = Vec::new();
+                for c in chips {
+                    for m in [SceneMsg::ChipEnter(c.clone()), SceneMsg::ChipLeave(c)] {
+                        effects.extend(
+                            session
+                                .update(session::Msg::Shell(ShellMsg::Scene(m)))
+                                .effects,
+                        );
+                    }
+                }
+                Step::effects(effects)
+            }
+            Act::SaveSameColours => {
+                Step::effect(Effect::SaveTagColours(session.library.colour_rules()))
             }
             Act::Jump => {
                 let last = Self::scenes(session)

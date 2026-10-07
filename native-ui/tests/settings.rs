@@ -175,3 +175,118 @@ fn keyboard_lists_the_keymap() {
         assert!(ui.find(label).is_ok(), "{label} is listed");
     }
 }
+
+// ---- 008 T050: Settings → Tag colours --------------------------------------------------------
+
+mod tag_colours {
+    use semantic_stash_viewer_native::effects::Effect;
+    use semantic_stash_viewer_native::screens::settings::tag_colours::{
+        Saving, TagColoursMsg as M, TagColoursPage,
+    };
+    use stash_core::semantic::{default_colour_rules, Rgb};
+
+    fn page() -> TagColoursPage {
+        let mut p = TagColoursPage::default();
+        p.sync(default_colour_rules());
+        p
+    }
+
+    #[test]
+    fn changing_a_colour_and_saving_is_one_write_of_every_rule() {
+        let mut p = page();
+        let _ = p.update(M::Edit(2));
+        let _ = p.update(M::SetColour(2, Rgb(1, 2, 3)));
+        assert!(p.dirty);
+        let effects = p.update(M::Save);
+        let [Effect::SaveTagColours(rules)] = effects.as_slice() else {
+            panic!("one save: {effects:?}")
+        };
+        assert_eq!(rules.len(), 7);
+        assert_eq!(rules[2].colour, Rgb(1, 2, 3));
+        assert_eq!(p.saving, Saving::Saving);
+        assert!(p.update(M::Save).is_empty(), "no second write while saving");
+        p.saved(Ok(rules.clone()));
+        assert!(!p.dirty);
+        assert_eq!(p.saving, Saving::Saved);
+    }
+
+    #[test]
+    fn a_failed_save_says_so_and_keeps_the_edits() {
+        let mut p = page();
+        let _ = p.update(M::Reset);
+        let _ = p.update(M::SetColour(0, Rgb(9, 9, 9)));
+        let _ = p.update(M::Save);
+        p.saved(Err("Can't reach the server".into()));
+        assert!(matches!(p.saving, Saving::Failed(_)));
+        assert!(p.dirty, "the edits stay to try again");
+        assert_eq!(p.rules.as_ref().expect("rules")[0].colour, Rgb(9, 9, 9));
+    }
+
+    #[test]
+    fn rules_can_be_added_reordered_and_only_added_ones_removed() {
+        let mut p = page();
+        let _ = p.update(M::NewField("bad name".into()));
+        let _ = p.update(M::AddRule);
+        assert!(p.error.is_some(), "field names are checked");
+        let _ = p.update(M::NewField("isRole".into()));
+        let _ = p.update(M::AddRule);
+        assert!(p.error.is_some(), "one rule per field");
+
+        let _ = p.update(M::NewField("ssvTestFlag".into()));
+        let _ = p.update(M::AddRule);
+        let rules = p.rules.clone().expect("rules");
+        assert_eq!(rules.len(), 8);
+        assert_eq!(rules[7].field, "ssvTestFlag");
+
+        let _ = p.update(M::MoveUp(7));
+        assert_eq!(p.rules.as_ref().expect("rules")[6].field, "ssvTestFlag");
+        let _ = p.update(M::Remove(0));
+        assert_eq!(
+            p.rules.as_ref().expect("rules").len(),
+            8,
+            "a semantic default stays"
+        );
+        let _ = p.update(M::Remove(6));
+        assert_eq!(
+            p.rules.as_ref().expect("rules").len(),
+            7,
+            "an added rule goes"
+        );
+        let _ = p.update(M::Reset);
+        assert_eq!(p.rules, Some(default_colour_rules()));
+    }
+
+    #[test]
+    fn a_hex_colour_is_checked() {
+        let mut p = page();
+        let _ = p.update(M::Edit(1));
+        let _ = p.update(M::Hex("green".into()));
+        let _ = p.update(M::ApplyHex);
+        assert!(p.error.is_some());
+        let _ = p.update(M::Hex("#ABCDEF".into()));
+        let _ = p.update(M::ApplyHex);
+        assert_eq!(
+            p.rules.as_ref().expect("rules")[1].colour,
+            Rgb(0xab, 0xcd, 0xef)
+        );
+    }
+
+    #[test]
+    fn the_servers_rules_dont_overwrite_edits_in_progress() {
+        let mut p = page();
+        let _ = p.update(M::SetColour(0, Rgb(5, 5, 5)));
+        p.sync(default_colour_rules());
+        assert_eq!(p.rules.as_ref().expect("rules")[0].colour, Rgb(5, 5, 5));
+    }
+
+    #[test]
+    fn the_keyboard_moves_the_highlight_within_the_rules() {
+        let mut p = page();
+        let _ = p.update(M::Highlight(-1));
+        assert_eq!(p.highlight, 0);
+        for _ in 0..20 {
+            let _ = p.update(M::Highlight(1));
+        }
+        assert_eq!(p.highlight, 6);
+    }
+}

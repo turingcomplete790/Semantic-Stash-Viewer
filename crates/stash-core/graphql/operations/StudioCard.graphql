@@ -1,0 +1,10 @@
+query StudioCard($id: ID!) {
+  findStudio(id: $id) {
+    id
+    name
+    parent_studio {
+      name
+    }
+    scene_count
+  }
+}

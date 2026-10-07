@@ -216,6 +216,18 @@ impl Session {
     fn thumbnails(&mut self) -> Vec<Effect> {
         let width = self.thumb_width();
         let mut effects = self.thumbs.want_cards(self.shell.active_cards(), width);
+        // Performer images on the scene page (008 FR-011a), only those Stash has.
+        if let crate::screens::Screen::Scene(scene) = self.shell.active().current() {
+            if let crate::screens::scene::Details::Ready(d) = &scene.details {
+                let keys: Vec<_> = d
+                    .performers
+                    .iter()
+                    .filter(|p| p.has_image)
+                    .map(|p| crate::screens::scenes::picker::performer_key(&p.id))
+                    .collect();
+                effects.extend(self.thumbs.want(&keys, 64));
+            }
+        }
         // Performer images for the picker's visible rows only (008 FR-003a).
         if let Some(crate::screens::scenes::Panel::Editor(editor)) =
             self.active_scenes().map(|s| &s.panel)
@@ -258,6 +270,7 @@ impl Session {
         };
         let Step { mut effects, up } = self.shell.update(msg);
         effects.extend(self.thumbnails());
+        effects.extend(self.sync_tag_colours());
         if self.restored {
             self.save_generation += 1;
             effects.push(Effect::SaveSessionLater {
@@ -294,6 +307,10 @@ impl Session {
                 step
             }
             Some(shell_mod::Up::Need(need)) => step.with_all(self.library.want(need)),
+            Some(shell_mod::Up::PlayAt { id, seconds }) => {
+                let owner = self.shell.active().id;
+                step.with_all(self.playback.open_at(id, owner, Some(seconds)))
+            }
             Some(shell_mod::Up::Notifications) => {
                 self.overlay = Overlay::Notifications;
                 step.with_all(
@@ -327,6 +344,17 @@ impl Session {
         if let Some(step) = self.scenes_panel_key(key, mods) {
             return step;
         }
+        if let Some(step) = self.tag_colours_key(key, mods) {
+            return step;
+        }
+        // Escape closes a chip's card on the scene page (the overlay rules).
+        if *key == Key::Named(iced::keyboard::key::Named::Escape) {
+            if let crate::screens::Screen::Scene(scene) = self.shell.active().current() {
+                if scene.chip_hover.is_some() {
+                    return self.shell(ShellMsg::Scene(crate::screens::scene::SceneMsg::CloseCard));
+                }
+            }
+        }
         if let Some(Step { mut effects, up }) = self.shell.screen_key(key, mods) {
             effects.extend(self.thumbnails());
             if self.restored {
@@ -353,11 +381,24 @@ impl Session {
             Some(Action::Player | Action::Scenes) | None => {
                 return self.scenes_key(key, mods).unwrap_or_else(Step::none)
             }
-            Some(Action::FocusSearch | Action::FilterMenu | Action::SavedFilters) => {
-                return Step::none()
-            }
+            Some(
+                Action::FocusSearch | Action::FilterMenu | Action::SavedFilters | Action::Settings,
+            ) => return Step::none(),
         };
         self.shell(msg)
+    }
+
+    /// Settings → Tag colours shows the server's rules (once they're here) and their counts.
+    fn sync_tag_colours(&mut self) -> Vec<Effect> {
+        if self.library.ui.ready().is_some() {
+            let rules = self.library.colour_rules();
+            self.shell.sync_tag_colours(&rules);
+        }
+        if self.shell.tag_colours_open() {
+            self.library.want(crate::library::Need::Vocabulary)
+        } else {
+            Vec::new()
+        }
     }
 
     /// The active Scenes screen, if that's what shows.
@@ -436,6 +477,32 @@ impl Session {
         Some(step)
     }
 
+    /// Settings → Tag colours' keys (008 FR-003g): move, reorder, change, remove, save.
+    fn tag_colours_key(&mut self, key: &Key, mods: Modifiers) -> Option<Step<Up>> {
+        use crate::screens::settings::tag_colours::TagColoursMsg as T;
+        use iced::keyboard::key::Named;
+        if !self.shell.tag_colours_open() {
+            return None;
+        }
+        let crate::screens::Screen::Settings(s) = self.shell.active().current() else {
+            return None;
+        };
+        let at = s.tag_colours.highlight;
+        let msg = match key {
+            Key::Named(Named::ArrowUp) if mods.alt() => T::MoveUp(at),
+            Key::Named(Named::ArrowDown) if mods.alt() => T::MoveDown(at),
+            Key::Named(Named::ArrowUp) => T::Highlight(-1),
+            Key::Named(Named::ArrowDown) => T::Highlight(1),
+            Key::Named(Named::Enter) => T::Edit(at),
+            Key::Named(Named::Delete) => T::Remove(at),
+            Key::Character(c) if mods.control() && c.eq_ignore_ascii_case("s") => T::Save,
+            _ => return None,
+        };
+        Some(self.shell(ShellMsg::Settings(
+            crate::screens::settings::SettingsMsg::TagColours(msg),
+        )))
+    }
+
     /// The Scenes level's own keys (008 FR-003f): search, filter menu, saved filters.
     fn scenes_key(&mut self, key: &Key, mods: Modifiers) -> Option<Step<Up>> {
         self.active_scenes()?;
@@ -490,7 +557,9 @@ impl Session {
                 if result.is_ok() {
                     self.shell.default_scenes = default;
                 }
-                Step::effects(self.library.ui_loaded(result))
+                let mut effects = self.library.ui_loaded(result);
+                effects.extend(self.sync_tag_colours());
+                Step::effects(effects)
             }
             Msg::Reply(Reply::SavedFilters(result)) => {
                 self.library.saved_loaded(result);
@@ -503,6 +572,32 @@ impl Session {
             Msg::Reply(Reply::Vocabulary(result)) => {
                 self.library.vocabulary_loaded(result);
                 Step::none()
+            }
+            Msg::Reply(Reply::SceneFiles { tab, id, result }) => {
+                self.shell.scene_files(tab, &id, result);
+                Step::none()
+            }
+            Msg::Reply(Reply::SceneGalleries { tab, id, result }) => {
+                self.shell.scene_galleries(tab, &id, result);
+                Step::none()
+            }
+            Msg::Reply(Reply::ChipRestDue { tab, generation }) => {
+                match self.shell.chip_rested(tab, generation) {
+                    Some(chip) => Step::effects(self.library.want_chip(chip.kind, &chip.id)),
+                    None => Step::none(),
+                }
+            }
+            Msg::Reply(Reply::ChipDetails { kind, id, result }) => {
+                self.library.chip_loaded(kind, id, result);
+                Step::none()
+            }
+            Msg::Reply(Reply::TagColoursSaved(result)) => {
+                let effects = match &result {
+                    Ok(settings) => self.library.colours_saved(settings.clone()),
+                    Err(_) => Vec::new(),
+                };
+                self.shell.tag_colours_saved(&result);
+                Step::effects(effects)
             }
             Msg::Reply(Reply::SearchDue { tab, generation }) => {
                 let mut effects = self.shell.search_due(tab, generation);
@@ -635,8 +730,16 @@ impl Session {
                 }
             }
             Msg::Reply(Reply::SceneDetails { tab, id, result }) => {
+                let loaded = result.is_ok();
                 self.shell.scene_details(tab, &id, *result);
-                Step::none()
+                // Tag chips need the vocabulary for their types and colours (FR-003d).
+                let mut effects = if loaded {
+                    self.library.want(crate::library::Need::Vocabulary)
+                } else {
+                    Vec::new()
+                };
+                effects.extend(self.thumbnails());
+                Step::effects(effects)
             }
             Msg::Reply(Reply::Cover { tab, id, cover }) => {
                 self.shell.scene_cover(tab, &id, cover);
@@ -861,7 +964,9 @@ impl Session {
                     crate::screens::Screen::Scene(scene) if self.player_visible() => {
                         crate::screens::scene::layout(
                             player(),
-                            scene.details_view().map(Msg::Shell),
+                            scene
+                                .details_view(&self.library, &self.thumbs)
+                                .map(Msg::Shell),
                             &self.shell.layout,
                         )
                     }

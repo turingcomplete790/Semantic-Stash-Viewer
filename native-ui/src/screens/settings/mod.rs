@@ -3,6 +3,7 @@
 
 pub mod about;
 pub mod servers;
+pub mod tag_colours;
 pub mod troubleshooting;
 
 use iced::widget::{button, column, container, row, scrollable, text};
@@ -24,14 +25,16 @@ pub enum SettingsPage {
     #[default]
     Servers,
     Keyboard,
+    TagColours,
     Troubleshooting,
     About,
 }
 
 impl SettingsPage {
-    pub const ALL: [SettingsPage; 4] = [
+    pub const ALL: [SettingsPage; 5] = [
         SettingsPage::Servers,
         SettingsPage::Keyboard,
+        SettingsPage::TagColours,
         SettingsPage::Troubleshooting,
         SettingsPage::About,
     ];
@@ -40,6 +43,7 @@ impl SettingsPage {
         match self {
             SettingsPage::Servers => "Servers",
             SettingsPage::Keyboard => "Keyboard",
+            SettingsPage::TagColours => "Tag colours",
             SettingsPage::Troubleshooting => "Troubleshooting",
             SettingsPage::About => "About",
         }
@@ -54,12 +58,15 @@ pub struct SettingsState {
     pub servers: Box<ServersState>,
     #[serde(skip)]
     pub troubleshooting: Troubleshooting,
+    #[serde(skip)]
+    pub tag_colours: tag_colours::TagColoursPage,
 }
 
 #[derive(Debug, Clone)]
 pub enum SettingsMsg {
     Servers(ServersMsg),
     Trouble(TroubleMsg),
+    TagColours(tag_colours::TagColoursMsg),
 }
 
 /// Events for the shell.
@@ -87,7 +94,7 @@ impl SettingsState {
         match self.page {
             SettingsPage::Servers => vec![Effect::LoadProfiles],
             SettingsPage::Troubleshooting => self.troubleshooting.enter(),
-            SettingsPage::Keyboard | SettingsPage::About => Vec::new(),
+            SettingsPage::Keyboard | SettingsPage::About | SettingsPage::TagColours => Vec::new(),
         }
     }
 
@@ -110,6 +117,7 @@ impl SettingsState {
                 }
             }
             SettingsMsg::Trouble(m) => Step::effects(self.troubleshooting.update(m)),
+            SettingsMsg::TagColours(m) => Step::effects(self.tag_colours.update(m)),
         }
     }
 
@@ -136,6 +144,7 @@ impl SettingsState {
                 self.troubleshooting.view(logs)
             }
             SettingsPage::About => about::view(ctx),
+            SettingsPage::TagColours => self.tag_colours.view(ctx.library),
         };
         let body: Element<'a, ShellMsg> = if self.page == SettingsPage::Keyboard {
             body

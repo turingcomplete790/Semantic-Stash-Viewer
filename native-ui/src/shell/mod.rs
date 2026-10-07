@@ -73,6 +73,8 @@ pub enum ShellMsg {
     Settings(crate::screens::settings::SettingsMsg),
     /// For the active Scenes screen.
     Scenes(ScenesMsg),
+    /// For the active Scene screen.
+    Scene(crate::screens::scene::SceneMsg),
     /// Open Scenes filtered to a performer, tag, or studio (008 FR-006), here or in a new tab.
     FilterTo {
         criterion: stash_core::scenes::filter::Criterion,
@@ -86,7 +88,7 @@ pub enum ShellMsg {
 }
 
 /// Events for the session.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Up {
     Play(String),
     /// A tab was closed (playback it owned stops).
@@ -98,6 +100,11 @@ pub enum Up {
     KeyboardHelp,
     /// A screen needs something from the library.
     Need(crate::library::Need),
+    /// Play a scene from a point (a marker).
+    PlayAt {
+        id: String,
+        seconds: f64,
+    },
 }
 
 impl Shell {
@@ -322,6 +329,16 @@ impl Shell {
                 effects
             }
             ShellMsg::FilterTo { criterion, new_tab } => self.filter_to(criterion, new_tab),
+            ShellMsg::Scene(m) => {
+                let tab = self.active().id;
+                let Screen::Scene(state) = self.active_mut().current_mut() else {
+                    return Step::none();
+                };
+                let id = state.scene_id.clone();
+                return state.update(m, tab).map_up(|up| match up {
+                    crate::screens::scene::SceneUp::PlayAt(seconds) => Up::PlayAt { id, seconds },
+                });
+            }
             ShellMsg::Play(id) => return Step::up(Up::Play(id)),
             ShellMsg::ServerMenu => return Step::up(Up::ServerMenu),
             ShellMsg::Notifications => return Step::up(Up::Notifications),
@@ -446,6 +463,74 @@ impl Shell {
         if let Some(state) = self.scene_in(tab, id) {
             state.details_loaded(result);
         }
+    }
+
+    /// A scene's files arrived for tab `tab`.
+    pub fn scene_files(
+        &mut self,
+        tab: TabId,
+        id: &str,
+        result: Result<Vec<stash_core::scenes::FileFacts>, AppError>,
+    ) {
+        if let Some(state) = self.scene_in(tab, id) {
+            state.files_loaded(result);
+        }
+    }
+
+    /// A scene's galleries arrived for tab `tab`.
+    pub fn scene_galleries(
+        &mut self,
+        tab: TabId,
+        id: &str,
+        result: Result<Vec<stash_core::scenes::GalleryChip>, AppError>,
+    ) {
+        if let Some(state) = self.scene_in(tab, id) {
+            state.galleries_loaded(result);
+        }
+    }
+
+    /// The tag colours were saved (or not): every Tag colours page shows it.
+    pub fn tag_colours_saved(
+        &mut self,
+        result: &Result<stash_core::adapter::filters::UiSettings, AppError>,
+    ) {
+        for s in self.settings_screens() {
+            s.tag_colours.saved(match result {
+                Ok(settings) => Ok(settings.colour_rules.clone()),
+                Err(e) => Err(crate::messages::for_error(e).title.to_owned()),
+            });
+        }
+    }
+
+    /// The server's colour rules: Tag colours pages not being edited show them.
+    pub fn sync_tag_colours(&mut self, rules: &[stash_core::semantic::ColourRule]) {
+        for s in self.settings_screens() {
+            s.tag_colours.sync(rules.to_vec());
+        }
+    }
+
+    /// Whether the active screen is Settings → Tag colours.
+    pub fn tag_colours_open(&self) -> bool {
+        matches!(
+            self.active().current(),
+            Screen::Settings(s) if s.page == crate::screens::settings::SettingsPage::TagColours
+        )
+    }
+
+    /// A chip rest came due in tab `tab`: the chip, if the pointer is still on it.
+    pub fn chip_rested(
+        &mut self,
+        tab: TabId,
+        generation: u64,
+    ) -> Option<crate::screens::scene::ChipRef> {
+        let i = self.index_of(tab)?;
+        self.tabs[i]
+            .history
+            .iter_mut()
+            .find_map(|screen| match screen {
+                Screen::Scene(s) if s.awaits_rest(generation) => s.chip_rested(generation),
+                _ => None,
+            })
     }
 
     /// A scene's cover arrived for tab `tab`.

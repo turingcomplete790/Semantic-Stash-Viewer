@@ -296,14 +296,14 @@ changing a rule's colour on Testing recolours chips at once.
 
 ### Tests for User Story 2 ⚠️ write first, check they fail
 
-- [ ] T040 [P] [US2] Golden files and tier rules in `crates/stash-core/tests/graphql_operations.rs`
+- [X] T040 [P] [US2] Golden files and tier rules in `crates/stash-core/tests/graphql_operations.rs`
   for the new `SceneDetails` selection, `SceneFiles`, `SceneGalleries`, `PerformerCard`,
   `TagCard`, `StudioCard` (selections exactly as in the contract)
-- [ ] T041 [P] [US2] Request-count tests in `crates/stash-core/tests/query_budget.rs`: opening a scene
+- [X] T041 [P] [US2] Request-count tests in `crates/stash-core/tests/query_budget.rs`: opening a scene
   page is 1 `SceneDetails` (0 when cached and fresh), also for a scene with 40 performers;
   `SceneFiles` and `SceneGalleries` 1 each, only when requested; each chip card 1 per item per
   session
-- [ ] T042 [P] [US2] Transition tests in `native-ui/tests/scene.rs`: title, cover, and Play show
+- [X] T042 [P] [US2] Transition tests in `native-ui/tests/scene.rs`: title, cover, and Play show
   from the card before details arrive and keep their place after; `Section` goes `Closed →
   Loading → Ready | Failed` and loads once; a chip hover resting 400 ms emits one
   `LoadChipDetails`, a sweep emits none, a second rest on the same chip emits none; choosing a
@@ -314,59 +314,59 @@ changing a rule's colour on Testing recolours chips at once.
 
 ### Implementation for User Story 2
 
-- [ ] T043 [US2] Replace `SceneDetails` in `crates/stash-core/src/adapter/gql.rs` and
+- [X] T043 [US2] Replace `SceneDetails` in `crates/stash-core/src/adapter/gql.rs` and
   `crates/stash-core/src/adapter/scenes.rs` with the contract's selection (`id title code details
   director date rating100 organized play_count resume_time play_duration urls studio{id name}
   performers{id name image_path} tags{id name} groups{group{id name} scene_index}
   scene_markers{id title seconds end_seconds primary_tag{name}}` first file's facts, `paths{
   screenshot webp vtt sprite}`), cached as `scene:details:<id>`
-- [ ] T044 [P] [US2] `SceneFiles` (`files{id basename path size duration width height video_codec
+- [X] T044 [P] [US2] `SceneFiles` (`files{id basename path size duration width height video_codec
   audio_codec format frame_rate bit_rate fingerprints{type value}}`) and `SceneGalleries`
   (`galleries{id title image_count}`) in `crates/stash-core/src/adapter/scenes.rs`, cached as
   `scene:files:<id>` and `scene:galleries:<id>`
-- [ ] T045 [P] [US2] `PerformerCard`, `TagCard`, `StudioCard` in
+- [X] T045 [P] [US2] `PerformerCard`, `TagCard`, `StudioCard` in
   `crates/stash-core/src/adapter/chips.rs`, cached as `chip:<kind>:<id>`
-- [ ] T046 [US2] Effects `LoadSceneFiles`, `LoadSceneGalleries`, `LoadChipDetails` in
+- [X] T046 [US2] Effects `LoadSceneFiles`, `LoadSceneGalleries`, `LoadChipDetails` in
   `native-ui/src/effects.rs`, and small performer chip images through the thumbnail service
   (`native-ui/src/screens/scenes/thumbs.rs`), cached like scene thumbnails
-- [ ] T047 [US2] `SceneState` in `native-ui/src/screens/scene.rs`: full `details`; `files:
+- [X] T047 [US2] `SceneState` in `native-ui/src/screens/scene.rs`: full `details`; `files:
   Section<Vec<FileFacts>>`, `galleries: Section<Vec<GalleryChip>>` where `Section = Closed |
   Loading | Ready | Failed`; `chip_hover: Option<(ChipRef, since)>`; fetched chip cards
-- [ ] T048 [P] [US2] Tag chip styling in `native-ui/src/widgets/theme.rs`: a badge per
+- [X] T048 [P] [US2] Tag chip styling in `native-ui/src/widgets/theme.rs`: a badge per
   `SemanticKind`; a chip style from `colour_of` (the matching rule's colour); chip text `#0d0a05`
   or `#e8e0c8`, whichever gives at least 4.5:1 contrast (constitution Principle XI), with a unit
   test over every default rule colour and a few user-picked colours
-- [ ] T049 [P] [US2] `SaveTagColours` in `crates/stash-core/src/adapter/filters.rs`:
+- [X] T049 [P] [US2] `SaveTagColours` in `crates/stash-core/src/adapter/filters.rs`:
   `configureUISetting(key: "semanticStashViewer.tagColours", value: { version: 1, rules })`
   (rules written with lower-case `#rrggbb`), golden file; on success patch `ui:settings`; tests
   in `crates/stash-core/tests/query_budget.rs` (1 write per save; a refetch of
   `SemanticVocabulary` only when a rule's field was added or changed) and against a mock server
   that the request replaces only that key
-- [ ] T050 [US2] Settings → Tag colours page in `native-ui/src/screens/settings/tag_colours.rs`,
+- [X] T050 [US2] Settings → Tag colours page in `native-ui/src/screens/settings/tag_colours.rs`,
   registered in `native-ui/src/screens/settings/mod.rs`: `TagColoursPage { rules, counts, editing,
   saving: Idle | Saving | Failed(message) }`; the ordered rules with swatch and tag count; change
   a colour (RPG and app palettes, or hex), add a rule for a tag custom field key (letters,
   digits, _; 1–64 characters), remove an added rule, reorder, reset to defaults; save as one
   `SaveTagColours`; every open view recolours within one frame of the confirmed save; a failed save says so and keeps the
   previous rules; keyboard-operable; transition tests in `native-ui/tests/settings.rs`
-- [ ] T051 [US2] Bench row `gql-tag-colours-save` (1 + at most 1, Testing only) in
+- [X] T051 [US2] Bench row `gql-tag-colours-save` (1 + at most 1, Testing only) in
   `native-ui/src/measure/bench.rs` and `crates/perf-harness/src/report.rs`
-- [ ] T052 [US2] Scene page view in `native-ui/src/screens/scene.rs`: details, code, director, date,
+- [X] T052 [US2] Scene page view in `native-ui/src/screens/scene.rs`: details, code, director, date,
   rating, organized, play count, resume point, URLs; performer chips with images; tag chips (all
   tags, semantic ones marked by kind and every matched tag coloured by `colour_of` from the
   cached vocabulary and rules, FR-003d); studio; groups with
   scene index; markers with time, title, and tag; primary file facts marked as the one that
   plays; "All files" and "Galleries" sections; missing fields left out; long text truncated in
   chips and full on the page
-- [ ] T053 [US2] Chip details card in `native-ui/src/screens/scene.rs` with the overlay rules in
+- [X] T053 [US2] Chip details card in `native-ui/src/screens/scene.rs` with the overlay rules in
   `native-ui/src/shell/overlays.rs` (shown after a 400 ms rest or focus; Escape and click outside
   close it)
-- [ ] T054 [US2] Choosing a marker starts playback at its seconds (T011's start position) in
+- [X] T054 [US2] Choosing a marker starts playback at its seconds (T011's start position) in
   `native-ui/src/session/playback.rs`
-- [ ] T055 [US2] Bench rows `gql-scene-page` (1), `gql-scene-files` (1), `gql-scene-galleries` (1),
+- [X] T055 [US2] Bench rows `gql-scene-page` (1), `gql-scene-files` (1), `gql-scene-galleries` (1),
   `gql-chip-rest` (1), `gql-chip-sweep` (0) in `native-ui/src/measure/bench.rs` and
   `crates/perf-harness/src/report.rs`
-- [ ] T056 [US2] Run quickstart V2 with the user (the tag colours part on Testing only), then the gate
+- [X] T056 [US2] Run quickstart V2 with the user (the tag colours part on Testing only), then the gate
 
 **Checkpoint**: US1 and US2 both work on their own.
 

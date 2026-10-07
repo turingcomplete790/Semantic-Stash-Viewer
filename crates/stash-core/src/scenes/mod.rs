@@ -102,6 +102,60 @@ pub struct SceneFile {
     pub size: Option<u64>,
 }
 
+/// A performer on the scene page: id, name, and whether Stash has an image for them (the image
+/// itself comes through the thumbnail service).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PerformerChip {
+    pub id: String,
+    pub name: String,
+    pub has_image: bool,
+}
+
+/// A group the scene is in, with the scene's number there.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GroupRef {
+    pub id: String,
+    pub name: String,
+    pub scene_index: Option<i32>,
+}
+
+/// A marker: a titled point (and optional end) with its primary tag's name.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Marker {
+    pub id: String,
+    pub title: String,
+    pub seconds: f64,
+    pub end_seconds: Option<f64>,
+    pub tag: String,
+}
+
+/// One file's facts for the "All files" section.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FileFacts {
+    pub id: String,
+    pub basename: String,
+    pub path: String,
+    pub size: u64,
+    pub duration: f64,
+    pub width: u32,
+    pub height: u32,
+    pub video_codec: String,
+    pub audio_codec: String,
+    pub format: String,
+    pub frame_rate: f64,
+    pub bit_rate: u64,
+    /// `(type, value)`: oshash, md5, phash.
+    pub fingerprints: Vec<(String, String)>,
+}
+
+/// A gallery chip.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GalleryChip {
+    pub id: String,
+    pub title: String,
+    pub image_count: u32,
+}
+
 /// A related item: its id (to filter by) and name (to show).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Named {
@@ -123,8 +177,32 @@ pub struct SceneDetails {
     pub details: Option<String>,
     pub director: Option<String>,
     pub studio: Option<Named>,
-    pub performers: Vec<Named>,
+    pub performers: Vec<PerformerChip>,
     pub tags: Vec<Named>,
+    /// Groups with the scene's number in each.
+    #[serde(default)]
+    pub groups: Vec<GroupRef>,
+    /// Markers in time order.
+    #[serde(default)]
+    pub markers: Vec<Marker>,
+    #[serde(default)]
+    pub urls: Vec<String>,
+    #[serde(default)]
+    pub organized: bool,
+    /// Where playback left off, in seconds.
+    #[serde(default)]
+    pub resume_time: Option<f64>,
+    /// Total time watched, in seconds.
+    #[serde(default)]
+    pub play_duration: Option<f64>,
+    /// How many files the scene has (the "All files" section lists them).
+    #[serde(default)]
+    pub file_count: usize,
+    /// The generated sprite and VTT file names (no address or key), for seek-bar thumbnails.
+    #[serde(default)]
+    pub sprite: Option<String>,
+    #[serde(default)]
+    pub vtt: Option<String>,
     /// 1–100.
     pub rating100: Option<u8>,
     pub play_count: u32,

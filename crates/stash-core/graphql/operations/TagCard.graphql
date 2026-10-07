@@ -1,0 +1,8 @@
+query TagCard($id: ID!) {
+  findTag(id: $id) {
+    id
+    name
+    description
+    scene_count
+  }
+}

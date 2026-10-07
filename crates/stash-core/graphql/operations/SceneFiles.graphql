@@ -1,0 +1,22 @@
+query SceneFiles($id: ID!) {
+  findScene(id: $id) {
+    files {
+      id
+      basename
+      path
+      size
+      duration
+      width
+      height
+      video_codec
+      audio_codec
+      format
+      frame_rate
+      bit_rate
+      fingerprints {
+        type
+        value
+      }
+    }
+  }
+}

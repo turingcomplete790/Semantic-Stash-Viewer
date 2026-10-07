@@ -1,0 +1,63 @@
+query SceneDetails($id: ID!) {
+  findScene(id: $id) {
+    id
+    title
+    code
+    details
+    director
+    date
+    rating100
+    organized
+    o_counter
+    play_count
+    resume_time
+    play_duration
+    urls
+    studio {
+      id
+      name
+    }
+    performers {
+      id
+      name
+      image_path
+    }
+    tags {
+      id
+      name
+    }
+    groups {
+      group {
+        id
+        name
+      }
+      scene_index
+    }
+    scene_markers {
+      id
+      title
+      seconds
+      end_seconds
+      primary_tag {
+        name
+      }
+    }
+    files {
+      basename
+      duration
+      width
+      height
+      video_codec
+      audio_codec
+      format
+      frame_rate
+      bit_rate
+      size
+    }
+    paths {
+      screenshot
+      vtt
+      sprite
+    }
+  }
+}

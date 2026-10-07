@@ -111,6 +111,29 @@ pub enum Effect {
         generation: u64,
         after: std::time::Duration,
     },
+    /// Read a scene's "All files" section through the cache.
+    LoadSceneFiles {
+        tab: TabId,
+        id: String,
+    },
+    /// Read a scene's galleries through the cache.
+    LoadSceneGalleries {
+        tab: TabId,
+        id: String,
+    },
+    /// Read one chip's card through the cache.
+    LoadChipDetails {
+        kind: stash_core::adapter::chips::ChipKind,
+        id: String,
+    },
+    /// A chip hover's rest: report back after `after` (008 FR-011b: 400 ms).
+    ChipRestDue {
+        tab: TabId,
+        generation: u64,
+        after: std::time::Duration,
+    },
+    /// Save the tag colour rules to Stash (the one settings write, FR-003g).
+    SaveTagColours(Vec<stash_core::semantic::ColourRule>),
     /// Read a scene's details through the cache, for the Scene screen in `tab`.
     LoadSceneDetails {
         tab: TabId,
@@ -248,6 +271,26 @@ pub enum Reply {
         tab: TabId,
         generation: u64,
     },
+    SceneFiles {
+        tab: TabId,
+        id: String,
+        result: Result<Vec<stash_core::scenes::FileFacts>, AppError>,
+    },
+    SceneGalleries {
+        tab: TabId,
+        id: String,
+        result: Result<Vec<stash_core::scenes::GalleryChip>, AppError>,
+    },
+    ChipDetails {
+        kind: stash_core::adapter::chips::ChipKind,
+        id: String,
+        result: Result<stash_core::adapter::chips::ChipDetails, AppError>,
+    },
+    ChipRestDue {
+        tab: TabId,
+        generation: u64,
+    },
+    TagColoursSaved(Result<stash_core::adapter::filters::UiSettings, AppError>),
 }
 
 /// Turn an effect into a task.
@@ -418,6 +461,80 @@ pub fn run(effect: Effect, services: &Arc<Services>, window: Option<window::Id>)
         } => Task::perform(tokio::time::sleep(after), move |()| {
             Message::Reply(Reply::SearchDue { tab, generation })
         }),
+        Effect::LoadSceneFiles { tab, id } => {
+            let services = Arc::clone(services);
+            Task::perform(
+                async move {
+                    let key = stash_core::cache::keys::scene_files(&id);
+                    let wanted = id.clone();
+                    let result = services
+                        .read_cached(&key, RefreshPolicy::Auto, false, move |client| {
+                            let id = wanted.clone();
+                            async move {
+                                stash_core::adapter::scene_page::scene_files(&client, &id).await
+                            }
+                        })
+                        .await
+                        .map(|c| c.data);
+                    (id, result)
+                },
+                move |(id, result)| Message::Reply(Reply::SceneFiles { tab, id, result }),
+            )
+        }
+        Effect::LoadSceneGalleries { tab, id } => {
+            let services = Arc::clone(services);
+            Task::perform(
+                async move {
+                    let key = stash_core::cache::keys::scene_galleries(&id);
+                    let wanted = id.clone();
+                    let result = services
+                        .read_cached(&key, RefreshPolicy::Auto, false, move |client| {
+                            let id = wanted.clone();
+                            async move {
+                                stash_core::adapter::scene_page::scene_galleries(&client, &id).await
+                            }
+                        })
+                        .await
+                        .map(|c| c.data);
+                    (id, result)
+                },
+                move |(id, result)| Message::Reply(Reply::SceneGalleries { tab, id, result }),
+            )
+        }
+        Effect::LoadChipDetails { kind, id } => {
+            let services = Arc::clone(services);
+            Task::perform(
+                async move {
+                    let key = stash_core::cache::keys::chip(kind.key(), &id);
+                    let wanted = id.clone();
+                    let result = services
+                        .read_cached(&key, RefreshPolicy::Auto, false, move |client| {
+                            let id = wanted.clone();
+                            async move {
+                                stash_core::adapter::chips::chip_details(&client, kind, &id).await
+                            }
+                        })
+                        .await
+                        .map(|c| c.data);
+                    (id, result)
+                },
+                move |(id, result)| Message::Reply(Reply::ChipDetails { kind, id, result }),
+            )
+        }
+        Effect::ChipRestDue {
+            tab,
+            generation,
+            after,
+        } => Task::perform(tokio::time::sleep(after), move |()| {
+            Message::Reply(Reply::ChipRestDue { tab, generation })
+        }),
+        Effect::SaveTagColours(rules) => {
+            let services = Arc::clone(services);
+            Task::perform(
+                async move { services.save_tag_colours(rules).await },
+                |result| Message::Reply(Reply::TagColoursSaved(result)),
+            )
+        }
         Effect::LoadSceneDetails { tab, id } => {
             let services = Arc::clone(services);
             Task::perform(

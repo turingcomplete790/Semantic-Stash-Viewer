@@ -21,11 +21,15 @@ per neighbour (as 007).
 ### `SceneDetails` (detail tier; replaces 007's)
 
 Variables: `id`.
-Selects: `id title code details director date rating100 organized play_count resume_time
-play_duration urls studio{id name} performers{id name image_path} tags{id name}
+Selects: `id title code details director date rating100 organized o_counter play_count
+resume_time play_duration urls studio{id name} performers{id name image_path} tags{id name}
 groups{group{id name} scene_index} scene_markers{id title seconds end_seconds primary_tag{name}}
-files(first file only){basename duration width height video_codec audio_codec format frame_rate
-bit_rate size} paths{screenshot webp vtt sprite}`.
+files{basename duration width height video_codec audio_codec format frame_rate bit_rate size}
+paths{screenshot vtt sprite}` (GraphQL can't select only the first file: these few facts come for
+each file and the page uses the first; `o_counter` because the web UI shows it; no `webp`, since
+Stash returns that path whether or not a preview was generated, so US4 learns it from the preview
+fetch itself). Only the sprite's and VTT's file names are kept, never their URLs (which carry the
+API key when authentication is on).
 Must not select: galleries, every file's path, performer details beyond id/name/image path, tag
 images or descriptions, markers' scenes or streams, `sceneStreams`, `paths.stream`.
 Budget: **1 per scene page opened** (0 when cached and fresh); the title, cover, and Play show

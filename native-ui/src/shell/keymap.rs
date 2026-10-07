@@ -15,6 +15,7 @@ use crate::widgets::theme;
 pub enum Level {
     Player,
     Scenes,
+    Settings,
     Shell,
 }
 
@@ -23,6 +24,7 @@ impl Level {
         match self {
             Level::Player => "Player",
             Level::Scenes => "Scenes",
+            Level::Settings => "Settings → Tag colours",
             Level::Shell => "Everywhere",
         }
     }
@@ -149,6 +151,8 @@ pub enum Action {
     FilterMenu,
     /// Open the saved filters.
     SavedFilters,
+    /// Handled by Settings → Tag colours.
+    Settings,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -320,6 +324,19 @@ pub fn bindings() -> Vec<Binding> {
         ),
     ] {
         all.push(b(Level::Scenes, chord, Action::Scenes, label));
+    }
+    // Settings → Tag colours (008 FR-003g); the page applies them.
+    for (chord, label) in [
+        (Chord::plain(N(Named::ArrowUp)), "Move between rules (↑ ↓)"),
+        (
+            Chord::alt(N(Named::ArrowUp)),
+            "Move the rule up or down (Alt+↑ ↓)",
+        ),
+        (Chord::plain(N(Named::Enter)), "Change the rule's colour"),
+        (Chord::plain(N(Named::Delete)), "Remove an added rule"),
+        (Chord::ctrl(Char("s")), "Save"),
+    ] {
+        all.push(b(Level::Settings, chord, Action::Settings, label));
     }
     // 002 FR-009, exactly.
     for (key, label) in [

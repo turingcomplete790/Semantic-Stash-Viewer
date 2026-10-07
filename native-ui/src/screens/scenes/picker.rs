@@ -197,12 +197,8 @@ pub fn colour(c: Rgb) -> Color {
 
 /// The text colour on a chip of `c`: dark or light, whichever has at least 4.5:1 contrast.
 pub fn on_colour(c: Rgb) -> Color {
-    let (dark, light) = theme::chip_text(c);
-    if dark {
-        Color::from_rgb8(0x0d, 0x0a, 0x05)
-    } else {
-        light
-    }
+    let t = theme::chip_text(c);
+    Color::from_rgb8(t.0, t.1, t.2)
 }
 
 fn swatch(c: Option<Rgb>) -> Element<'static, ShellMsg> {

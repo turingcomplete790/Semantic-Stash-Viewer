@@ -1,7 +1,7 @@
 //! Saved scene filters and the server's UI settings (spec FR-004, research R3;
 //! contracts/query-budget.md `UiConfig`).
 
-use cynic::QueryBuilder;
+use cynic::{MutationBuilder, QueryBuilder};
 use serde::{Deserialize, Serialize};
 
 use super::gql::{schema, JsonMap};
@@ -87,6 +87,50 @@ pub async fn saved_scene_filters(client: &StashClient) -> Result<Vec<SavedFilter
             )
         })
         .collect())
+}
+
+// ---- SaveTagColours (a settings write) ------------------------------------------------------
+
+#[derive(cynic::QueryVariables, Debug)]
+pub(crate) struct SaveTagColoursVariables {
+    pub(crate) key: String,
+    pub(crate) value: Option<super::gql::JsonAny>,
+}
+
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(graphql_type = "Mutation", variables = "SaveTagColoursVariables")]
+pub(crate) struct SaveTagColours {
+    #[arguments(key: $key, value: $value)]
+    #[cynic(rename = "configureUISetting")]
+    configure_ui_setting: JsonMap,
+}
+
+/// The stored form of the colour rules (`{ version, rules: [{field, colour}] }`), colours in
+/// lower case.
+pub fn colour_rules_value(rules: &[ColourRule]) -> serde_json::Value {
+    serde_json::json!({
+        "version": crate::semantic::TAG_COLOURS_VERSION,
+        "rules": rules
+            .iter()
+            .map(|r| serde_json::json!({ "field": r.field, "colour": r.colour.to_string() }))
+            .collect::<Vec<_>>(),
+    })
+}
+
+/// One `SaveTagColours` write: the whole `semanticStashViewer.tagColours` value (Stash sets that
+/// nested key and keeps the rest of the UI configuration). Returns the UI settings Stash now
+/// holds, so the cache can be patched without a read.
+pub async fn save_tag_colours(
+    client: &StashClient,
+    rules: &[ColourRule],
+) -> Result<UiSettings, AppError> {
+    let data = client
+        .graphql(&SaveTagColours::build(SaveTagColoursVariables {
+            key: TAG_COLOURS_KEY.to_owned(),
+            value: Some(super::gql::JsonAny(colour_rules_value(rules))),
+        }))
+        .await?;
+    Ok(parse_ui_settings(&data.configure_ui_setting.0))
 }
 
 // ---- UiConfig: configuration { ui } ---------------------------------------------------------

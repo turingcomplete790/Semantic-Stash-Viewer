@@ -1,0 +1,3 @@
+mutation SaveTagColours($key: String!, $value: Any) {
+  configureUISetting(key: $key, value: $value)
+}

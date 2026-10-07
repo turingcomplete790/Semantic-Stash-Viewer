@@ -138,7 +138,7 @@ impl Screen {
         match self {
             Screen::Home(h) => h.view(ctx),
             Screen::Scenes(s) => scenes::view(s, ctx, tab),
-            Screen::Scene(s) => s.view(&ctx.layout),
+            Screen::Scene(s) => s.view(&ctx.layout, ctx.library, ctx.thumbs),
             Screen::Settings(s) => s.view(ctx),
         }
     }

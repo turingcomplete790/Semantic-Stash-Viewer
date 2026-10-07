@@ -9,6 +9,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use stash_core::adapter::chips::{ChipDetails, ChipKind};
 use stash_core::adapter::choices::{ChoiceKind, ChoiceList};
 use stash_core::adapter::filters::UiSettings;
 use stash_core::scenes::filter::saved::SavedFilter;
@@ -62,6 +63,8 @@ pub struct Library {
     pub saved: Loadable<Vec<SavedFilter>>,
     pub choices: HashMap<ChoiceKind, Loadable<Arc<Choices>>>,
     pub vocabulary: Loadable<Arc<SemanticVocabulary>>,
+    /// Chip cards fetched this session (performer, tag, studio), once each.
+    pub chips: HashMap<(ChipKind, String), Loadable<ChipDetails>>,
 }
 
 impl Library {
@@ -119,6 +122,39 @@ impl Library {
                 vec![Effect::LoadSavedFilters]
             }
         }
+    }
+
+    /// A chip's card, fetched once per item per session (spec FR-011b).
+    pub fn want_chip(&mut self, kind: ChipKind, id: &str) -> Vec<Effect> {
+        let entry = self.chips.entry((kind, id.to_owned())).or_default();
+        if !entry.wanted() {
+            return Vec::new();
+        }
+        *entry = Loadable::Loading;
+        vec![Effect::LoadChipDetails {
+            kind,
+            id: id.to_owned(),
+        }]
+    }
+
+    pub fn chip_loaded(
+        &mut self,
+        kind: ChipKind,
+        id: String,
+        result: Result<ChipDetails, AppError>,
+    ) {
+        self.chips.insert(
+            (kind, id),
+            match result {
+                Ok(d) => Loadable::Ready(d),
+                Err(_) => Loadable::Failed,
+            },
+        );
+    }
+
+    /// The colour rules were saved: the settings Stash now holds take effect at once.
+    pub fn colours_saved(&mut self, settings: UiSettings) -> Vec<Effect> {
+        self.ui_loaded(Ok(settings))
     }
 
     pub fn ui_loaded(&mut self, result: Result<UiSettings, AppError>) -> Vec<Effect> {
