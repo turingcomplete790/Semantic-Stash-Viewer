@@ -1,0 +1,9 @@
+query ChoiceListGroups($filter: FindFilterType!) {
+  findGroups(filter: $filter) {
+    groups {
+      id
+      name
+      aliases
+    }
+  }
+}

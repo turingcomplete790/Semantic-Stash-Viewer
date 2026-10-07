@@ -3,10 +3,14 @@
 //! tags, the description, and the file. Details and cover come through the cache first.
 
 use iced::widget::image::Handle;
-use iced::widget::{button, center, column, container, image, row, scrollable, text, Space};
+use iced::widget::{
+    button, center, column, container, image, mouse_area, row, scrollable, text, Space,
+};
 use iced::{Alignment, ContentFit, Element, Length};
 use serde::{Deserialize, Serialize};
-use stash_core::scenes::SceneDetails;
+use stash_core::scenes::filter::kinds::CriterionKind;
+use stash_core::scenes::filter::{Criterion, CriterionValue, Item, Modifier};
+use stash_core::scenes::{Named, SceneDetails};
 use stash_core::AppError;
 
 use super::scenes::grid::duration;
@@ -197,15 +201,56 @@ fn stars(rating100: u8) -> String {
     format!("{}{}", "★".repeat(filled), "☆".repeat(5 - filled))
 }
 
-fn chip<'a>(label: &'a str) -> Element<'a, ShellMsg> {
-    container(text(label).size(13))
-        .padding([3, 10])
-        .style(|_| {
-            container::Style::default()
-                .background(iced::Background::Color(theme::YALE_BLUE))
-                .border(iced::border::rounded(12))
-        })
-        .into()
+/// The criterion "scenes with exactly this performer / tag / studio" (008 FR-006).
+fn only(kind: CriterionKind, item: &Named) -> Criterion {
+    let modifier = match kind {
+        CriterionKind::Studios => Modifier::Includes,
+        _ => Modifier::IncludesAll,
+    };
+    Criterion::new(
+        kind,
+        modifier,
+        CriterionValue::Items {
+            items: vec![Item {
+                id: item.id.clone(),
+                label: item.name.clone(),
+            }],
+            excluded: vec![],
+            depth: matches!(kind, CriterionKind::Tags | CriterionKind::Studios).then_some(0),
+        },
+    )
+}
+
+/// A chip that opens Scenes filtered to it (Ctrl+click or middle-click: a new tab).
+fn chip<'a>(kind: CriterionKind, item: &'a Named) -> Element<'a, ShellMsg> {
+    let criterion = only(kind, item);
+    mouse_area(
+        button(text(item.name.as_str()).size(13))
+            .padding([3, 10])
+            .style(|_, status| button::Style {
+                background: Some(iced::Background::Color(theme::YALE_BLUE)),
+                text_color: theme::TEXT,
+                border: iced::Border {
+                    radius: 12.0.into(),
+                    width: if matches!(status, button::Status::Hovered) {
+                        1.0
+                    } else {
+                        0.0
+                    },
+                    color: theme::FROSTED_BLUE,
+                },
+                ..button::Style::default()
+            })
+            .on_press(ShellMsg::FilterTo {
+                criterion: criterion.clone(),
+                new_tab: false,
+            }),
+    )
+    .on_middle_press(ShellMsg::FilterTo {
+        criterion,
+        new_tab: true,
+    })
+    .into()
 }
 
 fn file_line(d: &SceneDetails) -> Option<String> {
@@ -243,9 +288,7 @@ fn facts(d: &SceneDetails) -> Element<'_, ShellMsg> {
     if let Some(s) = d.duration_seconds {
         line.push(duration(s));
     }
-    if let Some(studio) = &d.studio {
-        line.push(studio.clone());
-    }
+
     if let Some(code) = &d.code {
         line.push(code.clone());
     }
@@ -264,15 +307,34 @@ fn facts(d: &SceneDetails) -> Element<'_, ShellMsg> {
         meta = meta.push(text(stars(r)).size(14).color(theme::FROSTED_BLUE));
     }
     col = col.push(meta);
+    if let Some(studio) = &d.studio {
+        col = col.push(
+            row![
+                text("Studio").size(14).color(theme::MUTED),
+                chip(CriterionKind::Studios, studio)
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center),
+        );
+    }
     if !d.performers.is_empty() {
-        col = col.push(text(format!("With {}", d.performers.join(", "))).size(15));
+        col = col.push(
+            row(std::iter::once(text("With").size(15).into()).chain(
+                d.performers
+                    .iter()
+                    .map(|p| chip(CriterionKind::Performers, p)),
+            ))
+            .spacing(6)
+            .wrap()
+            .vertical_spacing(6),
+        );
     }
     if let Some(director) = &d.director {
         col = col.push(text(format!("Directed by {director}")).size(14));
     }
     if !d.tags.is_empty() {
         col = col.push(
-            row(d.tags.iter().map(|t| chip(t)))
+            row(d.tags.iter().map(|t| chip(CriterionKind::Tags, t)))
                 .spacing(6)
                 .wrap()
                 .vertical_spacing(6),

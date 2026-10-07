@@ -1,0 +1,17 @@
+{
+ "_comment": "SC-001: each query's SceneFilterType written by hand the way the Stash web UI sends it (toCriterionInput), independent of the viewer's converter. Ids are Testing's seeded data (specs/008-finish-browse-play/quickstart.md).",
+ "queries": [
+  {"name": "search only", "q": "prod", "scene_filter": {}},
+  {"name": "one performer", "scene_filter": {"performers": {"value": ["2"], "modifier": "INCLUDES_ALL"}}},
+  {"name": "tag with sub-tags", "scene_filter": {"tags": {"value": ["7"], "excludes": [], "modifier": "INCLUDES", "depth": -1}}},
+  {"name": "one studio", "scene_filter": {"studios": {"value": ["1"], "excludes": [], "modifier": "INCLUDES", "depth": 0}}},
+  {"name": "resolution above 720p", "scene_filter": {"resolution": {"value": "STANDARD_HD", "modifier": "GREATER_THAN"}}},
+  {"name": "duration 10 to 30 minutes", "scene_filter": {"duration": {"value": 600, "value2": 1800, "modifier": "BETWEEN"}}},
+  {"name": "not organized", "scene_filter": {"organized": false}},
+  {"name": "rating at least 4 stars", "scene_filter": {"rating100": {"value": 79, "modifier": "GREATER_THAN"}}},
+  {"name": "scene custom field", "scene_filter": {"custom_fields": [{"field": "ssvSceneFlag", "modifier": "NOT_NULL"}]}},
+  {"name": "saved: SSV performer A", "saved": "SSV performer A", "scene_filter": {"performers": {"value": ["2"], "modifier": "INCLUDES_ALL"}}},
+  {"name": "saved: SSV parent tag + 1080p", "saved": "SSV parent tag + 1080p", "scene_filter": {"tags": {"value": ["7"], "excludes": [], "modifier": "INCLUDES", "depth": -1}, "resolution": {"value": "FULL_HD", "modifier": "EQUALS"}}},
+  {"name": "saved: SSV scene custom field", "saved": "SSV scene custom field", "scene_filter": {"custom_fields": [{"field": "ssvSceneFlag", "modifier": "NOT_NULL"}]}}
+ ]
+}

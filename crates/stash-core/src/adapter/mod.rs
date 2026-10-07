@@ -173,6 +173,30 @@ impl StashClient {
             .as_deref()
             .or_else(|| operation_name_in(&operation.query))
             .unwrap_or("anonymous");
+        self.send_graphql(name, body).await
+    }
+
+    /// Send a GraphQL document built by hand (only where the text must follow data, such as the
+    /// semantic vocabulary's aliases per colour rule) and return its `data` as JSON. Recorded
+    /// under `name`, like typed operations.
+    pub(crate) async fn graphql_document(
+        &self,
+        name: &str,
+        query: String,
+    ) -> Result<serde_json::Value, AppError> {
+        let body = serde_json::to_vec(&serde_json::json!({ "query": query })).map_err(|e| {
+            AppError::Internal {
+                message: format!("could not encode the request: {e}"),
+            }
+        })?;
+        self.send_graphql(name, body).await
+    }
+
+    async fn send_graphql<R: DeserializeOwned>(
+        &self,
+        name: &str,
+        body: Vec<u8>,
+    ) -> Result<R, AppError> {
         let request_bytes = body.len();
         let started = Instant::now();
         let result = self.graphql_bytes(body).await;

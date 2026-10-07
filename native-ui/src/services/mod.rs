@@ -363,7 +363,7 @@ impl Services {
         }
         let refresher = self.caches.for_profile(profile)?;
         let this = Arc::downgrade(self);
-        let fetch: SourceFetch = Arc::new(move |id: String| {
+        let fetch: SourceFetch = Arc::new(move |kind: &'static str, id: String| {
             let this = this.clone();
             Box::pin(async move {
                 let client = this
@@ -371,7 +371,12 @@ impl Services {
                     .ok_or(AppError::NotConnected)?
                     .active_client()
                     .map(|(client, _, _)| client)?;
-                scene_screenshot_bytes(&client, &id).await
+                match kind {
+                    "performer" => {
+                        stash_core::adapter::scenes::performer_image_bytes(&client, &id).await
+                    }
+                    _ => scene_screenshot_bytes(&client, &id).await,
+                }
             })
         });
         let service = Arc::new(ThumbService::new(Arc::clone(refresher.cache()), fetch));

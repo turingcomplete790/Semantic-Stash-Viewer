@@ -11,6 +11,16 @@ pub fn choices(kind: &str) -> String {
 /// The semantic vocabulary: semantic tags, common variants, colour-rule matches.
 pub const SEMANTIC_VOCABULARY: &str = "semantic:vocabulary";
 
+/// The vocabulary's key for colour rules whose extra (non-semantic) fields are `extra`: the
+/// matches differ per set of fields, so each set has its own entry.
+pub fn semantic_vocabulary(extra: &[&str]) -> String {
+    if extra.is_empty() {
+        SEMANTIC_VOCABULARY.to_owned()
+    } else {
+        format!("{SEMANTIC_VOCABULARY}:{}", extra.join(","))
+    }
+}
+
 /// The server's UI settings (default filter, minimum play percent, colour rules).
 pub const UI_SETTINGS: &str = "ui:settings";
 

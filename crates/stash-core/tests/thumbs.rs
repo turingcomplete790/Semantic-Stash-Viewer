@@ -55,7 +55,7 @@ fn cache() -> (tempfile::TempDir, Arc<Mutex<ViewCache>>) {
 
 /// A fetcher that returns `source` and counts calls.
 fn fetcher(source: Option<(Vec<u8>, &'static str)>, calls: Arc<AtomicUsize>) -> SourceFetch {
-    Arc::new(move |_id: String| {
+    Arc::new(move |_kind: &'static str, _id: String| {
         calls.fetch_add(1, Ordering::SeqCst);
         let source = source.clone().map(|(b, t)| (b, t.to_owned()));
         Box::pin(async move { Ok(source) })
@@ -122,8 +122,9 @@ async fn failures_and_missing_screenshots_return_the_placeholder() {
         none.get("scene", "1", "0").await.expect("kind"),
         PLACEHOLDER
     );
-    let failing: SourceFetch =
-        Arc::new(|_id: String| Box::pin(async { Err(AppError::NotConnected) }));
+    let failing: SourceFetch = Arc::new(|_kind: &'static str, _id: String| {
+        Box::pin(async { Err(AppError::NotConnected) })
+    });
     let service = ThumbService::new(Arc::clone(&cache), failing);
     assert_eq!(
         service.get("scene", "2", "0").await.expect("kind"),
@@ -148,6 +149,10 @@ async fn unknown_kinds_are_refused() {
         "reserved for the galleries spec"
     );
     assert!(service.get("nonsense", "1", "0").await.is_none());
+    assert!(
+        service.get("performer", "1", "0").await.is_some(),
+        "performer images are served (picker rows and chips)"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -157,7 +162,7 @@ async fn at_most_six_thumbnails_are_prepared_at_once() {
     let peak = Arc::new(AtomicUsize::new(0));
     let source = jpeg(640, 360);
     let (a, p) = (Arc::clone(&active), Arc::clone(&peak));
-    let slow: SourceFetch = Arc::new(move |_id: String| {
+    let slow: SourceFetch = Arc::new(move |_kind: &'static str, _id: String| {
         let (a, p, source) = (Arc::clone(&a), Arc::clone(&p), source.clone());
         Box::pin(async move {
             let now = a.fetch_add(1, Ordering::SeqCst) + 1;

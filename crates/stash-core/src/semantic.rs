@@ -114,6 +114,282 @@ pub fn parse_colour_rules(value: Option<&serde_json::Value>) -> (Vec<ColourRule>
     (parsed, skipped)
 }
 
+// ---- The semantic vocabulary ------------------------------------------------------------------
+
+/// The plugin's semantic tag types, each marked on a tag by its own custom-field flag
+/// (design documents, roadmap Milestone 1D §2/§4), in the plugin's current priority (highest
+/// first): a tag flagged with several types takes the first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum SemanticKind {
+    Label,
+    Action,
+    Role,
+    Trait,
+    Pluggable,
+    MiseEnScene,
+    Variation,
+}
+
+impl SemanticKind {
+    /// In priority order, highest first.
+    pub const ALL: [SemanticKind; 7] = [
+        SemanticKind::Label,
+        SemanticKind::Action,
+        SemanticKind::Role,
+        SemanticKind::Trait,
+        SemanticKind::Pluggable,
+        SemanticKind::MiseEnScene,
+        SemanticKind::Variation,
+    ];
+
+    /// The tag custom field that marks this type.
+    pub fn flag(self) -> &'static str {
+        match self {
+            SemanticKind::Label => "isLabel",
+            SemanticKind::Action => "isAction",
+            SemanticKind::Role => "isRole",
+            SemanticKind::Trait => "isTrait",
+            SemanticKind::Pluggable => "plugtag",
+            SemanticKind::MiseEnScene => "isMiseEnScene",
+            SemanticKind::Variation => "isVariation",
+        }
+    }
+
+    pub fn from_flag(flag: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|k| k.flag() == flag)
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SemanticKind::Label => "Label",
+            SemanticKind::Action => "Action",
+            SemanticKind::Role => "Role",
+            SemanticKind::Trait => "Trait",
+            SemanticKind::Pluggable => "Pluggable",
+            SemanticKind::MiseEnScene => "Mise-en-scène",
+            SemanticKind::Variation => "Variation",
+        }
+    }
+}
+
+/// The custom field linking a common variant to its canonical tag (roadmap Milestone 1C).
+pub const VARIANT_OF_FIELD: &str = "variantOfTagId";
+
+/// Whether a flag value counts as set: `1`, `"1"`, `true`, or `"true"` (flags are 0/1, but
+/// Stash may hand back either form). Anything else, including 0, isn't set.
+pub fn flag_is_set(value: Option<&serde_json::Value>) -> bool {
+    match value {
+        Some(serde_json::Value::Number(n)) => n.as_i64() == Some(1) || n.as_f64() == Some(1.0),
+        Some(serde_json::Value::String(s)) => s == "1" || s == "true",
+        Some(serde_json::Value::Bool(b)) => *b,
+        _ => false,
+    }
+}
+
+/// A tag as the vocabulary keeps it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VocabularyTag {
+    pub id: String,
+    pub name: String,
+    pub aliases: Vec<String>,
+}
+
+/// The semantic vocabulary of one server (spec FR-003c to FR-003e; data-model
+/// "SemanticVocabulary"): semantic tags by type, common variants, and which tags each colour rule
+/// matches. Built from one `SemanticVocabulary` request and cached per server.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct SemanticVocabulary {
+    /// Tags with a type flag set, with their type.
+    pub tags: std::collections::BTreeMap<String, (VocabularyTag, SemanticKind)>,
+    /// Common variants: the tag and its canonical tag's id.
+    pub variants: std::collections::BTreeMap<String, (VocabularyTag, String)>,
+    /// Tags the flag queries returned but whose flags aren't set (for example 0): ordinary tags,
+    /// listed so the picker can show them with the ordinary ones (the ordinary list's "every
+    /// flag is null" filter leaves them out).
+    pub unflagged: Vec<VocabularyTag>,
+    /// For each colour rule's field, the ids of the tags with it set.
+    pub rule_matches: std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
+}
+
+impl SemanticVocabulary {
+    /// A tag's semantic type: its own, else its canonical tag's (a common variant), else none.
+    pub fn kind_of(&self, id: &str) -> Option<SemanticKind> {
+        if let Some((_, kind)) = self.tags.get(id) {
+            return Some(*kind);
+        }
+        let (_, canonical) = self.variants.get(id)?;
+        self.tags.get(canonical).map(|(_, kind)| *kind)
+    }
+
+    /// A tag's colour under `rules`: the first rule (in order) whose flag the tag has set; else,
+    /// for a common variant, its canonical tag's; else none (contracts/tag-colour.md).
+    pub fn colour_of(&self, id: &str, rules: &[ColourRule]) -> Option<Rgb> {
+        let own = |id: &str| {
+            rules.iter().find_map(|r| {
+                self.rule_matches
+                    .get(&r.field)
+                    .is_some_and(|ids| ids.contains(id))
+                    .then_some(r.colour)
+            })
+        };
+        own(id).or_else(|| {
+            let (_, canonical) = self.variants.get(id)?;
+            own(canonical)
+        })
+    }
+
+    /// Tags that arrived with the vocabulary but belong with ordinary tags in the picker: flags
+    /// not set, and common variants whose canonical tag has no type.
+    pub fn ordinary_extras(&self) -> Vec<&VocabularyTag> {
+        let mut out: Vec<&VocabularyTag> = self.unflagged.iter().collect();
+        out.extend(
+            self.variants
+                .iter()
+                .filter(|(id, _)| self.kind_of(id).is_none() && !self.tags.contains_key(*id))
+                .map(|(_, (tag, _))| tag),
+        );
+        out
+    }
+
+    /// The vocabulary's tags of one type, sorted by name.
+    pub fn of_kind(&self, kind: SemanticKind) -> Vec<&VocabularyTag> {
+        let mut tags: Vec<&VocabularyTag> = self
+            .tags
+            .values()
+            .filter(|(_, k)| *k == kind)
+            .map(|(t, _)| t)
+            .collect();
+        tags.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        tags
+    }
+}
+
+/// The extra colour-rule fields: those that aren't semantic flags (which the vocabulary queries
+/// anyway), deduplicated, in rule order.
+pub fn extra_rule_fields(rules: &[ColourRule]) -> Vec<&str> {
+    let mut out: Vec<&str> = Vec::new();
+    for r in rules {
+        let f = r.field.as_str();
+        if SemanticKind::from_flag(f).is_none() && f != VARIANT_OF_FIELD && !out.contains(&f) {
+            out.push(f);
+        }
+    }
+    out
+}
+
+/// The `SemanticVocabulary` request text for `rules`: one aliased "flag is not null" query per
+/// type flag, one for common variants, and one per extra colour-rule field (research R12). Built
+/// by hand because the aliases follow the rules; field names are checked identifiers
+/// ([`valid_rule_field`]), so nothing else can reach the text.
+pub fn vocabulary_query(rules: &[ColourRule]) -> String {
+    let find = |alias: &str, field: &str, selection: &str| {
+        format!(
+            "  {alias}: findTags(filter: {{per_page: -1}}, tag_filter: {{custom_fields: [{{field: \"{field}\", modifier: NOT_NULL}}]}}) {{\n    tags {{\n      {selection}\n    }}\n  }}\n"
+        )
+    };
+    let full = "id\n      name\n      aliases\n      custom_fields";
+    let mut q = String::from("query SemanticVocabulary {\n");
+    for kind in SemanticKind::ALL {
+        q.push_str(&find(kind.flag(), kind.flag(), full));
+    }
+    q.push_str(&find("variant", VARIANT_OF_FIELD, full));
+    for (i, field) in extra_rule_fields(rules).into_iter().enumerate() {
+        if valid_rule_field(field) {
+            q.push_str(&find(
+                &format!("rule_{i}"),
+                field,
+                "id\n      custom_fields",
+            ));
+        }
+    }
+    q.push_str("}\n");
+    q
+}
+
+/// Build the vocabulary from the request's `data` (`{alias: {tags: [...]}}`) and the rules it
+/// was asked with.
+pub fn build_vocabulary(data: &serde_json::Value, rules: &[ColourRule]) -> SemanticVocabulary {
+    use serde_json::Value;
+    let tags_of = |alias: &str| -> Vec<Value> {
+        data.get(alias)
+            .and_then(|r| r.get("tags"))
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+    };
+    let tag = |t: &Value| VocabularyTag {
+        id: t
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        name: t
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        aliases: t
+            .get("aliases")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default(),
+    };
+    let field = |t: &Value, f: &str| t.get("custom_fields").and_then(|c| c.get(f)).cloned();
+
+    let mut v = SemanticVocabulary::default();
+    let mut seen_unset = std::collections::BTreeMap::new();
+    // Lowest priority first, so a higher-priority type overwrites on conflict.
+    for kind in SemanticKind::ALL.iter().rev() {
+        for t in tags_of(kind.flag()) {
+            let vt = tag(&t);
+            if vt.id.is_empty() {
+                continue;
+            }
+            if flag_is_set(field(&t, kind.flag()).as_ref()) {
+                v.rule_matches
+                    .entry(kind.flag().to_owned())
+                    .or_default()
+                    .insert(vt.id.clone());
+                v.tags.insert(vt.id.clone(), (vt, *kind));
+            } else {
+                seen_unset.insert(vt.id.clone(), vt);
+            }
+        }
+    }
+    for t in tags_of("variant") {
+        let vt = tag(&t);
+        let canonical = match field(&t, VARIANT_OF_FIELD) {
+            Some(Value::String(s)) if !s.is_empty() => s,
+            Some(Value::Number(n)) => n.to_string(),
+            _ => continue,
+        };
+        if !vt.id.is_empty() && !v.tags.contains_key(&vt.id) {
+            seen_unset.remove(&vt.id);
+            v.variants.insert(vt.id.clone(), (vt, canonical));
+        }
+    }
+    for (i, f) in extra_rule_fields(rules).into_iter().enumerate() {
+        let ids = v.rule_matches.entry(f.to_owned()).or_default();
+        for t in tags_of(&format!("rule_{i}")) {
+            if flag_is_set(field(&t, f).as_ref()) {
+                if let Some(id) = t.get("id").and_then(Value::as_str) {
+                    ids.insert(id.to_owned());
+                }
+            }
+        }
+    }
+    v.unflagged = seen_unset
+        .into_values()
+        .filter(|t| !v.tags.contains_key(&t.id))
+        .collect();
+    v
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

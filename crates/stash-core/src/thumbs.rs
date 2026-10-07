@@ -28,9 +28,14 @@ const CONCURRENCY: usize = 6;
 /// Shown when there's nothing to show (no screenshot, a failed fetch, an undecodable image).
 pub const PLACEHOLDER: &[u8] = include_bytes!("../assets/thumb-placeholder.jpg");
 
-/// Fetches a scene's source image (bytes and content type), or `None` if it has none.
+/// The kinds of thumbnail served: scene screenshots and performer images (008 picker rows and
+/// chips).
+pub const KINDS: [&str; 2] = ["scene", "performer"];
+
+/// Fetches the source image (bytes and content type) for a kind and id, or `None` if it has none.
 pub type SourceFetch = Arc<
     dyn Fn(
+            &'static str,
             String,
         )
             -> Pin<Box<dyn Future<Output = Result<Option<(Vec<u8>, String)>, AppError>> + Send>>
@@ -57,9 +62,7 @@ impl ThumbService {
     /// for a kind this build doesn't serve (`image` and `gallery` arrive with the galleries
     /// spec); the placeholder when there's nothing to show.
     pub async fn get(&self, kind: &str, id: &str, version: &str) -> Option<Vec<u8>> {
-        if kind != "scene" {
-            return None;
-        }
+        let kind: &'static str = KINDS.iter().copied().find(|k| *k == kind)?;
         let key = format!("thumb:{kind}:{id}:{version}");
         if let Some(bytes) = self.lock().get_bytes(&key) {
             return Some(bytes);
@@ -71,7 +74,7 @@ impl ThumbService {
         if let Some(bytes) = self.lock().get_bytes(&key) {
             return Some(bytes);
         }
-        let source = match (self.fetch)(id.to_owned()).await {
+        let source = match (self.fetch)(kind, id.to_owned()).await {
             Ok(Some(source)) => source,
             Ok(None) => return Some(PLACEHOLDER.to_vec()),
             Err(e) => {

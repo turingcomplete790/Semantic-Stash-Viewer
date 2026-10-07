@@ -67,6 +67,7 @@ fn normalization_trims_search_and_drops_a_stray_seed() {
         sort: SceneSort::Title,
         direction: SortDirection::Asc,
         seed: Some(9),
+        criteria: Vec::new(),
     };
     let n = q.normalized();
     assert_eq!(n.search, "beach");
@@ -126,6 +127,7 @@ fn the_query_round_trips_as_camel_case_json() {
         sort: SceneSort::PlayCount,
         direction: SortDirection::Asc,
         seed: None,
+        criteria: Vec::new(),
     };
     let json = serde_json::to_value(&q).expect("json");
     assert_eq!(json["sort"], "play_count");

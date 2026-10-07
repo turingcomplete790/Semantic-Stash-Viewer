@@ -142,3 +142,36 @@ pub fn card(focused: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
         }
     }
 }
+
+// ---- Tag chips (008 FR-003d; constitution Principle XI) ---------------------------------------
+
+/// Dark chip text (the RPG palette's darkest).
+pub const CHIP_DARK: stash_core::semantic::Rgb = stash_core::semantic::Rgb(0x0d, 0x0a, 0x05);
+/// Light chip text (the RPG palette's light text).
+pub const CHIP_LIGHT: stash_core::semantic::Rgb = stash_core::semantic::Rgb(0xe8, 0xe0, 0xc8);
+
+fn luminance(c: stash_core::semantic::Rgb) -> f64 {
+    let channel = |v: u8| {
+        let v = f64::from(v) / 255.0;
+        if v <= 0.039_28 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * channel(c.0) + 0.7152 * channel(c.1) + 0.0722 * channel(c.2)
+}
+
+/// The WCAG contrast ratio between two colours (1 to 21).
+pub fn contrast(a: stash_core::semantic::Rgb, b: stash_core::semantic::Rgb) -> f64 {
+    let (la, lb) = (luminance(a), luminance(b));
+    let (hi, lo) = if la > lb { (la, lb) } else { (lb, la) };
+    (hi + 0.05) / (lo + 0.05)
+}
+
+/// Chip text on `background`: `(true, _)` for dark text, else `(false, light)`; whichever
+/// contrasts more (at least 4.5:1 for the default rule colours).
+pub fn chip_text(background: stash_core::semantic::Rgb) -> (bool, Color) {
+    let dark = contrast(background, CHIP_DARK) >= contrast(background, CHIP_LIGHT);
+    (dark, rgb(CHIP_LIGHT.0, CHIP_LIGHT.1, CHIP_LIGHT.2))
+}

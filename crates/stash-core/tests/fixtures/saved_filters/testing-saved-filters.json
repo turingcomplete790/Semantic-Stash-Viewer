@@ -1,0 +1,92 @@
+{
+ "data": {
+  "findSavedFilters": [
+   {
+    "id": "2",
+    "name": "SSV parent tag + 1080p",
+    "find_filter": {
+     "q": null,
+     "page": 1,
+     "per_page": 40,
+     "sort": "date",
+     "direction": "DESC"
+    },
+    "object_filter": {
+     "resolution": {
+      "modifier": "EQUALS",
+      "value": "1080p"
+     },
+     "tags": {
+      "modifier": "INCLUDES",
+      "value": {
+       "depth": -1,
+       "excluded": [],
+       "items": [
+        {
+         "id": "7",
+         "label": "SSV Test Parent"
+        }
+       ]
+      }
+     }
+    },
+    "ui_options": {
+     "display_mode": 0,
+     "zoom_index": 1
+    }
+   },
+   {
+    "id": "1",
+    "name": "SSV performer A",
+    "find_filter": {
+     "q": null,
+     "page": 1,
+     "per_page": 40,
+     "sort": "date",
+     "direction": "DESC"
+    },
+    "object_filter": {
+     "performers": {
+      "modifier": "INCLUDES_ALL",
+      "value": {
+       "excluded": [],
+       "items": [
+        {
+         "id": "2",
+         "label": "SSV Test Performer A"
+        }
+       ]
+      }
+     }
+    },
+    "ui_options": {
+     "display_mode": 0,
+     "zoom_index": 1
+    }
+   },
+   {
+    "id": "3",
+    "name": "SSV scene custom field",
+    "find_filter": {
+     "q": null,
+     "page": 1,
+     "per_page": 40,
+     "sort": "date",
+     "direction": "DESC"
+    },
+    "object_filter": {
+     "custom_fields": [
+      {
+       "field": "ssvSceneFlag",
+       "modifier": "NOT_NULL"
+      }
+     ]
+    },
+    "ui_options": {
+     "display_mode": 0,
+     "zoom_index": 1
+    }
+   }
+  ]
+ }
+}

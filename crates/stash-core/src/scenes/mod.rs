@@ -102,6 +102,13 @@ pub struct SceneFile {
     pub size: Option<u64>,
 }
 
+/// A related item: its id (to filter by) and name (to show).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Named {
+    pub id: String,
+    pub name: String,
+}
+
 /// What the scene view shows (007 T048). Cached per scene (`scene:details:<id>`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -115,9 +122,9 @@ pub struct SceneDetails {
     /// The description.
     pub details: Option<String>,
     pub director: Option<String>,
-    pub studio: Option<String>,
-    pub performers: Vec<String>,
-    pub tags: Vec<String>,
+    pub studio: Option<Named>,
+    pub performers: Vec<Named>,
+    pub tags: Vec<Named>,
     /// 1–100.
     pub rating100: Option<u8>,
     pub play_count: u32,

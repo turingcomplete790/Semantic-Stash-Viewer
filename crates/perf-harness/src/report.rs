@@ -187,9 +187,11 @@ pub struct Report {
 /// The request budget of each live audit row (008 contracts/query-budget.md "Live audit rows"):
 /// the most GraphQL requests the scenario may send. Rows not listed are reported as info.
 pub const GQL_BUDGETS: &[(&str, f64)] = &[
-    ("gql-page-50", 1.0),
-    ("gql-page-1000", 1.0),
-    ("gql-filter-apply", 1.0),
+    // A page shown on page 1 also prefetches its one neighbour (contract: 1 per page shown plus
+    // 1 per neighbour).
+    ("gql-page-50", 2.0),
+    ("gql-page-1000", 2.0),
+    ("gql-filter-apply", 2.0),
     ("gql-scene-page", 1.0),
     ("gql-scene-files", 1.0),
     ("gql-scene-galleries", 1.0),

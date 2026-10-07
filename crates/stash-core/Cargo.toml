@@ -40,6 +40,9 @@ turbojpeg = { version = "1", default-features = false, features = ["pkg-config",
 fast_image_resize = "5"
 # Non-JPEG covers (uploaded or scraped PNG/WebP) only.
 image = { version = "0.25", default-features = false, features = ["png", "webp"] }
+# Accent-folded picker search (008 FR-003a): NFD decomposition, then combining marks dropped.
+# Already in the tree through url/idna.
+icu_normalizer = "2"
 
 [build-dependencies]
 cynic-codegen = "3.14"

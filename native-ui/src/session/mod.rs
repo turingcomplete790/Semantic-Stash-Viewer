@@ -38,6 +38,9 @@ pub struct Session {
     pub thumbs: Thumbs,
     /// The notification centre's entries and toasts.
     pub notifications: crate::shell::notifications::Notifications,
+    /// What every tab of this server shares: UI settings, saved filters, picker lists, the
+    /// semantic vocabulary (008).
+    pub library: crate::library::Library,
     /// Held modifier keys (Ctrl+click opens in a new tab).
     modifiers: Modifiers,
     ever_connected: bool,
@@ -104,8 +107,11 @@ impl Session {
             },
         ];
         effects.extend(shell_effects);
+        let mut library = crate::library::Library::default();
+        effects.extend(library.want_ui());
         (
             Self {
+                library,
                 servers: vec![profile.clone()],
                 profile,
                 connection: connection::Connection::default(),
@@ -209,7 +215,19 @@ impl Session {
     /// Thumbnails for what the active screen shows.
     fn thumbnails(&mut self) -> Vec<Effect> {
         let width = self.thumb_width();
-        self.thumbs.want_cards(self.shell.active_cards(), width)
+        let mut effects = self.thumbs.want_cards(self.shell.active_cards(), width);
+        // Performer images for the picker's visible rows only (008 FR-003a).
+        if let Some(crate::screens::scenes::Panel::Editor(editor)) =
+            self.active_scenes().map(|s| &s.panel)
+        {
+            let keys: Vec<_> =
+                crate::screens::scenes::picker::visible_performers(&self.library, editor)
+                    .iter()
+                    .map(|id| crate::screens::scenes::picker::performer_key(id))
+                    .collect();
+            effects.extend(self.thumbs.want(&keys, 64));
+        }
+        effects
     }
 
     /// The width thumbnails are decoded at: a grid card's (list rows draw them smaller), in steps
@@ -229,6 +247,13 @@ impl Session {
                 index,
                 new_tab: true,
             }),
+            ShellMsg::FilterTo {
+                criterion,
+                new_tab: false,
+            } if self.modifiers.control() => ShellMsg::FilterTo {
+                criterion,
+                new_tab: true,
+            },
             other => other,
         };
         let Step { mut effects, up } = self.shell.update(msg);
@@ -268,6 +293,7 @@ impl Session {
                 self.overlay = Overlay::KeyboardHelp;
                 step
             }
+            Some(shell_mod::Up::Need(need)) => step.with_all(self.library.want(need)),
             Some(shell_mod::Up::Notifications) => {
                 self.overlay = Overlay::Notifications;
                 step.with_all(
@@ -298,6 +324,9 @@ impl Session {
                 return Step::none();
             }
         }
+        if let Some(step) = self.scenes_panel_key(key, mods) {
+            return step;
+        }
         if let Some(Step { mut effects, up }) = self.shell.screen_key(key, mods) {
             effects.extend(self.thumbnails());
             if self.restored {
@@ -321,9 +350,103 @@ impl Session {
             Some(Action::KeyboardHelp) => ShellMsg::KeyboardHelp,
             Some(Action::FocusNext) => return Step::effect(Effect::FocusNext),
             Some(Action::FocusPrevious) => return Step::effect(Effect::FocusPrevious),
-            Some(Action::Player | Action::Scenes) | None => return Step::none(),
+            Some(Action::Player | Action::Scenes) | None => {
+                return self.scenes_key(key, mods).unwrap_or_else(Step::none)
+            }
+            Some(Action::FocusSearch | Action::FilterMenu | Action::SavedFilters) => {
+                return Step::none()
+            }
         };
         self.shell(msg)
+    }
+
+    /// The active Scenes screen, if that's what shows.
+    fn active_scenes(&self) -> Option<&crate::screens::ScenesState> {
+        match self.shell.active().current() {
+            crate::screens::Screen::Scenes(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Keys for an open filter panel on Scenes (008 FR-003f): move, choose, remove, exclude,
+    /// close. Keys a focused field takes (typing, Enter in a field) never get here.
+    fn scenes_panel_key(&mut self, key: &Key, mods: Modifiers) -> Option<Step<Up>> {
+        use crate::screens::scenes::editor::EditorMsg;
+        use crate::screens::scenes::filters::{menu_target, MenuRow};
+        use crate::screens::scenes::{picker, Panel};
+        use iced::keyboard::key::Named;
+        let state = self.active_scenes()?;
+        let scenes = |m: ScenesMsg| ShellMsg::Scenes(m);
+        let named = match key {
+            Key::Named(n) => Some(*n),
+            _ => None,
+        };
+        let msg = match (&state.panel, named) {
+            (Panel::None, _) => return None,
+            (Panel::Editor(_), Some(Named::Escape)) => scenes(ScenesMsg::Editor(EditorMsg::Cancel)),
+            (Panel::Menu { .. }, Some(Named::Escape)) => scenes(ScenesMsg::FilterMenu(false)),
+            (Panel::Saved { .. }, Some(Named::Escape)) => scenes(ScenesMsg::SavedMenu(false)),
+            (_, Some(Named::ArrowDown)) => scenes(ScenesMsg::MenuMove(1)),
+            (_, Some(Named::ArrowUp)) => scenes(ScenesMsg::MenuMove(-1)),
+            (Panel::Menu { highlight }, Some(Named::Enter)) => {
+                match menu_target(state, *highlight)? {
+                    MenuRow::Active { key, .. } => scenes(ScenesMsg::Edit(key)),
+                    MenuRow::Kind(kind) => scenes(ScenesMsg::Add(kind)),
+                    _ => return Some(Step::none()),
+                }
+            }
+            (Panel::Menu { highlight }, Some(Named::Delete | Named::Backspace)) => {
+                match menu_target(state, *highlight)? {
+                    MenuRow::Active { key, .. } => scenes(ScenesMsg::Remove(key)),
+                    _ => return Some(Step::none()),
+                }
+            }
+            (Panel::Saved { highlight }, Some(Named::Enter)) => {
+                let list = self.library.saved.ready()?;
+                let filter = list.get((*highlight).min(list.len().checked_sub(1)?))?;
+                scenes(ScenesMsg::ApplySaved(Box::new(filter.clone())))
+            }
+            (Panel::Editor(editor), Some(Named::Enter)) => {
+                match picker::highlighted(&self.library, editor) {
+                    Some(item) if editor.picker().is_some() && !mods.control() => {
+                        scenes(ScenesMsg::Editor(EditorMsg::Toggle(item)))
+                    }
+                    _ => scenes(ScenesMsg::Editor(EditorMsg::Apply)),
+                }
+            }
+            (Panel::Editor(editor), None)
+                if mods.control()
+                    && matches!(key, Key::Character(c) if c.eq_ignore_ascii_case("e")) =>
+            {
+                let item = picker::highlighted(&self.library, editor)?;
+                scenes(ScenesMsg::Editor(EditorMsg::Exclude(item)))
+            }
+            _ => return None,
+        };
+        let mut step = self.shell(msg);
+        // Keep the picker's highlighted row in view.
+        if let Some(Panel::Editor(editor)) = self.active_scenes().map(|s| &s.panel) {
+            if let Some(y) = picker::reveal(&self.library, editor) {
+                step.effects.push(Effect::ScrollTo {
+                    id: picker::LIST_ID.to_owned(),
+                    y,
+                });
+            }
+        }
+        Some(step)
+    }
+
+    /// The Scenes level's own keys (008 FR-003f): search, filter menu, saved filters.
+    fn scenes_key(&mut self, key: &Key, mods: Modifiers) -> Option<Step<Up>> {
+        self.active_scenes()?;
+        match keymap::resolve(key, mods, &[Level::Scenes])? {
+            Action::FocusSearch => Some(Step::effect(Effect::Focus(
+                crate::screens::scenes::state::SEARCH_ID,
+            ))),
+            Action::FilterMenu => Some(self.shell(ShellMsg::Scenes(ScenesMsg::FilterMenu(true)))),
+            Action::SavedFilters => Some(self.shell(ShellMsg::Scenes(ScenesMsg::SavedMenu(true)))),
+            _ => None,
+        }
     }
 
     pub fn update(&mut self, msg: Msg) -> Step<Up> {
@@ -337,7 +460,9 @@ impl Session {
                     self.shell.unreachable();
                 }
                 let retry = if up == Some(connection::Up::BecameConnected) {
-                    self.shell.retry_active()
+                    let mut retry = self.shell.retry_active();
+                    retry.extend(self.library.want_ui());
+                    retry
                 } else {
                     Vec::new()
                 };
@@ -351,7 +476,45 @@ impl Session {
                 self.shell.layout = layout;
                 Step::none()
             }
-            Msg::CacheChanged(key) => Step::effects(self.shell.cache_changed(&key)),
+            Msg::CacheChanged(key) => {
+                let mut effects = self.shell.cache_changed(&key);
+                effects.extend(self.library.cache_changed(&key));
+                Step::effects(effects)
+            }
+            Msg::Reply(Reply::UiSettings(result)) => {
+                let default = result
+                    .as_ref()
+                    .ok()
+                    .and_then(|s| s.default_scene_filter.as_ref())
+                    .map(stash_core::scenes::filter::saved::decode_default_filter);
+                if result.is_ok() {
+                    self.shell.default_scenes = default;
+                }
+                Step::effects(self.library.ui_loaded(result))
+            }
+            Msg::Reply(Reply::SavedFilters(result)) => {
+                self.library.saved_loaded(result);
+                Step::none()
+            }
+            Msg::Reply(Reply::Choices { kind, result }) => {
+                self.library.choices_loaded(kind, result);
+                Step::effects(self.thumbnails())
+            }
+            Msg::Reply(Reply::Vocabulary(result)) => {
+                self.library.vocabulary_loaded(result);
+                Step::none()
+            }
+            Msg::Reply(Reply::SearchDue { tab, generation }) => {
+                let mut effects = self.shell.search_due(tab, generation);
+                effects.extend(self.thumbnails());
+                if self.restored && !effects.is_empty() {
+                    self.save_generation += 1;
+                    effects.push(Effect::SaveSessionLater {
+                        generation: self.save_generation,
+                    });
+                }
+                Step::effects(effects)
+            }
             Msg::Reply(Reply::ScenesPage {
                 tab,
                 generation,
@@ -707,6 +870,7 @@ impl Session {
                             profile: &self.profile,
                             connection: &self.connection,
                             thumbs: &self.thumbs,
+                            library: &self.library,
                             layout: self.shell.layout,
                         };
                         self.shell.content(&ctx).map(Msg::Shell)

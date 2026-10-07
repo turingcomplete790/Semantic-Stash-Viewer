@@ -1,5 +1,5 @@
-query ScenesPage($filter: FindFilterType!) {
-  findScenes(filter: $filter) {
+query ScenesPage($filter: FindFilterType!, $sceneFilter: SceneFilterType) {
+  findScenes(filter: $filter, scene_filter: $sceneFilter) {
     count
     scenes {
       id

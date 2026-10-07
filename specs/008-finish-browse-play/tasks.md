@@ -141,16 +141,16 @@ after the first time.
 
 ### Tests for User Story 1 ⚠️ write first, check they fail
 
-- [ ] T013 [P] [US1] Criterion conversion tests in `crates/stash-core/tests/scene_filters.rs`:
+- [X] T013 [P] [US1] Criterion conversion tests in `crates/stash-core/tests/scene_filters.rs`:
   table-driven, one row per `CriterionKind` × allowed `Modifier`, checking the generated
   `SceneFilterType` variables; validation: "the modifier is one the kind allows; `Between` has two
   values; `IsNull`/`NotNull` carry no value; `Items` are non-empty unless the modifier is a null
   check"; semantic placeholder kinds are never sent
-- [ ] T014 [P] [US1] Saved-filter decoding tests in `crates/stash-core/tests/scene_filters.rs` using
+- [X] T014 [P] [US1] Saved-filter decoding tests in `crates/stash-core/tests/scene_filters.rs` using
   fixture JSON in `crates/stash-core/tests/fixtures/saved_filters/` copied from Testing's saved
   filters (the saved criterion format: `{items: [{id, label}], excluded, depth}`,
   `find_filter`, `ui_options`); an unknown key lands in `left_out`, never silently dropped
-- [ ] T015 [P] [US1] Choice list and vocabulary tests in `crates/stash-core/tests/choices.rs`:
+- [X] T015 [P] [US1] Choice list and vocabulary tests in `crates/stash-core/tests/choices.rs`:
   `ChoiceListTags` sends one `custom_fields` list with `IS_NULL` for every type flag and
   `variantOfTagId`; flag values `1`, `"1"`, `true`, `"true"` are set and `0`, `"0"`, `false`, null
   are not; a tag with several flags takes the fixed priority (Label > Action > Role > Trait >
@@ -162,11 +162,11 @@ after the first time.
   the Production fixture `crates/stash-core/tests/fixtures/semantic/vocabulary.json` parses with
   every flagged tag typed; group aliases split on commas; local search is case-insensitive and
   accent-folded over name and aliases
-- [ ] T016 [P] [US1] Request-count tests in `crates/stash-core/tests/query_budget.rs`: a page with
+- [X] T016 [P] [US1] Request-count tests in `crates/stash-core/tests/query_budget.rs`: a page with
   search and criteria is 1 `ScenesPage`; `SavedSceneFilters` 1 cold, 0 cached; each
   `ChoiceList<Kind>` 1 cold, 0 cached; `SemanticVocabulary` 1 cold, 0 cached; opening the Tags
   picker cold is at most 2 (`ChoiceListTags` + `SemanticVocabulary`)
-- [ ] T017 [P] [US1] Transition tests in `native-ui/tests/scenes_find.rs`: typing updates
+- [X] T017 [P] [US1] Transition tests in `native-ui/tests/scenes_find.rs`: typing updates
   `search_draft` only; 300 ms after the last key one `LoadScenesPage` with page 1; an older
   generation's results are dropped; adding, editing, removing a chip, clearing, and applying a
   saved filter each reset to page 1 with one load; a saved filter with `left_out` shows the
@@ -175,13 +175,13 @@ after the first time.
   (FR-003f): focus search, open the filter menu, move through criteria and editors, picker
   arrows/Enter/include-exclude/Escape, saved filters menu, and removing a focused chip all work
   without a pointer
-- [ ] T018 [P] [US1] Snapshot round-trip test in `native-ui/tests/snapshot.rs`: a tab with search,
+- [X] T018 [P] [US1] Snapshot round-trip test in `native-ui/tests/snapshot.rs`: a tab with search,
   criteria (including an `Items` criterion with labels and a semantic placeholder), applied saved
   filter, sort, page, page size, and scroll comes back identical without a request
 
 ### Implementation for User Story 1
 
-- [ ] T019 [US1] Criterion model in `crates/stash-core/src/scenes/filter/mod.rs`: `Criterion {
+- [X] T019 [US1] Criterion model in `crates/stash-core/src/scenes/filter/mod.rs`: `Criterion {
   kind, modifier, value }`, `CriterionKind` (one per v0.31.1 `SceneFilterType` field in research
   R3, plus `Semantic(SemanticKind)` placeholders), `Modifier` (`Equals, NotEquals, GreaterThan,
   LessThan, Between, NotBetween, Includes, IncludesAll, Excludes, IsNull, NotNull, MatchesRegex,
@@ -189,37 +189,37 @@ after the first time.
   Timestamp | Bool | Resolution | Orientation(Set) | Items { items, excluded, depth } | StashId {
   endpoint, id } | CustomField { field, value }`), validation as quoted in T013, serde for the
   session file
-- [ ] T020 [US1] Per-kind metadata in `crates/stash-core/src/scenes/filter/kinds.rs`: label, group
+- [X] T020 [US1] Per-kind metadata in `crates/stash-core/src/scenes/filter/kinds.rs`: label, group
   (as the web UI's filter menu), allowed modifiers, and value type, taken from the Stash web UI
   source for v0.31.1 (`/home/bbulder/stash-source/stash/ui/v2.5/src/models/list-filter/scenes.ts`
   and its criteria files)
-- [ ] T021 [US1] Semantic placeholders in `crates/stash-core/src/scenes/filter/semantic.rs`: Trait,
+- [X] T021 [US1] Semantic placeholders in `crates/stash-core/src/scenes/filter/semantic.rs`: Trait,
   Trait Category, Label, Role, Role Category, Pluggable, Action with variation, Mise-en-scène and
   Location, Timeline relation, Archetype, Look, each with a one-line description; excluded from
   conversion (never sent)
-- [ ] T022 [US1] Cynic input objects for `SceneFilterType` and its criterion inputs in
+- [X] T022 [US1] Cynic input objects for `SceneFilterType` and its criterion inputs in
   `crates/stash-core/src/adapter/gql.rs`, and the conversion in
   `crates/stash-core/src/scenes/filter/to_stash.rs`
-- [ ] T023 [US1] `SceneQuery` gains `criteria: Vec<Criterion>` in
+- [X] T023 [US1] `SceneQuery` gains `criteria: Vec<Criterion>` in
   `crates/stash-core/src/scenes/query.rs` ("each kind at most once except custom fields; order
   kept for chips"); `normalized()` sorts criteria by kind and drops empty search and criteria;
   `cache_hash()` includes them; `find_scenes_page` in `crates/stash-core/src/adapter/scenes.rs`
   sends `scene_filter`; regenerate `ScenesPage.graphql` (selection unchanged, new variable only)
-- [ ] T024 [US1] Saved-filter decoding in `crates/stash-core/src/scenes/filter/saved.rs`:
+- [X] T024 [US1] Saved-filter decoding in `crates/stash-core/src/scenes/filter/saved.rs`:
   `SavedFilter { id, name, query: SceneQuery, page_size: Option<u32>, mode: Option<Mode>,
   left_out: Vec<String> }` from `find_filter` + `object_filter` + `ui_options`; also used for the
   default filter from `UiSettings`
-- [ ] T025 [US1] `SavedSceneFilters` in `crates/stash-core/src/adapter/filters.rs`
+- [X] T025 [US1] `SavedSceneFilters` in `crates/stash-core/src/adapter/filters.rs`
   (`findSavedFilters(mode: SCENES){id name find_filter{q page per_page sort direction}
   object_filter ui_options}`), cached as `saved-filters:scenes`, golden file
-- [ ] T026 [P] [US1] Choice lists in `crates/stash-core/src/adapter/choices.rs`:
+- [X] T026 [P] [US1] Choice lists in `crates/stash-core/src/adapter/choices.rs`:
   `ChoiceListPerformers` (`id name alias_list`), `ChoiceListTags` (ordinary tags only: `id name
   aliases` with every type flag and `variantOfTagId` `IS_NULL`), `ChoiceListStudios`,
   `ChoiceListGroups` (`id name aliases`), `ChoiceListGalleries` (`id title`), all `per_page: -1,
   sort: name`, cached per server as `choices:<kind>`, registered with the quiet refresher in
   `crates/stash-core/src/cache/refresh.rs`; golden files; local search in
   `crates/stash-core/src/scenes/filter/search.rs`
-- [ ] T027 [P] [US1] Semantic vocabulary in `crates/stash-core/src/semantic.rs` (`SemanticKind`:
+- [X] T027 [P] [US1] Semantic vocabulary in `crates/stash-core/src/semantic.rs` (`SemanticKind`:
   `Pluggable (plugtag) | Trait (isTrait) | Role (isRole) | Action (isAction) | Label (isLabel) |
   MiseEnScene (isMiseEnScene) | Variation (isVariation)`; flag parsing; priority; `kind_of`;
   `colour_of(tag id, rules)` per [contracts/tag-colour.md](contracts/tag-colour.md)) and the
@@ -230,54 +230,54 @@ after the first time.
   as `semantic:vocabulary` (refetched whenever the set of rule fields changes, whether saved
   here or picked up by the quiet refresh of the UI settings) and refreshed with the tag
   choice list; golden file for the default rules
-- [ ] T028 [US1] Effects in `native-ui/src/effects.rs` and services in
+- [X] T028 [US1] Effects in `native-ui/src/effects.rs` and services in
   `native-ui/src/services/choices.rs` (`LoadChoices { kind }`, `LoadVocabulary`) and
   `native-ui/src/services/filters.rs` (`LoadSavedFilters`, `LoadUiSettings`), registered in
   `native-ui/src/services/mod.rs`, each answered from the cache first, results as typed messages
   in `native-ui/src/messages.rs`
-- [ ] T029 [US1] `ScenesState` in `native-ui/src/screens/scenes/state.rs`: `query.search`,
+- [X] T029 [US1] `ScenesState` in `native-ui/src/screens/scenes/state.rs`: `query.search`,
   `query.criteria`, `applied_saved_filter: Option<(id, name)>` ("cleared when the user edits the
   criteria"), transient `search_draft` and `picker: Option<PickerState>`; the transitions in T017
   (300 ms debounce through a timer effect, page 1 on change, generations)
-- [ ] T030 [P] [US1] Search box in `native-ui/src/screens/scenes/search.rs`, placed in the controls
+- [X] T030 [P] [US1] Search box in `native-ui/src/screens/scenes/search.rs`, placed in the controls
   bar (`native-ui/src/screens/scenes/controls.rs`), with a key to focus it added to
   `native-ui/src/shell/keymap.rs` and the keyboard help
-- [ ] T031 [US1] Criterion chips and "Clear all" in `native-ui/src/screens/scenes/filters.rs`, plus
+- [X] T031 [US1] Criterion chips and "Clear all" in `native-ui/src/screens/scenes/filters.rs`, plus
   the filter menu: every criterion in the web UI's groups, a value editor per value type (text,
   number, range, duration, date, resolution, orientation, bool, items, StashID, custom field), and
   the Semantic group shown described and disabled; tag chips in the filter bar use `colour_of`;
   every part keyboard-operable (FR-003f), keys listed in keyboard help
-- [ ] T032 [US1] Picker in `native-ui/src/screens/scenes/picker.rs`: the full cached list, narrowing
+- [X] T032 [US1] Picker in `native-ui/src/screens/scenes/picker.rs`: the full cached list, narrowing
   on each key within a frame (windowed rows with `keyed_column`, as the grid), names and aliases;
   performer images only for visible rows through the thumbnail service; the Tags picker shows the
   vocabulary grouped by kind (type badge, each tag in its `colour_of` colour) above ordinary
   tags (ordinary tags matched by an added rule in that rule's colour); include/exclude and modifier; `Loading` until
   the list first arrives; arrows move, Enter chooses, a key toggles include/exclude, Escape and
   click outside close it
-- [ ] T033 [US1] Saved filters menu in `native-ui/src/screens/scenes/filters.rs` (listed by name,
+- [X] T033 [US1] Saved filters menu in `native-ui/src/screens/scenes/filters.rs` (listed by name,
   apply sets search, criteria, sort, page size, display mode; `left_out` shown as a notice;
   opened and chosen from the keyboard), and
   the default filter for new Scenes tabs in `native-ui/src/shell/mod.rs` (tabs already open keep
   what they show)
-- [ ] T034 [P] [US1] Empty state with "Clear filters", and the offline message for an uncached
+- [X] T034 [P] [US1] Empty state with "Clear filters", and the offline message for an uncached
   search or filter, in `native-ui/src/screens/scenes/grid.rs`
-- [ ] T035 [US1] Performer, tag, and studio chips on the scene page open Scenes filtered to them
+- [X] T035 [US1] Performer, tag, and studio chips on the scene page open Scenes filtered to them
   (same tab; Ctrl+click or middle-click opens a new tab) in `native-ui/src/screens/scene.rs`
-- [ ] T036 [US1] Save and restore search, criteria, and applied saved filter with the tab in
+- [X] T036 [US1] Save and restore search, criteria, and applied saved filter with the tab in
   `native-ui/src/session/snapshot.rs`
-- [ ] T037 [US1] Bench rows in `native-ui/src/measure/bench.rs` and budgets in
+- [X] T037 [US1] Bench rows in `native-ui/src/measure/bench.rs` and budgets in
   `crates/perf-harness/src/report.rs`: `gql-page-50` (1), `gql-page-1000` (1), `gql-filter-apply`
   (1), `gql-picker-cold` (1), `gql-picker-cached` (0), `gql-vocabulary-cold` (1),
   `gql-tags-picker-cold` (≤ 2); add the SC-002a picker timing row (open < 150 ms cached for a
   20,000-name list, narrowing within a frame)
-- [ ] T038 [US1] Opt-in live test in `crates/stash-core/tests/live_stash.rs` (SC-001): every saved
+- [X] T038 [US1] Opt-in live test in `crates/stash-core/tests/live_stash.rs` (SC-001): every saved
   filter on Testing decodes with an empty `left_out`; for 10 varied queries (listed in
   [quickstart.md](quickstart.md) V1: search only, performer, tag with depth, studio, resolution,
   duration range, organized, rating, custom field, and the 3 saved filters) a hand-written
   `SceneFilterType` JSON per query in `crates/stash-core/tests/fixtures/sc001/` (written from
   the web UI's network requests for the same filter, independent of the viewer's converter)
   and the viewer's converted criteria give the same count and the same first 100 ids
-- [ ] T039 [US1] Run quickstart V1 with the user (Testing, and Production read-only for the
+- [X] T039 [US1] Run quickstart V1 with the user (Testing, and Production read-only for the
   picker), then the gate
 
 **Checkpoint**: US1 works on its own (MVP).

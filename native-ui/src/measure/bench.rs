@@ -47,6 +47,11 @@ enum Act {
     BackToScene,
     /// Select the playing tab (as a tab switch).
     SelectOwner,
+    /// Ask the library for the semantic vocabulary (the scene page does this from US2).
+    WantVocabulary,
+    /// Forget the library's in-memory lists (the disk cache keeps them): the next picker reads
+    /// them again.
+    ForgetLists,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -57,6 +62,10 @@ enum Cond {
     PageShown,
     /// A different page's cards are showing.
     CardsShown,
+    /// The open picker's list (and, for tags, the vocabulary) is here.
+    PickerReady,
+    /// The semantic vocabulary is here.
+    VocabularyReady,
     /// At least this many cards are showing.
     Cards(usize),
     /// Every card on the page has its thumbnail.
@@ -248,11 +257,18 @@ fn script() -> Vec<Op> {
         ops.push(Frames(10));
     }
 
-    // Scenes: a fresh tab at 50 per page.
+    // Scenes: a fresh tab at 50 per page (gql-page-50: the page and its neighbour's prefetch).
     ops.extend([
         shell(ShellMsg::NewTab),
         shell(ShellMsg::Section(Section::Scenes)),
         Until(Cond::Ready, ms(15_000)),
+        // The whole library, as 007 measured it: a server's default filter may narrow a fresh
+        // tab (Testing's does).
+        GqlReset,
+        shell(ShellMsg::Scenes(ScenesMsg::ClearFilters)),
+        Until(Cond::Ready, ms(15_000)),
+        Sleep(ms(500)),
+        Gql("gql-page-50"),
         Frames(2),
     ]);
     for i in 0..20 {
@@ -284,6 +300,79 @@ fn script() -> Vec<Op> {
         ]);
     }
     ops.push(Report("page-jump"));
+
+    // Finding (008): a filter applied, the vocabulary, and the pickers cold and cached.
+    let organized = stash_core::scenes::filter::Criterion::new(
+        stash_core::scenes::filter::kinds::CriterionKind::Organized,
+        stash_core::scenes::filter::Modifier::Equals,
+        stash_core::scenes::filter::CriterionValue::Bool(false),
+    );
+    let picker = |kind| shell(ShellMsg::Scenes(ScenesMsg::Add(kind)));
+    let close = shell(ShellMsg::Scenes(ScenesMsg::Editor(
+        crate::screens::scenes::editor::EditorMsg::Cancel,
+    )));
+    use stash_core::scenes::filter::kinds::CriterionKind as K;
+    ops.extend([
+        // Let the page jumps' prefetches land first.
+        Sleep(ms(1500)),
+        GqlReset,
+        Remember,
+        shell(ShellMsg::Scenes(ScenesMsg::FilterTo(organized))),
+        Until(Cond::Ready, ms(15_000)),
+        Sleep(ms(500)),
+        Gql("gql-filter-apply"),
+        shell(ShellMsg::Scenes(ScenesMsg::ClearFilters)),
+        Until(Cond::Ready, ms(15_000)),
+        // Let the neighbour prefetch land before the next row starts counting.
+        Sleep(ms(1000)),
+        GqlReset,
+        Op::Act(A::WantVocabulary),
+        Until(Cond::VocabularyReady, ms(15_000)),
+        // A cached vocabulary refreshes quietly in the background: count it here.
+        Sleep(ms(1000)),
+        Gql("gql-vocabulary-cold"),
+        Op::Act(A::ForgetLists),
+        GqlReset,
+        Start,
+        picker(K::Performers),
+        Until(Cond::PickerReady, ms(30_000)),
+        Frames(2),
+        Sample("picker-open-cold"),
+        Gql("gql-picker-cold"),
+        close.clone(),
+        Frames(2),
+    ]);
+    ops.push(GqlReset);
+    for _ in 0..5 {
+        ops.extend([
+            Start,
+            picker(K::Performers),
+            Until(Cond::PickerReady, ms(5_000)),
+            Frames(2),
+            Sample("picker-open"),
+            Start,
+            shell(ShellMsg::Scenes(ScenesMsg::Editor(
+                crate::screens::scenes::editor::EditorMsg::PickerQuery("a".into()),
+            ))),
+            Frames(2),
+            Sample("picker-narrow"),
+            close.clone(),
+            Frames(2),
+        ]);
+    }
+    ops.extend([
+        Gql("gql-picker-cached"),
+        Report("picker-open-cold"),
+        Report("picker-open"),
+        Report("picker-narrow"),
+        Op::Act(A::ForgetLists),
+        GqlReset,
+        picker(K::Tags),
+        Until(Cond::PickerReady, ms(30_000)),
+        Gql("gql-tags-picker-cold"),
+        close,
+        Frames(2),
+    ]);
     if only_scroll {
         ops.truncate(1);
         ops.extend([
@@ -392,16 +481,37 @@ impl Bench {
         if let Cond::Playing = cond {
             return session.playback.snapshot().state == player::PlayerStateKind::Playing;
         }
+        if let Cond::VocabularyReady = cond {
+            return session.library.vocabulary.ready().is_some();
+        }
         let Some(s) = Self::scenes(session) else {
             return false;
         };
+        if let Cond::PickerReady = cond {
+            let crate::screens::scenes::Panel::Editor(editor) = &s.panel else {
+                return false;
+            };
+            let Some(kind) = editor.picker() else {
+                return false;
+            };
+            let list = session
+                .library
+                .choices
+                .get(&kind)
+                .is_some_and(|c| c.ready().is_some());
+            let vocabulary = kind != stash_core::adapter::choices::ChoiceKind::Tags
+                || session.library.vocabulary.ready().is_some();
+            return list && vocabulary;
+        }
         if !s.ready() {
             return false;
         }
         let changed = || Self::first_card(session) != self.remembered;
         match cond {
             Cond::Ready => true,
-            Cond::Playing => unreachable!("checked before the Scenes screen"),
+            Cond::Playing | Cond::PickerReady | Cond::VocabularyReady => {
+                unreachable!("checked above")
+            }
             Cond::Cards(n) => s.cards().len() >= n.min(s.count().unwrap_or(0) as usize),
             Cond::CardsShown => changed(),
             Cond::AllThumbs => s
@@ -429,6 +539,13 @@ impl Bench {
             Act::CloseOverlay => session.update(session::Msg::Overlay(overlays::Msg::Close)),
             Act::ClearThumbs => {
                 session.thumbs = Thumbs::default();
+                Step::none()
+            }
+            Act::WantVocabulary => {
+                Step::effects(session.library.want(crate::library::Need::Vocabulary))
+            }
+            Act::ForgetLists => {
+                session.library.choices.clear();
                 Step::none()
             }
             Act::Jump => {

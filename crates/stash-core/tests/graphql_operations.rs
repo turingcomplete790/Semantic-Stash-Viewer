@@ -99,11 +99,12 @@ fn only_play_history_and_tag_colours_write() {
 fn forbidden_for(doc: &OperationDocument) -> Vec<&'static str> {
     match doc.tier {
         Tier::Card | Tier::Chip => {
+            // A scene's heavy relations, wherever a scene appears (lists of galleries are fine).
             let mut fields = vec![
                 "paths.stream",
-                "sceneStreams",
-                "scene_markers",
-                "galleries",
+                "scenes.sceneStreams",
+                "scenes.scene_markers",
+                "scenes.galleries",
                 "files.path",
                 "files.fingerprints",
                 "image_path",
@@ -113,7 +114,12 @@ fn forbidden_for(doc: &OperationDocument) -> Vec<&'static str> {
             }
             fields
         }
-        Tier::Detail => vec!["galleries", "sceneStreams", "paths.stream", "files.path"],
+        Tier::Detail => vec![
+            "findScene.galleries",
+            "findScene.sceneStreams",
+            "paths.stream",
+            "files.path",
+        ],
         Tier::Other => vec![],
     }
 }

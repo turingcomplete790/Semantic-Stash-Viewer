@@ -64,6 +64,7 @@ struct SceneDetailsQuery {
 #[derive(cynic::QueryVariables, Debug)]
 pub(crate) struct ScenesPageVariables {
     pub(crate) filter: FindFilterType,
+    pub(crate) scene_filter: Option<SceneFilterType>,
 }
 
 #[derive(cynic::QueryFragment, Debug)]
@@ -76,7 +77,7 @@ pub(crate) struct SceneCards {
 #[derive(cynic::QueryFragment, Debug)]
 #[cynic(graphql_type = "Query", variables = "ScenesPageVariables")]
 pub(crate) struct ScenesPage {
-    #[arguments(filter: $filter)]
+    #[arguments(filter: $filter, scene_filter: $scene_filter)]
     find_scenes: SceneCards,
 }
 
@@ -165,7 +166,10 @@ async fn fetch_scenes_page(
         }),
     };
     let data = client
-        .graphql(&ScenesPage::build(ScenesPageVariables { filter }))
+        .graphql(&ScenesPage::build(ScenesPageVariables {
+            filter,
+            scene_filter: crate::scenes::filter::to_stash::scene_filter(&q.criteria),
+        }))
         .await?;
     let found = data.find_scenes;
     Ok((u32::try_from(found.count).unwrap_or(u32::MAX), found.scenes))
@@ -428,9 +432,26 @@ pub async fn scene_details(client: &StashClient, id: &str) -> Result<SceneDetail
         date: text(scene.date),
         details: text(scene.details),
         director: text(scene.director),
-        studio: scene.studio.map(|s| s.name),
-        performers: scene.performers.into_iter().map(|p| p.name).collect(),
-        tags: scene.tags.into_iter().map(|t| t.name).collect(),
+        studio: scene.studio.map(|s| scenes::Named {
+            id: s.id.into_inner(),
+            name: s.name,
+        }),
+        performers: scene
+            .performers
+            .into_iter()
+            .map(|p| scenes::Named {
+                id: p.id.into_inner(),
+                name: p.name,
+            })
+            .collect(),
+        tags: scene
+            .tags
+            .into_iter()
+            .map(|t| scenes::Named {
+                id: t.id.into_inner(),
+                name: t.name,
+            })
+            .collect(),
         rating100: scene.rating100.and_then(|r| u8::try_from(r).ok()),
         play_count: count(scene.play_count),
         o_count: count(scene.o_counter),
@@ -458,15 +479,40 @@ pub async fn scene_screenshot_bytes(
     screenshot_bytes(client, id, MAX_THUMB_SOURCE_BYTES).await
 }
 
+/// A performer's image as bytes and content type, for picker rows and chips (008 FR-003a); the
+/// key goes in a header; `None` when the performer has none.
+pub async fn performer_image_bytes(
+    client: &StashClient,
+    id: &str,
+) -> Result<Option<(Vec<u8>, String)>, AppError> {
+    image_bytes(client, "performer", id, "image", MAX_THUMB_SOURCE_BYTES).await
+}
+
 async fn screenshot_bytes(
     client: &StashClient,
     id: &str,
     max_bytes: usize,
 ) -> Result<Option<(Vec<u8>, String)>, AppError> {
-    let mut url = endpoint(&endpoint(client.base_url(), "scene"), id);
+    image_bytes(client, "scene", id, "screenshot", max_bytes).await
+}
+
+/// `{base}/{kind}/{id}/{resource}` with the key in a header.
+async fn image_bytes(
+    client: &StashClient,
+    kind: &str,
+    id: &str,
+    resource: &str,
+    max_bytes: usize,
+) -> Result<Option<(Vec<u8>, String)>, AppError> {
+    let mut url = endpoint(&endpoint(client.base_url(), kind), id);
     if let Ok(mut segments) = url.path_segments_mut() {
-        segments.push("screenshot");
+        segments.push(resource);
     }
+    let record_as = if kind == "performer" {
+        "performer-image"
+    } else {
+        "screenshot"
+    };
     let started = std::time::Instant::now();
     let response = client
         .get_with_key(url)
@@ -474,7 +520,7 @@ async fn screenshot_bytes(
         .await
         .map_err(|e| AppError::from(client.classify_transport_error(&e)))?;
     if !response.status().is_success() {
-        client.record_get("screenshot", 0, started);
+        client.record_get(record_as, 0, started);
         return Ok(None);
     }
     let content_type = response
@@ -488,13 +534,13 @@ async fn screenshot_bytes(
         .content_length()
         .is_some_and(|len| len > max_bytes as u64)
     {
-        client.record_get("screenshot", 0, started);
+        client.record_get(record_as, 0, started);
         return Ok(None);
     }
     let bytes = response.bytes().await.map_err(|e| AppError::Internal {
-        message: format!("couldn't read the screenshot: {e}"),
+        message: format!("couldn't read the {resource}: {e}"),
     })?;
-    client.record_get("screenshot", bytes.len(), started);
+    client.record_get(record_as, bytes.len(), started);
     if bytes.len() > max_bytes {
         return Ok(None);
     }

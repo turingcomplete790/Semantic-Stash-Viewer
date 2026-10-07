@@ -10,7 +10,7 @@ use stash_core::scenes::paging::PAGE_SIZES;
 use stash_core::scenes::query::{SceneSort, SortDirection};
 
 use super::layout::PAD;
-use super::state::{ScenesMsg, ScenesState};
+use super::state::{Panel, ScenesMsg, ScenesState, SEARCH_ID};
 use crate::screens::Mode;
 use crate::shell::ShellMsg;
 use crate::widgets::theme;
@@ -82,7 +82,39 @@ pub fn top(state: &ScenesState) -> Element<'_, ShellMsg> {
         SortDirection::Asc => "↑ Ascending",
         SortDirection::Desc => "↓ Descending",
     };
+    let filters = state.query.criteria.len();
     let mut bar = row![
+        text_input("Search scenes", state.search_text())
+            .id(SEARCH_ID)
+            .on_input(|t| msg(ScenesMsg::SearchInput(t)))
+            .on_submit(msg(ScenesMsg::SearchSubmit))
+            .size(13)
+            .padding([4, 8])
+            .width(Length::Fixed(220.0)),
+        button(
+            text(if filters == 0 {
+                "Filter".to_owned()
+            } else {
+                format!("Filter ({filters})")
+            })
+            .size(13)
+        )
+        .padding([4, 10])
+        .style(theme::menu_row(matches!(
+            state.panel,
+            Panel::Menu { .. } | Panel::Editor(_)
+        )))
+        .on_press(msg(ScenesMsg::FilterMenu(!matches!(
+            state.panel,
+            Panel::Menu { .. } | Panel::Editor(_)
+        )))),
+        button(text("Saved filters").size(13))
+            .padding([4, 10])
+            .style(theme::menu_row(matches!(state.panel, Panel::Saved { .. })))
+            .on_press(msg(ScenesMsg::SavedMenu(!matches!(
+                state.panel,
+                Panel::Saved { .. }
+            )))),
         pick_list(sorts, Some(Sort(state.query.sort)), |s: Sort| msg(
             ScenesMsg::Sort(s.0)
         ))

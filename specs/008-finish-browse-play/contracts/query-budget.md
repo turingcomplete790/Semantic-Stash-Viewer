@@ -112,8 +112,12 @@ fetched at most once per item until the cache drops it, with the API key in a he
 
 ## Live audit rows
 
-`gql-page-50`, `gql-page-1000`, `gql-filter-apply`, `gql-scene-page`, `gql-scene-files`,
-`gql-scene-galleries`, `gql-chip-rest`, `gql-chip-sweep` (expected 0), `gql-picker-cold`,
-`gql-picker-cached` (expected 0), `gql-vocabulary-cold` (1), `gql-tag-colours-save` (1 + at most 1), `gql-tags-picker-cold` (≤ 2:
-ordinary tags plus the vocabulary), `gql-viewing-10min-writes` (≤ 11 + 1). Each reports requests,
-response bytes, and server time (median, p95).
+`gql-page-50`, `gql-page-1000`, `gql-filter-apply` (each ≤ 2 on page 1: the page shown plus its
+one neighbour's prefetch, as `ScenesPage`'s budget says; 0 when cached), `gql-scene-page`,
+`gql-scene-files`, `gql-scene-galleries`, `gql-chip-rest`, `gql-chip-sweep` (expected 0),
+`gql-picker-cold` (1), `gql-picker-cached` (expected 0), `gql-vocabulary-cold` (1),
+`gql-tag-colours-save` (1 + at most 1), `gql-tags-picker-cold` (≤ 2: ordinary tags plus the
+vocabulary), `gql-viewing-10min-writes` (≤ 11 + 1). Each reports requests, response bytes, and
+server time (median, p95); plain GETs (thumbnails, performer images) are listed beside them, not
+counted against the request budget. The bench lets a scenario's late prefetches and quiet
+background refreshes land before the next row starts counting.

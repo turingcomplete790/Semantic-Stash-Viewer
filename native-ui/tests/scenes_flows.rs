@@ -137,6 +137,7 @@ fn opening_a_card_and_going_back_returns_the_exact_place() {
             profile: &s.profile,
             connection: &connection,
             thumbs: &thumbs,
+            library: &s.library,
             layout: semantic_stash_viewer_native::screens::scenes::layout::Layout::new(
                 1100.0, 2400.0,
             ),
@@ -203,6 +204,7 @@ fn a_rebuilt_grid_starts_where_its_state_says() {
         profile: &s.profile,
         connection: &connection,
         thumbs: &thumbs,
+        library: &s.library,
         layout,
     };
     let mut ui = iced_test::simulator::Simulator::with_size(

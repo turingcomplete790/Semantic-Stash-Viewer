@@ -44,10 +44,12 @@ against Testing's web UI for the same criteria. Apply each saved filter; open a 
 and check the default filter applies. From a scene page, choose a performer, a tag, and a studio
 (and Ctrl+click one). Restart: the tab's search, chips, page, and scroll come back. Open the
 filter menu and check the Semantic group shows its placeholders.
-The 10 SC-001 queries (checked automatically by the live test, and by eye against Testing's web
-UI): search text only; one performer; one tag with sub-tags (depth); one studio; resolution at
-least 1080p; duration between 10 and 30 minutes; organized; rating at least 4 stars; one custom
-field; and the 3 saved filters. Check the Tags picker: semantic tags grouped by type, each type
+The 12 SC-001 queries (checked automatically by
+`STASH_TEST_URL=http://localhost:9998 STASH_TEST_API_KEY=… cargo test -p stash-core --test live_stash -- --ignored`,
+and by eye against Testing's web UI): search text only; one performer; one tag with sub-tags
+(depth); one studio; resolution above 720p; duration between 10 and 30 minutes; not organized;
+rating at least 4 stars; one custom field; and the 3 saved filters. On 2026-10-06 all 12 gave the
+same count and first 100 as the web UI's request. Check the Tags picker: semantic tags grouped by type, each type
 in its default colour, and the `isTrait: 0` tag among ordinary, uncoloured tags. Do the whole of V1 once with the keyboard only. Open the performer picker on
 Production (read-only): it opens at once after the first time and narrows as you type.
 

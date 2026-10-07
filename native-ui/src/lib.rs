@@ -13,6 +13,7 @@
 
 pub mod app;
 pub mod effects;
+pub mod library;
 pub mod logging;
 pub mod machine;
 pub mod measure;

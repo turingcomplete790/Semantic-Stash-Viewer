@@ -157,6 +157,7 @@ fn run(options: &Options) -> Result<Report, String> {
     measurements.push(cold_start("cold-start-cleared", None, &cleared));
     measurements.extend(bench_measurements(&bench));
     measurements.extend(scenes_measurements(&bench));
+    measurements.extend(picker_measurements(&bench));
     measurements.extend(gql_rows(&bench));
     measurements.extend(playback_measurements(&playback));
     measurements.extend(resource_measurements(&bench, &playback));
@@ -600,6 +601,34 @@ fn bench_measurements(launch: &Launch) -> Vec<Measurement> {
             "back-to-scene",
             "back-to-scene",
             None,
+            Check::Median,
+        ),
+    ]
+}
+
+/// Finding (008 SC-002a): a cached picker of the whole list opens within 150 ms and narrows on
+/// a key within the input budget (50 ms, drawn).
+fn picker_measurements(launch: &Launch) -> Vec<Measurement> {
+    vec![
+        from_bench(
+            launch,
+            "picker-open-cold",
+            "picker-open-cold",
+            None,
+            Check::Median,
+        ),
+        from_bench(
+            launch,
+            "picker-open",
+            "picker-open",
+            Some(150.0),
+            Check::Median,
+        ),
+        from_bench(
+            launch,
+            "picker-narrow",
+            "picker-narrow",
+            Some(50.0),
             Check::Median,
         ),
     ]

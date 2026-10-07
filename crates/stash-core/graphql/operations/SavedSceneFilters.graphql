@@ -1,0 +1,15 @@
+query SavedSceneFilters($mode: FilterMode) {
+  findSavedFilters(mode: $mode) {
+    id
+    name
+    find_filter {
+      q
+      page
+      per_page
+      sort
+      direction
+    }
+    object_filter
+    ui_options
+  }
+}

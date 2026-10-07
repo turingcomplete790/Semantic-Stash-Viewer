@@ -45,6 +45,8 @@ pub struct Shell {
     pub layout: Layout,
     /// Something changed since the shell was made (a restore then keeps the current tab).
     touched: bool,
+    /// The server's default scene filter: new Scenes screens start from it (008 FR-004).
+    pub default_scenes: Option<stash_core::scenes::filter::saved::SavedFilter>,
 }
 
 #[derive(Debug, Clone)]
@@ -71,6 +73,11 @@ pub enum ShellMsg {
     Settings(crate::screens::settings::SettingsMsg),
     /// For the active Scenes screen.
     Scenes(ScenesMsg),
+    /// Open Scenes filtered to a performer, tag, or studio (008 FR-006), here or in a new tab.
+    FilterTo {
+        criterion: stash_core::scenes::filter::Criterion,
+        new_tab: bool,
+    },
     // Handled above the shell.
     Play(String),
     ServerMenu,
@@ -89,9 +96,21 @@ pub enum Up {
     ServerMenu,
     Notifications,
     KeyboardHelp,
+    /// A screen needs something from the library.
+    Need(crate::library::Need),
 }
 
 impl Shell {
+    /// A fresh screen for a section: Scenes starts from the server's default filter.
+    fn fresh(&self, section: Section) -> Screen {
+        match (section, &self.default_scenes) {
+            (Section::Scenes, Some(filter)) => {
+                Screen::Scenes(Box::new(crate::screens::ScenesState::from_saved(filter)))
+            }
+            _ => Screen::for_section(section),
+        }
+    }
+
     /// One Home tab.
     pub fn new() -> (Self, Vec<Effect>) {
         let mut shell = Self {
@@ -100,6 +119,7 @@ impl Shell {
             next_id: 2,
             layout: Layout::default(),
             touched: false,
+            default_scenes: None,
         };
         let effects = shell.active_mut().enter();
         (shell, effects)
@@ -125,6 +145,7 @@ impl Shell {
             next_id,
             layout: Layout::default(),
             touched: false,
+            default_scenes: None,
         };
         let effects = shell.active_mut().enter();
         Some((shell, effects))
@@ -237,7 +258,10 @@ impl Shell {
         self.touched = true;
         let len = self.tabs.len();
         let effects = match msg {
-            ShellMsg::Section(section) => self.active_mut().open_section(section),
+            ShellMsg::Section(section) => {
+                let fresh = self.fresh(section);
+                self.active_mut().open_section_with(section, fresh)
+            }
             ShellMsg::Open(screen) => self.active_mut().open(screen),
             ShellMsg::OpenInNewTab(screen) => self.new_tab(self.selected + 1, screen),
             ShellMsg::Back => self.active_mut().back(),
@@ -278,16 +302,26 @@ impl Shell {
                     return Step::none();
                 };
                 let Step { mut effects, up } = state.update(m, tab, &layout);
-                if let Some(ScenesUp::Open { id, title, new_tab }) = up {
-                    let screen = Screen::scene(&id, &title);
-                    effects.extend(if new_tab {
-                        self.new_tab(self.selected + 1, screen)
-                    } else {
-                        self.active_mut().open(screen)
-                    });
+                match up {
+                    Some(ScenesUp::Open { id, title, new_tab }) => {
+                        let screen = Screen::scene(&id, &title);
+                        effects.extend(if new_tab {
+                            self.new_tab(self.selected + 1, screen)
+                        } else {
+                            self.active_mut().open(screen)
+                        });
+                    }
+                    Some(ScenesUp::Need(need)) => {
+                        return Step {
+                            effects,
+                            up: Some(Up::Need(need)),
+                        }
+                    }
+                    None => {}
                 }
                 effects
             }
+            ShellMsg::FilterTo { criterion, new_tab } => self.filter_to(criterion, new_tab),
             ShellMsg::Play(id) => return Step::up(Up::Play(id)),
             ShellMsg::ServerMenu => return Step::up(Up::ServerMenu),
             ShellMsg::Notifications => return Step::up(Up::Notifications),
@@ -317,6 +351,39 @@ impl Shell {
             })
             .map(|state| state.page_loaded(generation, result, waiting))
             .unwrap_or_default()
+    }
+
+    /// A search's debounce came due for tab `tab`.
+    pub fn search_due(&mut self, tab: TabId, generation: u64) -> Vec<Effect> {
+        let Some(i) = self.index_of(tab) else {
+            return Vec::new();
+        };
+        self.tabs[i]
+            .history
+            .iter_mut()
+            .find_map(|screen| match screen {
+                Screen::Scenes(state) if state.awaits_search(generation) => Some(state),
+                _ => None,
+            })
+            .map(|state| state.search_due(generation))
+            .unwrap_or_default()
+    }
+
+    /// Open Scenes filtered to `criterion` (a performer, tag, or studio chip), here or in a new
+    /// tab (008 FR-006).
+    pub fn filter_to(
+        &mut self,
+        criterion: stash_core::scenes::filter::Criterion,
+        new_tab: bool,
+    ) -> Vec<Effect> {
+        let mut state = crate::screens::ScenesState::default();
+        state.query.criteria = vec![criterion];
+        let screen = Screen::Scenes(Box::new(state));
+        if new_tab {
+            self.new_tab(self.selected + 1, screen)
+        } else {
+            self.active_mut().open(screen)
+        }
     }
 
     /// Every Settings screen, in every tab (results for Settings reach them all).

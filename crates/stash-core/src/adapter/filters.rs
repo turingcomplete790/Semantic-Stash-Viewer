@@ -7,7 +7,87 @@ use serde::{Deserialize, Serialize};
 use super::gql::{schema, JsonMap};
 use super::StashClient;
 use crate::error::AppError;
+use crate::scenes::filter::saved::{decode_saved_filter, SavedFilter};
 use crate::semantic::{parse_colour_rules, ColourRule, TAG_COLOURS_KEY};
+
+// ---- SavedSceneFilters ------------------------------------------------------------------------
+
+#[derive(cynic::Enum, Clone, Copy, Debug)]
+#[cynic(graphql_type = "FilterMode")]
+pub(crate) enum FilterMode {
+    Scenes,
+    Performers,
+    Studios,
+    Galleries,
+    SceneMarkers,
+    Movies,
+    Groups,
+    Tags,
+    Images,
+}
+
+#[derive(cynic::QueryVariables, Debug)]
+pub(crate) struct SavedFiltersVariables {
+    pub(crate) mode: Option<FilterMode>,
+}
+
+#[derive(cynic::QueryFragment, Debug, serde::Serialize)]
+#[cynic(graphql_type = "SavedFindFilterType")]
+struct SavedFind {
+    q: Option<String>,
+    page: Option<i32>,
+    #[cynic(rename = "per_page")]
+    per_page: Option<i32>,
+    sort: Option<String>,
+    direction: Option<super::gql::SortDirectionEnum>,
+}
+
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(graphql_type = "SavedFilter")]
+struct SavedFilterFields {
+    id: cynic::Id,
+    name: String,
+    #[cynic(rename = "find_filter")]
+    find_filter: Option<SavedFind>,
+    #[cynic(rename = "object_filter")]
+    object_filter: Option<JsonMap>,
+    #[cynic(rename = "ui_options")]
+    ui_options: Option<JsonMap>,
+}
+
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(graphql_type = "Query", variables = "SavedFiltersVariables")]
+pub(crate) struct SavedSceneFilters {
+    #[arguments(mode: $mode)]
+    find_saved_filters: Vec<SavedFilterFields>,
+}
+
+/// One `SavedSceneFilters` request: every saved scene filter, decoded (cached per server as
+/// `saved-filters:scenes`).
+pub async fn saved_scene_filters(client: &StashClient) -> Result<Vec<SavedFilter>, AppError> {
+    let data = client
+        .graphql(&SavedSceneFilters::build(SavedFiltersVariables {
+            mode: Some(FilterMode::Scenes),
+        }))
+        .await?;
+    Ok(data
+        .find_saved_filters
+        .into_iter()
+        .map(|f| {
+            let find = f
+                .find_filter
+                .as_ref()
+                .and_then(|find| serde_json::to_value(find).ok());
+            decode_saved_filter(
+                f.id.inner(),
+                &f.name,
+                find.as_ref(),
+                f.object_filter.as_ref().map(|m| &m.0),
+                f.ui_options.as_ref().map(|m| &m.0),
+            )
+        })
+        .collect())
+}
 
 // ---- UiConfig: configuration { ui } ---------------------------------------------------------
 

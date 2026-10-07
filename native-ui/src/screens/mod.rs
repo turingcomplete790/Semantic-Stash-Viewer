@@ -21,6 +21,8 @@ pub struct Context<'a> {
     pub profile: &'a ServerProfile,
     pub connection: &'a Connection,
     pub thumbs: &'a scenes::Thumbs,
+    /// What the server's tabs share: picker lists, saved filters, the vocabulary (008).
+    pub library: &'a crate::library::Library,
     /// The window's size, for the grid's columns.
     pub layout: scenes::layout::Layout,
 }
@@ -48,7 +50,8 @@ pub enum Mode {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Screen {
     Home(home::Home),
-    Scenes(ScenesState),
+    /// Boxed: the Scenes state is large next to the others.
+    Scenes(Box<ScenesState>),
     Scene(SceneState),
     Settings(SettingsState),
 }
@@ -59,7 +62,7 @@ impl Screen {
     }
 
     pub fn scenes() -> Self {
-        Screen::Scenes(ScenesState::default())
+        Screen::Scenes(Box::default())
     }
 
     pub fn scene(id: &str, title: &str) -> Self {
@@ -102,7 +105,7 @@ impl Screen {
     pub fn persistent(&self) -> Screen {
         match self {
             Screen::Home(_) => Screen::home(),
-            Screen::Scenes(s) => Screen::Scenes(s.persistent()),
+            Screen::Scenes(s) => Screen::Scenes(Box::new(s.persistent())),
             Screen::Scene(s) => Screen::Scene(s.persistent()),
             Screen::Settings(s) => Screen::Settings(s.persistent()),
         }

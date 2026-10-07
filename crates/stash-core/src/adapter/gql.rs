@@ -107,17 +107,206 @@ pub struct StringCriterionInput {
     pub modifier: CriterionModifier,
 }
 
-/// The parts of `SceneFilterType` the adapter uses today.
+#[derive(cynic::InputObject, Clone, Debug)]
+#[cynic(graphql_type = "IntCriterionInput")]
+pub struct IntCriterionInput {
+    pub value: i32,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub value2: Option<i32>,
+    pub modifier: CriterionModifier,
+}
+
+#[derive(cynic::InputObject, Clone, Debug)]
+#[cynic(graphql_type = "DateCriterionInput")]
+pub struct DateCriterionInput {
+    pub value: String,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub value2: Option<String>,
+    pub modifier: CriterionModifier,
+}
+
+#[derive(cynic::InputObject, Clone, Debug)]
+#[cynic(graphql_type = "TimestampCriterionInput")]
+pub struct TimestampCriterionInput {
+    pub value: String,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub value2: Option<String>,
+    pub modifier: CriterionModifier,
+}
+
+#[derive(cynic::InputObject, Clone, Debug)]
+#[cynic(graphql_type = "MultiCriterionInput")]
+pub struct MultiCriterionInput {
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub value: Option<Vec<cynic::Id>>,
+    pub modifier: CriterionModifier,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub excludes: Option<Vec<cynic::Id>>,
+}
+
+#[derive(cynic::InputObject, Clone, Debug)]
+#[cynic(graphql_type = "HierarchicalMultiCriterionInput")]
+pub struct HierarchicalMultiCriterionInput {
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub value: Option<Vec<cynic::Id>>,
+    pub modifier: CriterionModifier,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub depth: Option<i32>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub excludes: Option<Vec<cynic::Id>>,
+}
+
+#[derive(cynic::Enum, Clone, Copy, Debug, PartialEq, Eq)]
+#[cynic(graphql_type = "OrientationEnum")]
+pub enum OrientationEnum {
+    Landscape,
+    Portrait,
+    Square,
+}
+
+#[derive(cynic::InputObject, Clone, Debug)]
+#[cynic(graphql_type = "OrientationCriterionInput")]
+pub struct OrientationCriterionInput {
+    pub value: Vec<OrientationEnum>,
+}
+
 #[derive(cynic::InputObject, Clone, Debug, Default)]
-#[cynic(graphql_type = "SceneFilterType")]
+#[cynic(graphql_type = "DuplicationCriterionInput", rename_all = "None")]
+pub struct DuplicationCriterionInput {
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub phash: Option<bool>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub url: Option<bool>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub stash_id: Option<bool>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub title: Option<bool>,
+}
+
+#[derive(cynic::InputObject, Clone, Debug)]
+#[cynic(graphql_type = "PhashDistanceCriterionInput")]
+pub struct PhashDistanceCriterionInput {
+    pub value: String,
+    pub modifier: CriterionModifier,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub distance: Option<i32>,
+}
+
+#[derive(cynic::InputObject, Clone, Debug)]
+#[cynic(graphql_type = "StashIDCriterionInput", rename_all = "None")]
+pub struct StashIdCriterionInput {
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub stash_id: Option<String>,
+    pub modifier: CriterionModifier,
+}
+
+#[derive(cynic::InputObject, Clone, Debug)]
+#[cynic(graphql_type = "CustomFieldCriterionInput")]
+pub struct CustomFieldCriterionInput {
+    pub field: String,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub value: Option<Vec<JsonAny>>,
+    pub modifier: CriterionModifier,
+}
+
+/// `SceneFilterType`: every criterion the filter model sends (spec FR-002; research R3).
+#[derive(cynic::InputObject, Clone, Debug, Default)]
+#[cynic(graphql_type = "SceneFilterType", rename_all = "None")]
 pub struct SceneFilterType {
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub title: Option<StringCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub code: Option<StringCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub details: Option<StringCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub director: Option<StringCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub oshash: Option<StringCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub checksum: Option<StringCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub phash_distance: Option<PhashDistanceCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub path: Option<StringCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub file_count: Option<IntCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub rating100: Option<IntCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub organized: Option<bool>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub o_counter: Option<IntCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub duplicated: Option<DuplicationCriterionInput>,
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub resolution: Option<ResolutionCriterionInput>,
     #[cynic(skip_serializing_if = "Option::is_none")]
-    #[cynic(rename = "video_codec")]
+    pub orientation: Option<OrientationCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub framerate: Option<IntCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub bitrate: Option<IntCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
     pub video_codec: Option<StringCriterionInput>,
     #[cynic(skip_serializing_if = "Option::is_none")]
-    pub path: Option<StringCriterionInput>,
+    pub audio_codec: Option<StringCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub duration: Option<IntCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub has_markers: Option<String>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub is_missing: Option<String>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub studios: Option<HierarchicalMultiCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub groups: Option<HierarchicalMultiCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub galleries: Option<MultiCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<HierarchicalMultiCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub tag_count: Option<IntCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub performer_tags: Option<HierarchicalMultiCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub performer_favorite: Option<bool>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub performer_age: Option<IntCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub performers: Option<MultiCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub performer_count: Option<IntCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub stash_id_endpoint: Option<StashIdCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub stash_id_count: Option<IntCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub url: Option<StringCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub interactive: Option<bool>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub interactive_speed: Option<IntCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub captions: Option<StringCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub resume_time: Option<IntCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub play_count: Option<IntCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub play_duration: Option<IntCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub last_played_at: Option<TimestampCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub date: Option<DateCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<TimestampCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<TimestampCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub custom_fields: Option<Vec<CustomFieldCriterionInput>>,
 }
 
 // ---- Fragments per view tier ------------------------------------------------------------------
@@ -201,12 +390,22 @@ pub struct PlayableFileFields {
 #[derive(cynic::QueryFragment, Debug, Clone)]
 #[cynic(graphql_type = "Performer")]
 pub struct PerformerName {
+    pub id: cynic::Id,
     pub name: String,
 }
 
 #[derive(cynic::QueryFragment, Debug, Clone)]
 #[cynic(graphql_type = "Tag")]
 pub struct TagName {
+    pub id: cynic::Id,
+    pub name: String,
+}
+
+/// A studio with its id (the scene page's studio leads to filtered Scenes, 008 FR-006).
+#[derive(cynic::QueryFragment, Debug, Clone)]
+#[cynic(graphql_type = "Studio")]
+pub struct StudioRef {
+    pub id: cynic::Id,
     pub name: String,
 }
 
@@ -226,7 +425,7 @@ pub struct SceneDetailFields {
     #[cynic(rename = "o_counter")]
     pub o_counter: Option<i32>,
     pub files: Vec<PlayableFileFields>,
-    pub studio: Option<StudioName>,
+    pub studio: Option<StudioRef>,
     pub performers: Vec<PerformerName>,
     pub tags: Vec<TagName>,
     pub paths: ScreenshotPath,

@@ -231,7 +231,20 @@ pub fn view<'a>(state: &'a ScenesState, ctx: &Context<'a>, tab: TabId) -> Elemen
         )
         .into(),
         Data::Ready { cards: c, .. } if c.is_empty() => {
-            center(text("No scenes match.").color(theme::MUTED)).into()
+            let filtered = !state.query.criteria.is_empty() || !state.query.search.is_empty();
+            let mut col = column![text(if filtered {
+                "No scenes match these filters."
+            } else {
+                "No scenes."
+            })
+            .color(theme::MUTED)]
+            .spacing(10)
+            .align_x(Alignment::Center);
+            if filtered {
+                col =
+                    col.push(button(text("Clear filters")).on_press(msg(ScenesMsg::ClearFilters)));
+            }
+            center(col).into()
         }
         Data::Ready { .. } => scroll_watch(
             scrollable(
@@ -256,5 +269,14 @@ pub fn view<'a>(state: &'a ScenesState, ctx: &Context<'a>, tab: TabId) -> Elemen
         .auto_scroll(state.auto_scroll, |r| msg(ScenesMsg::AutoScrolled(r)))
         .into(),
     };
-    column![controls::top(state), body].into()
+    let mut page = column![controls::top(state)];
+    if let Some(bar) = super::filters::bar(state, ctx.library) {
+        page = page.push(bar);
+    }
+    // The filter panels float above the grid rather than pushing it down.
+    let body = match super::filters::panel(state, ctx.library, ctx.thumbs) {
+        Some(panel) => iced::widget::stack![body, panel].into(),
+        None => body,
+    };
+    page.push(body).into()
 }

@@ -143,6 +143,12 @@ pub enum Action {
     Player,
     /// Handled by the Scenes grid (`screens::scenes::keyboard`; 005 FR-006).
     Scenes,
+    /// Put the cursor in the Scenes search box (008 FR-003f).
+    FocusSearch,
+    /// Open the filter menu.
+    FilterMenu,
+    /// Open the saved filters.
+    SavedFilters,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -271,8 +277,47 @@ pub fn bindings() -> Vec<Binding> {
         (Chord::plain(N(Named::End)), "Last scene on the page"),
         (Chord::plain(Char("]")), "Next page"),
         (Chord::plain(Char("[")), "Previous page"),
-        (Chord::plain(N(Named::Enter)), "Open the scene"),
+        (
+            Chord::plain(N(Named::Enter)),
+            "Open the scene (in a filter menu or list: choose)",
+        ),
         (Chord::ctrl(N(Named::Enter)), "Open in a new tab"),
+    ] {
+        all.push(b(Level::Scenes, chord, Action::Scenes, label));
+    }
+    // Finding scenes (008 FR-003f).
+    all.push(b(
+        Level::Scenes,
+        Chord::plain(Char("/")),
+        Action::FocusSearch,
+        "Search",
+    ));
+    all.push(b(
+        Level::Scenes,
+        Chord::plain(Char("f")),
+        Action::FilterMenu,
+        "Filter menu",
+    ));
+    all.push(b(
+        Level::Scenes,
+        Chord::plain(Char("s")),
+        Action::SavedFilters,
+        "Saved filters",
+    ));
+    for (chord, label) in [
+        (
+            Chord::plain(N(Named::ArrowDown)),
+            "In a filter menu or list: move (↑ ↓)",
+        ),
+        (
+            Chord::plain(N(Named::Delete)),
+            "In the filter menu: remove the filter",
+        ),
+        (Chord::ctrl(Char("e")), "In a list: exclude"),
+        (
+            Chord::plain(N(Named::Escape)),
+            "Close the filter menu or list",
+        ),
     ] {
         all.push(b(Level::Scenes, chord, Action::Scenes, label));
     }

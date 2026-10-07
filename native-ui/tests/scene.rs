@@ -17,9 +17,18 @@ fn details(id: &str) -> SceneDetails {
         date: Some("2026-01-02".into()),
         details: Some("A description.".into()),
         director: None,
-        studio: Some("A studio".into()),
-        performers: vec!["Someone".into()],
-        tags: vec!["A tag".into()],
+        studio: Some(stash_core::scenes::Named {
+            id: "4".into(),
+            name: "A studio".into(),
+        }),
+        performers: vec![stash_core::scenes::Named {
+            id: "2".into(),
+            name: "Someone".into(),
+        }],
+        tags: vec![stash_core::scenes::Named {
+            id: "6".into(),
+            name: "A tag".into(),
+        }],
         rating100: Some(80),
         play_count: 3,
         o_count: 0,

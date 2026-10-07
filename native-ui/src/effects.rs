@@ -96,6 +96,21 @@ pub enum Effect {
         keys: Vec<ThumbKey>,
         width: u32,
     },
+    /// Read the server's UI settings through the cache (008: default filter, play settings,
+    /// tag colour rules).
+    LoadUiSettings,
+    /// Read the saved scene filters through the cache.
+    LoadSavedFilters,
+    /// Read a picker's list through the cache.
+    LoadChoices(stash_core::adapter::choices::ChoiceKind),
+    /// Read the semantic vocabulary (and these colour rules' matches) through the cache.
+    LoadVocabulary(Vec<stash_core::semantic::ColourRule>),
+    /// The search box's debounce: report back after `after` (008 FR-001).
+    SearchDue {
+        tab: TabId,
+        generation: u64,
+        after: std::time::Duration,
+    },
     /// Read a scene's details through the cache, for the Scene screen in `tab`.
     LoadSceneDetails {
         tab: TabId,
@@ -221,6 +236,18 @@ pub enum Reply {
         profile: Uuid,
         saved: Option<SavedSession>,
     },
+    UiSettings(Result<stash_core::adapter::filters::UiSettings, AppError>),
+    SavedFilters(Result<Vec<stash_core::scenes::filter::saved::SavedFilter>, AppError>),
+    Choices {
+        kind: stash_core::adapter::choices::ChoiceKind,
+        result: Result<stash_core::adapter::choices::ChoiceList, AppError>,
+    },
+    Vocabulary(Result<stash_core::semantic::SemanticVocabulary, AppError>),
+    /// A search's debounce is over.
+    SearchDue {
+        tab: TabId,
+        generation: u64,
+    },
 }
 
 /// Turn an effect into a task.
@@ -309,6 +336,88 @@ pub fn run(effect: Effect, services: &Arc<Services>, window: Option<window::Id>)
                 Message::Reply(Reply::Thumbnails(batch))
             })
         }
+        Effect::LoadUiSettings => {
+            let services = Arc::clone(services);
+            Task::perform(
+                async move {
+                    services
+                        .read_cached(
+                            stash_core::cache::keys::UI_SETTINGS,
+                            RefreshPolicy::Auto,
+                            false,
+                            |client| async move {
+                                stash_core::adapter::filters::ui_settings(&client).await
+                            },
+                        )
+                        .await
+                        .map(|c| c.data)
+                },
+                |result| Message::Reply(Reply::UiSettings(result)),
+            )
+        }
+        Effect::LoadSavedFilters => {
+            let services = Arc::clone(services);
+            Task::perform(
+                async move {
+                    services
+                        .read_cached(
+                            stash_core::cache::keys::SAVED_SCENE_FILTERS,
+                            RefreshPolicy::Auto,
+                            false,
+                            |client| async move {
+                                stash_core::adapter::filters::saved_scene_filters(&client).await
+                            },
+                        )
+                        .await
+                        .map(|c| c.data)
+                },
+                |result| Message::Reply(Reply::SavedFilters(result)),
+            )
+        }
+        Effect::LoadChoices(kind) => {
+            let services = Arc::clone(services);
+            Task::perform(
+                async move {
+                    let key = stash_core::cache::keys::choices(kind.key());
+                    services
+                        .read_cached(&key, RefreshPolicy::Auto, false, move |client| async move {
+                            stash_core::adapter::choices::choice_list(&client, kind).await
+                        })
+                        .await
+                        .map(|c| c.data)
+                },
+                move |result| Message::Reply(Reply::Choices { kind, result }),
+            )
+        }
+        Effect::LoadVocabulary(rules) => {
+            let services = Arc::clone(services);
+            let key = stash_core::cache::keys::semantic_vocabulary(
+                &stash_core::semantic::extra_rule_fields(&rules),
+            );
+            let rules = Arc::new(rules);
+            Task::perform(
+                async move {
+                    services
+                        .read_cached(&key, RefreshPolicy::Auto, false, move |client| {
+                            let rules = Arc::clone(&rules);
+                            async move {
+                                stash_core::adapter::semantic::semantic_vocabulary(&client, &rules)
+                                    .await
+                            }
+                        })
+                        .await
+                        .map(|c| c.data)
+                },
+                |result| Message::Reply(Reply::Vocabulary(result)),
+            )
+        }
+        Effect::SearchDue {
+            tab,
+            generation,
+            after,
+        } => Task::perform(tokio::time::sleep(after), move |()| {
+            Message::Reply(Reply::SearchDue { tab, generation })
+        }),
         Effect::LoadSceneDetails { tab, id } => {
             let services = Arc::clone(services);
             Task::perform(
@@ -513,8 +622,13 @@ async fn fetch_thumb(
     key: ThumbKey,
     width: u32,
 ) -> (ThumbKey, Option<iced::widget::image::Handle>) {
+    // Performer images are keyed `performer:<id>`; scene thumbnails by the scene id.
+    let (kind, id) = match key.0.strip_prefix("performer:") {
+        Some(id) => ("performer", id),
+        None => ("scene", key.0.as_str()),
+    };
     let bytes = match service {
-        Some(t) => t.get("scene", &key.0, &key.1).await,
+        Some(t) => t.get(kind, id, &key.1).await,
         None => None,
     };
     let Some(bytes) = bytes.filter(|b| b.as_slice() != stash_core::thumbs::PLACEHOLDER) else {

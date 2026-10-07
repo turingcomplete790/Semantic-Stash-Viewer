@@ -162,6 +162,7 @@ fn keyboard_lists_the_keymap() {
         profile: &p,
         connection: &connection,
         thumbs: &thumbs,
+        library: &semantic_stash_viewer_native::library::Library::default(),
         layout: Layout::new(1400.0, 1000.0),
     };
     let mut ui = iced_test::simulator(s.view(&ctx));
