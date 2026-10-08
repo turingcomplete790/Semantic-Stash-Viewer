@@ -57,7 +57,9 @@ the defaults: `isLabel`, `isAction`, `isRole`, `isTrait`, `plugtag`, `isMiseEnSc
 ### ChoiceList
 
 `{ kind: Performers | Tags | Studios | Groups | Galleries, entries: Vec<Choice { id, name,
-aliases: Vec<String> }>, fetched_at }` (a group's single `aliases` string is split on commas), cached per server (`choices:<kind>`). Search is local:
+aliases: Vec<String>, image: Option<String> }>, fetched_at }` (`image`: performers only, the
+picture version from `image_path`'s `t`; `None` when the path says `default=true` or for other
+kinds; R13) (a group's single `aliases` string is split on commas), cached per server (`choices:<kind>`). Search is local:
 case-insensitive and accent-folded over name and aliases.
 
 ### SemanticVocabulary
@@ -85,7 +87,8 @@ server (`semantic:vocabulary`).
 ### SceneDetails (changed: detail tier)
 
 The fields of `SceneDetails` in the contract: details, code, director, date, rating, organized,
-play count, resume time, play duration, URLs, studio, performers (id, name, image path), tags,
+play count, resume time, play duration, URLs, studio, performers (`PerformerChip { id, name,
+image: Option<String> }`, the picture version as in `Choice`; R13), tags,
 groups (with scene index), markers (id, title, seconds, end seconds, primary tag name), the
 primary file's facts, and paths (screenshot, webp, vtt, sprite). Cached as `scene:details:<id>`
 and patched after play-history saves.

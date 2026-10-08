@@ -213,10 +213,13 @@ impl Session {
     }
 
     /// Thumbnails for what the active screen shows.
-    fn thumbnails(&mut self) -> Vec<Effect> {
+    pub(crate) fn thumbnails(&mut self) -> Vec<Effect> {
+        use crate::screens::scene::{PERFORMER_ICON, PORTRAIT};
         let width = self.thumb_width();
         let mut effects = self.thumbs.want_cards(self.shell.active_cards(), width);
-        // Performer images on the scene page (008 FR-011a), only those Stash has.
+        // Performer images on the scene page (008 FR-011a), only those Stash has, decoded at
+        // their drawn size on this display; and the open performer card's portrait (FR-011b)
+        // from the same cached image.
         if let crate::screens::Screen::Scene(scene) = self.shell.active().current() {
             if let crate::screens::scene::Details::Ready(d) = &scene.details {
                 let keys: Vec<_> = d
@@ -225,7 +228,13 @@ impl Session {
                     .filter(|p| p.has_image)
                     .map(|p| crate::screens::scenes::picker::performer_key(&p.id))
                     .collect();
-                effects.extend(self.thumbs.want(&keys, 64));
+                let icon = self.shell.layout.physical(PERFORMER_ICON);
+                effects.extend(self.thumbs.want(&keys, icon));
+            }
+            if let Some(id) = scene.portrait_wanted() {
+                let key = crate::screens::scenes::picker::portrait_key(id);
+                let portrait = self.shell.layout.physical(PORTRAIT);
+                effects.extend(self.thumbs.want([&key], portrait));
             }
         }
         // Performer images for the picker's visible rows only (008 FR-003a).
@@ -583,7 +592,12 @@ impl Session {
             }
             Msg::Reply(Reply::ChipRestDue { tab, generation }) => {
                 match self.shell.chip_rested(tab, generation) {
-                    Some(chip) => Step::effects(self.library.want_chip(chip.kind, &chip.id)),
+                    Some(chip) => {
+                        let mut effects = self.library.want_chip(chip.kind, &chip.id);
+                        // A performer's card shows their portrait (008 FR-011b).
+                        effects.extend(self.thumbnails());
+                        Step::effects(effects)
+                    }
                     None => Step::none(),
                 }
             }

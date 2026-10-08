@@ -66,6 +66,26 @@ pub fn panel(_: &Theme) -> container::Style {
         .color(TEXT)
 }
 
+/// A card that floats over a panel (a chip's details): framed in cerulean, lifted by a shadow.
+pub fn hover_card(_: &Theme) -> container::Style {
+    container::Style::default()
+        .background(Background::Color(SURFACE))
+        .border(Border {
+            color: CERULEAN,
+            width: 1.5,
+            radius: 10.0.into(),
+        })
+        .shadow(iced::Shadow {
+            color: Color {
+                a: 0.5,
+                ..Color::BLACK
+            },
+            offset: iced::Vector::new(0.0, 4.0),
+            blur_radius: 16.0,
+        })
+        .color(TEXT)
+}
+
 /// A notice that something went wrong.
 pub fn problem(_: &Theme) -> container::Style {
     container::Style::default()

@@ -113,6 +113,18 @@ session).
   viewer already makes and written only when the user changes a colour; shared across machines
   and readable by the plugin.
 
+### Session 2026-10-07
+
+Focus: performer images on the scene page (20 px icons were too small to see).
+
+- Q: How large should performer images on the scene page's chips be? → A: A 40 px round icon,
+  decoded at its drawn size times the display scale (for example 80 px on a 2× display) from the
+  480 px image already in the image cache; no extra request or download (measured: about 0.6 ms
+  per performer, off the UI thread).
+- Q: Should the performer details card show the performer's picture? → A: Yes, a portrait about
+  240 px wide from the same cached image (no extra request or download; about 1 ms to decode, off
+  the UI thread); none when the performer has no image.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Find scenes: search, filters, saved filters (Priority: P1)
@@ -419,13 +431,16 @@ error offers the fallback, that choosing it plays the transcoded stream with a v
   The page MUST NEVER make a request per performer, tag, marker, or other related item.
 - **FR-011**: Choosing a marker on the page MUST start playback at that marker.
 - **FR-011a**: Related items on the page MUST carry only what their chip or row shows: performers
-  as id, name, and a small image; tags, studio, and groups as id and name; markers as id, time,
+  as id, name, and a 40 px round image (decoded at that size times the display scale, so it's
+  sharp on high-density displays); tags, studio, and groups as id and name; markers as id, time,
   end, title, and primary tag name. Performer images come through the image cache like scene
   thumbnails, never as data in the page's request.
 - **FR-011b**: Hovering or focusing a performer, tag, or studio chip for a moment MUST show a small
   details card (for example a performer's age, gender, and scene count, or a tag's description and
   scene count), fetched for that one item when first needed and cached; moving across chips
-  quickly MUST NOT start requests for chips only passed over.
+  quickly MUST NOT start requests for chips only passed over. A performer's card MUST also show
+  their portrait (about 240 px wide) when they have an image, taken from the image the chip
+  already cached: no extra request and no second download.
 
 **Playback (US3)**
 
@@ -500,7 +515,7 @@ error offers the fallback, that choosing it plays the transcoded stream with a v
 - **Saved filter**: a named scene query stored in Stash, possibly the server's default; read-only
   here.
 - **Scene details**: everything on the scene page by default: the card's fields plus details,
-  performers (id, name, small image), tags, studio, and groups (id, name), markers (id, time, end,
+  performers (id, name, 40 px image), tags, studio, and groups (id, name), markers (id, time, end,
   title, primary tag name), rating, play count, resume point, organized flag, and the primary
   file. Every file's details and the galleries load separately, when opened.
 - **Chip details**: the small card shown on hovering a performer, tag, or studio chip, fetched

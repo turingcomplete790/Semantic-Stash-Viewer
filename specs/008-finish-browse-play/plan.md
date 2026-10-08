@@ -14,6 +14,12 @@ lazy extras, chip details only on rest, cached choice lists, at most one play-hi
 minute), enforced by selection snapshot tests, request-count tests, and live audit rows in the
 performance harness ([research R1–R2](research.md), [contracts/query-budget.md](contracts/query-budget.md)).
 
+**Amendment 2026-10-07 (performer picture versions)**: performer pictures are cached under the
+version Stash puts in each performer's `image_path` (`?t=<updated_at>`), as scene thumbnails
+already are, instead of a fixed `0`, so a picture changed in Stash replaces the old one; the
+picker's performer list carries `image_path` too, which also stops it downloading pictures for
+performers that have none ([research R13](research.md#r13-performer-picture-versions)).
+
 ## Technical Context
 
 **Language/Version**: Rust 1.88 (workspace).
@@ -77,7 +83,7 @@ about 50 filter criteria; 5 user stories.
 | `SceneDetails` | scene page | 1 | ~3–8 KB (40 performers ≈ +4 KB) |
 | `SceneFiles` / `SceneGalleries` | section opened | 1 each | < 2 KB / < 5 KB |
 | `PerformerCard` / `TagCard` / `StudioCard` | chip rest | 1 per item per session | < 1 KB |
-| `ChoiceList<Kind>` | picker, first time per server | 1 per kind | ≤ ~1 MB for 20,000 names, once |
+| `ChoiceList<Kind>` | picker, first time per server | 1 per kind | ≤ ~1 MB for 20,000 names, once; performers ≈ +70 B each for `image_path` (≈ +70 KB per 1,000; R13) |
 | `SemanticVocabulary` | Tags picker or first scene page, first time per server | 1 | small (the plugin's vocabulary plus tags matched by extra colour rules, a few hundred; includes their `custom_fields`) |
 | `SavedSceneFilters` / `UiConfig` | menu / new tab | 1 per session each | < 50 KB / < 50 KB |
 | `SaveActivity` / `AddPlay` | viewing | ≤ 1/min + 1 / ≤ 1 | < 1 KB |
@@ -150,6 +156,40 @@ crates/perf-harness/             # gql-* rows and budgets
 
 **Structure Decision**: the 007 workspace layout, unchanged. Stash I/O, the filter model, and
 play-history rules go in `stash-core` (Principle III); the UI adds screens and views.
+
+## Performer picture versions (amendment 2026-10-07)
+
+**Problem**: performer pictures are cached as `thumb:performer:<id>:0`. The version never changes,
+so a picture replaced in Stash keeps showing the old one until the disk cache evicts it. Scene
+thumbnails don't have this problem: their key carries the `t` stamp from the screenshot path.
+
+**Design** ([research R13](research.md#r13-performer-picture-versions)):
+
+- The version is the `t` query value of the performer's `image_path` (Stash sets it to the
+  performer's `updated_at`), parsed by the same function as scene screenshots. A path marked
+  `default=true` means no picture.
+- `PerformerChip` (scene page) and the performer `Choice` (picker) carry `image: Option<String>`,
+  the version, replacing `has_image`. `SceneDetails` already selects `image_path`;
+  `ChoiceListPerformers` adds it ([contracts/query-budget.md](contracts/query-budget.md)).
+- Icon and portrait keys (`performer:<id>`, `portrait:<id>`) take that version, so both still
+  share one cached image, and a new version is one download.
+- The serialized field is required: scene details and choice lists cached before the change fail
+  to parse, count as misses, and refetch once (the cache already treats unreadable entries that
+  way).
+- Older versions are never read again and leave through the disk cache's least-recently-used
+  eviction; nothing deletes them explicitly.
+- A changed picture appears when the entry carrying the version refreshes (the scene page's
+  details or the picker's list, on the cache's existing schedule); no new polling or requests.
+
+**Technical context delta**: no new dependencies; files touched are `stash-core`
+`adapter/choices.rs`, `adapter/scene_page.rs`, `scenes/mod.rs` and the UI's `picker.rs`,
+`scene.rs`, `session/mod.rs`; golden operation `ChoiceListPerformers.graphql` changes.
+
+**Constitution re-check**: IV (lean GraphQL): one field added to one cached list (≈ 70 bytes per
+performer, Stash doesn't compress responses), no new request; in exchange the picker stops one
+wasted GET per visible performer without a picture each session. Tier rules unchanged (a
+performer's `image_path` isn't scene-scoped). VI (responsive UI): unchanged. I (system of record):
+read only. Pass.
 
 ## Complexity Tracking
 

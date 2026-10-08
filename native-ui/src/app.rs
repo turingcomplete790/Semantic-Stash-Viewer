@@ -59,6 +59,8 @@ pub enum Message {
     Tick,
     WindowId(Option<window::Id>),
     Resized(iced::Size),
+    /// The window's display scale (at the start, and when it moves to another display).
+    Scale(f32),
     Modifiers(keyboard::Modifiers),
     CacheChanged(String),
     Notifications(Vec<stash_core::shell::notifications::Notification>),
@@ -162,7 +164,14 @@ impl App {
             )),
             Message::WindowId(id) => {
                 self.window = id;
-                Vec::new()
+                return match id {
+                    Some(id) => window::scale_factor(id).map(Message::Scale),
+                    None => Task::none(),
+                };
+            }
+            Message::Scale(scale) => {
+                self.layout = self.layout.scaled(scale);
+                self.session(session::Msg::Layout(self.layout))
             }
             Message::Modifiers(m) => self.session(session::Msg::Modifiers(m)),
             Message::CacheChanged(key) => self.session(session::Msg::CacheChanged(key)),
@@ -170,7 +179,8 @@ impl App {
                 crate::shell::notifications::Msg::Changed(list),
             )),
             Message::Resized(size) => {
-                self.layout = crate::screens::scenes::layout::Layout::new(size.width, size.height);
+                self.layout = crate::screens::scenes::layout::Layout::new(size.width, size.height)
+                    .scaled(self.layout.scale);
                 let effects = self.session(session::Msg::Layout(self.layout));
                 let task = self.run_effects(effects);
                 return match self.window {
@@ -369,6 +379,9 @@ impl App {
                 ) => Some(Message::Key(key, modifiers)),
                 (iced::Event::Keyboard(keyboard::Event::ModifiersChanged(m)), _) => {
                     Some(Message::Modifiers(m))
+                }
+                (iced::Event::Window(window::Event::Rescaled(scale)), _) => {
+                    Some(Message::Scale(scale))
                 }
                 // The mouse's back and forward buttons move through the tab's history.
                 (iced::Event::Mouse(iced::mouse::Event::ButtonPressed(button)), _) => {

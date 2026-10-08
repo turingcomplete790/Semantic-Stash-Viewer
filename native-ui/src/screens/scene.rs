@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use iced::widget::image::Handle;
 use iced::widget::{
-    button, center, column, container, image, mouse_area, opaque, row, scrollable, stack, text,
-    Space,
+    button, center, column, container, image, mouse_area, opaque, row, rule, scrollable, stack,
+    text, Space,
 };
 use iced::{Alignment, ContentFit, Element, Length};
 use serde::{Deserialize, Serialize};
@@ -31,6 +31,10 @@ use crate::widgets::{icon, theme, Icon};
 
 /// How long the pointer or focus rests on a chip before its card loads (FR-011b).
 pub const CHIP_REST: Duration = Duration::from_millis(400);
+/// A performer chip's round picture (008 FR-011a, clarified 2026-10-07), in logical pixels.
+pub const PERFORMER_ICON: f32 = 40.0;
+/// A performer card's portrait (008 FR-011b): this wide, and half again as tall.
+pub const PORTRAIT: f32 = 240.0;
 
 /// The details' state (transient).
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -310,10 +314,30 @@ impl SceneState {
         // Always a stack, card or not, so the page's widget state is never handed to another
         // widget when a card appears.
         let card: Element<'a, ShellMsg> = match &self.chip_hover {
-            Some((chip, _, true)) => chip_card(chip, library),
+            Some((chip, _, true)) => {
+                let portrait = self
+                    .portrait_wanted()
+                    .map(|id| thumbs.get(&super::scenes::picker::portrait_key(id)));
+                chip_card(chip, portrait, library)
+            }
             _ => Space::new().into(),
         };
         stack![page, card].into()
+    }
+
+    /// The performer whose portrait the open chip card shows: a rested performer chip, for a
+    /// performer Stash has an image of.
+    pub fn portrait_wanted(&self) -> Option<&str> {
+        let Some((chip, _, true)) = &self.chip_hover else {
+            return None;
+        };
+        let Details::Ready(d) = &self.details else {
+            return None;
+        };
+        (chip.kind == ChipKind::Performer)
+            .then(|| d.performers.iter().find(|p| p.id == chip.id && p.has_image))
+            .flatten()
+            .map(|p| p.id.as_str())
     }
 
     /// The whole screen when the cover shows.
@@ -485,12 +509,15 @@ fn performer_chip<'a>(
         label = label.push(match thumbs.get(&key) {
             Some(h) => Element::from(
                 image(h.clone())
-                    .width(20)
-                    .height(20)
+                    .width(PERFORMER_ICON)
+                    .height(PERFORMER_ICON)
                     .content_fit(ContentFit::Cover)
-                    .border_radius(10),
+                    .border_radius(PERFORMER_ICON / 2.0),
             ),
-            None => Space::new().width(20).height(20).into(),
+            None => Space::new()
+                .width(PERFORMER_ICON)
+                .height(PERFORMER_ICON)
+                .into(),
         });
     }
     label = label.push(text(short(&p.name)).size(13));
@@ -763,9 +790,15 @@ fn facts<'a>(
     col.into()
 }
 
-/// The resting chip's card, at the foot of the details panel.
-fn chip_card<'a>(chip: &ChipRef, library: &'a Library) -> Element<'a, ShellMsg> {
-    let body: Element<'a, ShellMsg> = match library.chips.get(&(chip.kind, chip.id.clone())) {
+/// The resting chip's card, at the foot of the details panel. `portrait`: for a performer with
+/// an image, its handle once decoded (`Some(None)` keeps its room while it comes).
+fn chip_card<'a>(
+    chip: &ChipRef,
+    portrait: Option<Option<&'a Handle>>,
+    library: &'a Library,
+) -> Element<'a, ShellMsg> {
+    let heading = |s: String| text(s).size(17);
+    let info: Element<'a, ShellMsg> = match library.chips.get(&(chip.kind, chip.id.clone())) {
         Some(Loadable::Ready(details)) => match details {
             ChipDetails::Performer {
                 name,
@@ -776,60 +809,52 @@ fn chip_card<'a>(chip: &ChipRef, library: &'a Library) -> Element<'a, ShellMsg> 
                 favorite,
                 scene_count,
             } => {
-                let mut title = name.clone();
-                if let Some(d) = disambiguation {
-                    title.push_str(&format!(" ({d})"));
-                }
+                let mut title = row![heading(name.clone())]
+                    .spacing(6)
+                    .align_y(Alignment::Center);
                 if *favorite {
-                    title.push_str(" ♥");
+                    title = title.push(text("♥").size(15).color(theme::ROSEWOOD));
                 }
-                let facts: Vec<String> = [
-                    gender.clone(),
-                    birthdate.clone().map(|b| format!("born {b}")),
-                    country.clone(),
-                    Some(format!("{scene_count} scenes")),
-                ]
-                .into_iter()
-                .flatten()
-                .collect();
-                column![
-                    text(title).size(14),
-                    text(facts.join(" · ")).size(12).color(theme::MUTED)
-                ]
-                .spacing(4)
-                .into()
+                let mut col = column![title].spacing(6);
+                if let Some(d) = disambiguation {
+                    col = col.push(text(d.clone()).size(12).color(theme::MUTED));
+                }
+                col = col.push(rule::horizontal(1));
+                for (label, value) in [
+                    ("Gender", gender.clone()),
+                    ("Born", birthdate.clone()),
+                    ("Country", country.clone()),
+                    ("Scenes", Some(scene_count.to_string())),
+                ] {
+                    if let Some(value) = value {
+                        col = col.push(card_fact(label, value));
+                    }
+                }
+                col.into()
             }
             ChipDetails::Tag {
                 name,
                 description,
                 scene_count,
             } => {
-                let mut col = column![text(name.clone()).size(14)].spacing(4);
+                let mut col = column![heading(name.clone()), rule::horizontal(1)].spacing(6);
                 if let Some(d) = description {
-                    col = col.push(text(d.clone()).size(12));
+                    col = col.push(text(d.clone()).size(13));
                 }
-                col.push(
-                    text(format!("{scene_count} scenes"))
-                        .size(12)
-                        .color(theme::MUTED),
-                )
-                .into()
+                col.push(card_fact("Scenes", scene_count.to_string()))
+                    .into()
             }
             ChipDetails::Studio {
                 name,
                 parent,
                 scene_count,
             } => {
-                let mut col = column![text(name.clone()).size(14)].spacing(4);
+                let mut col = column![heading(name.clone()), rule::horizontal(1)].spacing(6);
                 if let Some(p) = parent {
-                    col = col.push(text(format!("Part of {p}")).size(12));
+                    col = col.push(card_fact("Part of", p.clone()));
                 }
-                col.push(
-                    text(format!("{scene_count} scenes"))
-                        .size(12)
-                        .color(theme::MUTED),
-                )
-                .into()
+                col.push(card_fact("Scenes", scene_count.to_string()))
+                    .into()
             }
         },
         Some(Loadable::Failed) => text("Couldn't load the details.")
@@ -838,15 +863,48 @@ fn chip_card<'a>(chip: &ChipRef, library: &'a Library) -> Element<'a, ShellMsg> 
             .into(),
         _ => text("Loading…").size(12).color(theme::MUTED).into(),
     };
+    // The details sit in a column of their own beside the portrait, top-aligned, and one frame
+    // holds both, sized to them rather than to the panel.
+    let content: Element<'a, ShellMsg> = match portrait {
+        Some(handle) => {
+            let picture: Element<'a, ShellMsg> = match handle {
+                Some(h) => image(h.clone())
+                    .width(PORTRAIT)
+                    .height(PORTRAIT * 1.5)
+                    .content_fit(ContentFit::Cover)
+                    .border_radius(6)
+                    .into(),
+                None => Space::new().width(PORTRAIT).height(PORTRAIT * 1.5).into(),
+            };
+            row![picture, container(info).width(CARD_INFO)]
+                .spacing(CARD_PAD)
+                .into()
+        }
+        None => container(info).width(CARD_INFO * 1.5).into(),
+    };
     container(opaque(
-        container(body)
-            .padding(10)
-            .width(Length::Fill)
-            .style(theme::panel),
+        container(content)
+            .padding(CARD_PAD)
+            .style(theme::hover_card),
     ))
     .padding(10)
     .width(Length::Fill)
     .height(Length::Fill)
     .align_y(iced::alignment::Vertical::Bottom)
+    .into()
+}
+
+/// The width of a chip card's details column.
+const CARD_INFO: f32 = 220.0;
+/// Space inside a chip card's frame, and between its portrait and details.
+const CARD_PAD: f32 = 14.0;
+
+/// One labelled fact on a chip card.
+fn card_fact<'a>(label: &'a str, value: String) -> Element<'a, ShellMsg> {
+    row![
+        text(label).size(12).color(theme::MUTED).width(64),
+        text(value).size(13),
+    ]
+    .spacing(8)
     .into()
 }

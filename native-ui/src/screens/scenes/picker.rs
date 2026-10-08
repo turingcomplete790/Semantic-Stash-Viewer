@@ -169,6 +169,12 @@ pub fn performer_key(id: &str) -> super::thumbs::ThumbKey {
     (format!("performer:{id}"), "0".to_owned())
 }
 
+/// A performer's portrait (the scene page's chip card, 008 FR-011b): its own handle, decoded
+/// larger, from the same cached image as [`performer_key`] (never a second download).
+pub fn portrait_key(id: &str) -> super::thumbs::ThumbKey {
+    (format!("portrait:{id}"), "0".to_owned())
+}
+
 /// Where the list must scroll to keep `highlight` (an entry index) in view, if it isn't.
 pub fn reveal(library: &Library, editor: &Editor) -> Option<f32> {
     let rows = rows(library, editor)?;

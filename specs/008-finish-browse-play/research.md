@@ -93,14 +93,14 @@ semantic-tagging plugin's README; and what 006–007 built.
 - **Decision**: one `ChoiceList<Kind>` query per kind (performers, tags, studios, groups,
   galleries) with `per_page: -1` and the narrowest selection: `id`, `name`, and aliases where the
   type has them (performers `alias_list`; tags and studios `aliases`, a list; groups `aliases`, one
-  string split on commas; galleries use `title`). No images, no counts. Tags are split (spec
+  string split on commas; galleries use `title`); performers also `image_path`, for the picture version (R13). No counts. Tags are split (spec
   FR-003c): `ChoiceListTags` holds ordinary tags only (every semantic flag and `variantOfTagId`
   `IS_NULL`), and semantic tags come from `SemanticVocabulary` (R12). The
   list is cached per server under `choices:<kind>` and refreshed quietly on the cache's schedule
   (003's refresher), so opening a picker is instant and costs Stash nothing after the first time.
   The drop-down filters the cached list locally as letters are typed (names and aliases,
   case-insensitive, accent-folded). Performer images in visible rows come through the image cache
-  (one GET per visible row, cached), never in the list query.
+  (one GET per performer with a picture, per picture version), never as data in the list query.
 - **Rationale**: matches the web UI's full drop-downs (clarification Q3) while keeping the load
   on Stash to one lean list fetch per server per refresh.
 - **Payload check**: a 20,000-name list at about 40 bytes per entry is under 1 MB once; the audit
@@ -219,3 +219,35 @@ semantic-tagging plugin's README; and what 006–007 built.
   meaning); colours in a local settings file (rejected: not shared across machines or with the
   plugin, and Principle I keeps library data in Stash); `custom_fields` on `SceneDetails` tags
   (rejected: semantic tags carry large JSON fields, multiplied per scene page).
+
+## R13. Performer picture versions
+
+- **Problem**: performer pictures are cached under `thumb:performer:<id>:0`; the fixed version
+  means a picture replaced in Stash never shows (found while building T056a).
+- **Decision**: key performer pictures by the `t` value in the performer's `image_path`, parsed
+  by `screenshot_version` as scene thumbnails are. Verified on Testing (2026-10-07): `t` is the
+  performer's `updated_at` in Unix seconds (`updated_at` `15:00:02-06:00` ↔ `t=1791406802`), and a
+  performer without a picture has `default=true` in the path. The scene page already selects
+  `image_path`; `ChoiceListPerformers` adds it, so the picker knows each row's version and which
+  performers have no picture.
+- **Rationale**: it's the stamp Stash itself uses to bust browser caches, it costs no request,
+  and it matches how scene thumbnails already work. Any performer edit changes `updated_at`, so
+  an unrelated edit costs one extra picture download for that performer, which is rare and small.
+- **Cost**: Stash doesn't compress GraphQL responses (checked: no `Content-Encoding` with
+  `Accept-Encoding: gzip`), so `image_path` adds its full length, about 70 bytes per performer
+  (about 70 KB per 1,000), to the performer list, fetched once per server and refreshed on the
+  cache's schedule. Production's performer count isn't cached locally; the harness's
+  `gql-picker-cold-payload` row records the real size, and will flag the one-time growth against
+  the previous report. In return the picker stops downloading for performers without a picture:
+  today every visible row is fetched, and a no-picture performer's request returns Stash's default
+  SVG, which isn't cached, so it repeats each session.
+- **Freshness**: a new picture appears once the entry carrying the version (scene details or the
+  performer list) refreshes on the cache's existing schedule. No polling.
+- **Old entries**: the serialized `image` field is required, so cached scene details and lists
+  from before the change fail to parse, count as misses, and refetch once. Superseded picture
+  versions leave through least-recently-used eviction.
+- **Alternatives**: revalidating each picture with its `ETag` (Stash sends one, with
+  `Cache-Control: no-cache`; rejected: one request per picture per check, the N+1 the budget
+  forbids); a time-to-live on cached pictures (rejected: refetches unchanged pictures and still
+  shows stale ones until it expires); selecting `updated_at` instead of `image_path` (about half
+  the bytes, but doesn't say whether there's a picture, so the wasted downloads stay).

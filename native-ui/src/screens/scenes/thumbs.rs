@@ -104,6 +104,13 @@ impl Thumbs {
         }
     }
 
+    /// Drop one handle (it's asked for again when next wanted).
+    pub fn forget(&mut self, key: &ThumbKey) {
+        if self.handles.remove(key).is_some() {
+            self.revision = REVISION.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
     /// The thumbnails for a page of cards.
     pub fn want_cards(&mut self, cards: &[SceneCard], width: u32) -> Vec<Effect> {
         let keys: Vec<ThumbKey> = cards.iter().filter_map(thumb_key).collect();

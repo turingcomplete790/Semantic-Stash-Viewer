@@ -57,6 +57,8 @@ enum Act {
     RestFirstChip,
     /// Sweep across the open scene page's tag chips without resting.
     SweepChips,
+    /// Drop the open performer card's portrait from memory (it comes back from the disk cache).
+    ForgetPortrait,
     /// Save the colour rules Stash already has (Testing only: nothing changes there).
     SaveSameColours,
 }
@@ -77,8 +79,10 @@ enum Cond {
     FilesReady,
     /// Its galleries are here.
     GalleriesReady,
-    /// The resting chip's card is here.
+    /// The resting chip's card is here (with its portrait, for a performer with an image).
     CardReady,
+    /// The open performer card's portrait is here (at once when it has none).
+    PortraitReady,
     /// The semantic vocabulary is here.
     VocabularyReady,
     /// At least this many cards are showing.
@@ -419,6 +423,22 @@ fn script() -> Vec<Op> {
         Until(Cond::CardReady, ms(15_000)),
         Gql("gql-chip-rest"),
         GqlReset,
+    ]);
+    // The portrait again from the disk cache, as when a card reopens later (008 T056a): no
+    // request, no download, about a millisecond to decode.
+    for _ in 0..5 {
+        ops.extend([
+            Start,
+            Op::Act(A::ForgetPortrait),
+            Until(Cond::PortraitReady, ms(5_000)),
+            Frames(2),
+            Sample("chip-portrait"),
+        ]);
+    }
+    ops.extend([
+        Report("chip-portrait"),
+        Gql("gql-chip-portrait"),
+        GqlReset,
         Op::Act(A::SaveSameColours),
         Sleep(ms(1500)),
         Gql("gql-tag-colours-save"),
@@ -536,7 +556,12 @@ impl Bench {
         if let Cond::VocabularyReady = cond {
             return session.library.vocabulary.ready().is_some();
         }
-        if let Cond::SceneReady | Cond::FilesReady | Cond::GalleriesReady | Cond::CardReady = cond {
+        if let Cond::SceneReady
+        | Cond::FilesReady
+        | Cond::GalleriesReady
+        | Cond::CardReady
+        | Cond::PortraitReady = cond
+        {
             use crate::screens::scene::{Details, Section};
             let Screen::Scene(scene) = session.shell.active().current() else {
                 return false;
@@ -549,14 +574,23 @@ impl Bench {
                 Cond::GalleriesReady => {
                     matches!(scene.galleries, Section::Ready { .. } | Section::Failed(_))
                 }
-                _ => scene.chip_hover.as_ref().is_some_and(|(chip, _, rested)| {
-                    *rested
-                        && session
-                            .library
-                            .chips
-                            .get(&(chip.kind, chip.id.clone()))
-                            .is_some_and(|c| c.ready().is_some())
-                }),
+                _ => {
+                    let portrait = scene.portrait_wanted().is_none_or(|id| {
+                        session
+                            .thumbs
+                            .get(&crate::screens::scenes::picker::portrait_key(id))
+                            .is_some()
+                    });
+                    let card = scene.chip_hover.as_ref().is_some_and(|(chip, _, rested)| {
+                        *rested
+                            && session
+                                .library
+                                .chips
+                                .get(&(chip.kind, chip.id.clone()))
+                                .is_some_and(|c| c.ready().is_some())
+                    });
+                    portrait && (card || matches!(cond, Cond::PortraitReady))
+                }
             };
         }
         let Some(s) = Self::scenes(session) else {
@@ -590,7 +624,8 @@ impl Bench {
             | Cond::SceneReady
             | Cond::FilesReady
             | Cond::GalleriesReady
-            | Cond::CardReady => unreachable!("checked above"),
+            | Cond::CardReady
+            | Cond::PortraitReady => unreachable!("checked above"),
             Cond::Cards(n) => s.cards().len() >= n.min(s.count().unwrap_or(0) as usize),
             Cond::CardsShown => changed(),
             Cond::AllThumbs => s
@@ -644,6 +679,21 @@ impl Bench {
                 match chip {
                     Some(c) => {
                         session.update(session::Msg::Shell(ShellMsg::Scene(SceneMsg::ChipEnter(c))))
+                    }
+                    None => Step::none(),
+                }
+            }
+            Act::ForgetPortrait => {
+                let key = match session.shell.active().current() {
+                    Screen::Scene(s) => s
+                        .portrait_wanted()
+                        .map(crate::screens::scenes::picker::portrait_key),
+                    _ => None,
+                };
+                match key {
+                    Some(key) => {
+                        session.thumbs.forget(&key);
+                        Step::effects(session.thumbnails())
                     }
                     None => Step::none(),
                 }

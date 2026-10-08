@@ -732,6 +732,20 @@ const THUMB_BATCH: std::time::Duration = std::time::Duration::from_millis(100);
 /// Requests kept in flight (the core's `ThumbService` limits the real concurrency).
 const THUMB_IN_FLIGHT: usize = 12;
 
+/// Which cached image a thumbnail key draws on, as the core's `ThumbService` names it. Performer
+/// images are keyed `performer:<id>`, and their portraits `portrait:<id>`: the same cached image,
+/// decoded larger, so a portrait never downloads again. Scene thumbnails are keyed by scene id.
+pub fn thumb_source(key: &ThumbKey) -> (&'static str, &str) {
+    match key
+        .0
+        .strip_prefix("performer:")
+        .or_else(|| key.0.strip_prefix("portrait:"))
+    {
+        Some(id) => ("performer", id),
+        None => ("scene", key.0.as_str()),
+    }
+}
+
 /// One thumbnail, decoded off the UI thread at the width it's drawn, so iced has nothing to
 /// decode or scale (scrolling stays smooth while rows of them appear).
 async fn fetch_thumb(
@@ -739,11 +753,7 @@ async fn fetch_thumb(
     key: ThumbKey,
     width: u32,
 ) -> (ThumbKey, Option<iced::widget::image::Handle>) {
-    // Performer images are keyed `performer:<id>`; scene thumbnails by the scene id.
-    let (kind, id) = match key.0.strip_prefix("performer:") {
-        Some(id) => ("performer", id),
-        None => ("scene", key.0.as_str()),
-    };
+    let (kind, id) = thumb_source(&key);
     let bytes = match service {
         Some(t) => t.get(kind, id, &key.1).await,
         None => None,

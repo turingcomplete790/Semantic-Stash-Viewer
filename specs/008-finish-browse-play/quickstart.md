@@ -57,9 +57,10 @@ Production (read-only): it opens at once after the first time and narrows as you
 
 Open scenes with many performers, with markers, with several files, and with almost no metadata;
 compare with the web UI's scene page. Hover a performer, tag, and studio chip (details card);
-sweep across a row of chips quickly (nothing loads). Open "All files" and "Galleries". Choose a
-marker (playback starts there). Tag chips show their type's colour; the variant tag shows its
-canonical tag's colour.
+sweep across a row of chips quickly (nothing loads). Performer chips show 40 px round pictures,
+sharp on a high-density display, and a performer's card shows their portrait. Open "All files" and
+"Galleries". Choose a marker (playback starts there). Tag chips show their type's colour; the
+variant tag shows its canonical tag's colour.
 
 On Testing only (it writes Stash's UI configuration): open Settings → Tag colours, check the
 seven default rules and their tag counts, change the Role colour, add a rule for another tag
@@ -91,3 +92,13 @@ with a "Transcoded" badge, and the log has the scene and reason. Normal scenes n
 
 `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
 `cargo test --workspace`, and the harness with every 007 row still passing (SC-009).
+
+## V2a: Performer picture versions (research R13; Testing only, it writes a performer)
+
+1. Open scene 185 and the Performers picker: performers 2 and 3 show their pictures.
+2. In Stash's web UI (Testing), replace performer 2's picture.
+3. After the scene details and the performer list refresh (or after clearing the cache), the scene
+   page's chip, the picker row, and the chip card's portrait show the new picture; the old one
+   never comes back.
+4. Remove performer 3's picture: its chip and picker row show no picture, and the bench's
+   `gql-picker-cold` row lists no `performer-image` download for it.

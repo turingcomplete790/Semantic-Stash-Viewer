@@ -196,6 +196,7 @@ pub const GQL_BUDGETS: &[(&str, f64)] = &[
     ("gql-scene-files", 1.0),
     ("gql-scene-galleries", 1.0),
     ("gql-chip-rest", 1.0),
+    ("gql-chip-portrait", 0.0),
     ("gql-chip-sweep", 0.0),
     ("gql-picker-cold", 1.0),
     ("gql-picker-cached", 0.0),
@@ -211,12 +212,19 @@ pub const GQL_BUDGETS: &[(&str, f64)] = &[
 pub struct GqlRow {
     pub row: String,
     pub requests: usize,
+    /// Image downloads (plain GETs) in the same scenario.
+    pub downloads: usize,
     pub bytes: usize,
     pub ms: Vec<f64>,
 }
 
+/// Image downloads allowed in a scenario, where the contract sets them (008 T056a: a performer
+/// card's portrait comes from the image its chip already cached).
+pub const DOWNLOAD_BUDGETS: &[(&str, f64)] = &[("gql-chip-rest", 0.0), ("gql-chip-portrait", 0.0)];
+
 /// A scenario's three rows: its request count against the budget, its response size (flagged when
-/// more than 20% larger than the previous report), and the server time per request.
+/// more than 20% larger than the previous report), and the server time per request; plus its
+/// image downloads where [`DOWNLOAD_BUDGETS`] sets a budget.
 pub fn gql_measurements(row: &GqlRow, invalid: Option<String>) -> Vec<Measurement> {
     let budget = GQL_BUDGETS
         .iter()
@@ -245,7 +253,21 @@ pub fn gql_measurements(row: &GqlRow, invalid: Option<String>) -> Vec<Measuremen
             invalid.clone(),
         )
     };
-    vec![
+    let downloads = DOWNLOAD_BUDGETS
+        .iter()
+        .find(|(name, _)| *name == row.row)
+        .map(|(_, b)| {
+            #[allow(clippy::cast_precision_loss)]
+            let n = row.downloads as f64;
+            Measurement::from_samples(
+                &format!("{}-downloads", row.row),
+                Unit::Count,
+                Some(*b),
+                &[n],
+                invalid.clone(),
+            )
+        });
+    let mut out = vec![
         Measurement::from_samples(&row.row, Unit::Count, budget, &[requests], invalid.clone()),
         Measurement::from_samples(
             &format!("{}-payload", row.row),
@@ -255,7 +277,9 @@ pub fn gql_measurements(row: &GqlRow, invalid: Option<String>) -> Vec<Measuremen
             invalid,
         ),
         time,
-    ]
+    ];
+    out.extend(downloads);
+    out
 }
 
 fn web_app() -> String {
@@ -495,6 +519,7 @@ mod tests {
         let row = GqlRow {
             row: "gql-scene-page".into(),
             requests: 2,
+            downloads: 0,
             bytes: 12 * 1024,
             ms: vec![10.0, 20.0, 30.0],
         };
@@ -547,6 +572,35 @@ mod tests {
             None,
         );
         assert_eq!(rows[0].result, Outcome::Info);
+    }
+
+    #[test]
+    fn a_portrait_that_downloads_fails_its_download_budget() {
+        let row = |downloads| GqlRow {
+            row: "gql-chip-portrait".into(),
+            downloads,
+            ..GqlRow::default()
+        };
+        let rows = gql_measurements(&row(0), None);
+        let downloads = rows
+            .iter()
+            .find(|m| m.name == "gql-chip-portrait-downloads")
+            .expect("a downloads row");
+        assert_eq!(downloads.result, Outcome::Pass);
+        let rows = gql_measurements(&row(1), None);
+        assert!(rows
+            .iter()
+            .any(|m| m.name == "gql-chip-portrait-downloads" && m.result == Outcome::Fail));
+        // Rows without a download budget report none.
+        let rows = gql_measurements(
+            &GqlRow {
+                row: "gql-scene-page".into(),
+                downloads: 3,
+                ..GqlRow::default()
+            },
+            None,
+        );
+        assert!(!rows.iter().any(|m| m.name.ends_with("-downloads")));
     }
 
     #[test]

@@ -23,6 +23,9 @@ pub struct Layout {
     /// The window's logical size.
     pub width: f32,
     pub height: f32,
+    /// Physical pixels per logical pixel (2 on a high-density display): images are decoded at
+    /// their drawn size times this, so they stay sharp.
+    pub scale: f32,
 }
 
 impl Default for Layout {
@@ -33,7 +36,28 @@ impl Default for Layout {
 
 impl Layout {
     pub fn new(width: f32, height: f32) -> Self {
-        Self { width, height }
+        Self {
+            width,
+            height,
+            scale: 1.0,
+        }
+    }
+
+    /// The same window at this display scale.
+    pub fn scaled(self, scale: f32) -> Self {
+        Self {
+            scale: if scale.is_finite() && scale > 0.0 {
+                scale
+            } else {
+                1.0
+            },
+            ..self
+        }
+    }
+
+    /// Physical pixels for an image drawn `logical` pixels wide.
+    pub fn physical(&self, logical: f32) -> u32 {
+        (logical * self.scale).ceil().max(1.0) as u32
     }
 
     fn content_width(&self) -> f32 {

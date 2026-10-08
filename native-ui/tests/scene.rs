@@ -332,3 +332,82 @@ fn tag_chips_take_their_type_and_rule_colour_from_the_vocabulary() {
         "an ordinary tag matched by an added rule"
     );
 }
+
+// ---- 008 T056a: performer pictures and portraits -------------------------------------------
+
+use semantic_stash_viewer_native::screens::scenes::layout::Layout;
+use semantic_stash_viewer_native::screens::scenes::picker::{performer_key, portrait_key};
+use semantic_stash_viewer_native::screens::scenes::Thumbs;
+
+#[test]
+fn a_portrait_is_wanted_only_for_a_rested_performer_chip_with_an_image() {
+    let mut s = ready_state();
+    assert_eq!(s.portrait_wanted(), None, "no chip");
+    let generation = rest_generation(&s.update(SceneMsg::ChipEnter(chip("2")), TAB).effects);
+    assert_eq!(s.portrait_wanted(), None, "not rested yet");
+    let _ = s.chip_rested(generation);
+    assert_eq!(s.portrait_wanted(), Some("2"));
+    let _ = s.update(SceneMsg::CloseCard, TAB);
+    assert_eq!(s.portrait_wanted(), None, "card closed");
+
+    // A tag chip, or a performer without an image, has no portrait.
+    let tag = ChipRef {
+        kind: ChipKind::Tag,
+        id: "6".into(),
+    };
+    let generation = rest_generation(&s.update(SceneMsg::ChipEnter(tag), TAB).effects);
+    let _ = s.chip_rested(generation);
+    assert_eq!(s.portrait_wanted(), None);
+
+    let mut d = details("7");
+    d.performers[0].has_image = false;
+    let mut s = SceneState::new("7", "Seven");
+    let _ = s.enter(TAB);
+    s.details_loaded(Ok(d));
+    let generation = rest_generation(&s.update(SceneMsg::ChipEnter(chip("2")), TAB).effects);
+    let _ = s.chip_rested(generation);
+    assert_eq!(s.portrait_wanted(), None, "no image, no portrait");
+}
+
+#[test]
+fn icon_and_portrait_are_separate_handles_from_one_cached_image() {
+    use semantic_stash_viewer_native::effects::thumb_source;
+    let (icon, portrait) = (performer_key("2"), portrait_key("2"));
+    assert_ne!(icon, portrait, "separate handles");
+    assert_eq!(
+        (thumb_source(&icon), &icon.1),
+        (thumb_source(&portrait), &portrait.1),
+        "the same cached image (kind, id, version): no second download"
+    );
+    assert_eq!(thumb_source(&portrait), ("performer", "2"));
+
+    let mut thumbs = Thumbs::default();
+    let _ = thumbs.want([&icon], 80);
+    thumbs.insert(icon.clone(), None);
+    assert!(thumbs.get(&icon).is_some());
+    assert!(
+        thumbs.get(&portrait).is_none(),
+        "the icon isn't the portrait"
+    );
+    assert_eq!(
+        thumbs.want([&portrait], 480),
+        vec![Effect::LoadThumbnails {
+            keys: vec![portrait.clone()],
+            width: 480
+        }]
+    );
+    assert!(thumbs.want([&portrait], 480).is_empty(), "on its way");
+}
+
+#[test]
+fn pictures_are_decoded_at_their_drawn_size_on_this_display() {
+    use semantic_stash_viewer_native::screens::scene::{PERFORMER_ICON, PORTRAIT};
+    let layout = Layout::new(1600.0, 1000.0);
+    assert_eq!(layout.physical(PERFORMER_ICON), 40);
+    let hidpi = layout.scaled(2.0);
+    assert_eq!(hidpi.physical(PERFORMER_ICON), 80);
+    assert_eq!(hidpi.physical(PORTRAIT), 480);
+    assert_eq!(layout.scaled(1.25).physical(PERFORMER_ICON), 50);
+    assert_eq!(layout.scaled(f32::NAN).scale, 1.0, "a bad scale is ignored");
+    assert_eq!(layout.scaled(0.0).scale, 1.0);
+}

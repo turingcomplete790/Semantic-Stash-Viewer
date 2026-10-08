@@ -48,12 +48,14 @@ Budget: **1 each, only when the section is opened**.
 `TagCard(id)`: `id name description scene_count`.
 `StudioCard(id)`: `id name parent_studio{name} scene_count`.
 Budget: **1 per item per session**, after the pointer or focus rests 400 ms; none for chips only
-passed over.
+passed over. The performer card's portrait comes from the image the chip already cached: **0**
+extra requests and **0** image downloads.
 
 ### `ChoiceList<Kind>` (picker lists)
 
 `ChoiceListPerformers`: `findPerformers(filter:{per_page:-1, sort:"name"}){performers{id name
-alias_list}}`; likewise `Studios` (`id name aliases`), `Groups` (`id name aliases`, one string split on commas), `Galleries`
+alias_list image_path}}` (`image_path` for the picture version and whether there is a picture;
+research R13); likewise `Studios` (`id name aliases`), `Groups` (`id name aliases`, one string split on commas), `Galleries`
 (`id title`).
 `ChoiceListTags` (ordinary tags only): `findTags(filter:{per_page:-1, sort:"name"},
 tag_filter:{custom_fields:[{field:"plugtag", modifier:IS_NULL}, … one per type flag,
@@ -125,3 +127,11 @@ vocabulary), `gql-viewing-10min-writes` (≤ 11 + 1). Each reports requests, res
 server time (median, p95); plain GETs (thumbnails, performer images) are listed beside them, not
 counted against the request budget. The bench lets a scenario's late prefetches and quiet
 background refreshes land before the next row starts counting.
+
+### Performer pictures (image GETs, not GraphQL)
+
+Keyed `thumb:performer:<id>:<version>`, the version being `image_path`'s `t` (research R13). One
+download per performer per version, shared by the chip icon, the picker row, and the card's
+portrait; **0** downloads for performers whose `image_path` says `default=true`; a changed
+picture is one download once the scene details or performer list carrying the new version
+refreshes.

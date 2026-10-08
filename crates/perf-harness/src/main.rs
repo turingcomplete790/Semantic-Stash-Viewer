@@ -520,6 +520,10 @@ fn gql_rows(launch: &Launch) -> Vec<Measurement> {
                 .get("requests")
                 .and_then(Value::as_object)
                 .map_or(0, |ops| ops.values().filter_map(Value::as_u64).sum::<u64>());
+            let downloads = l
+                .get("gets")
+                .and_then(Value::as_object)
+                .map_or(0, |ops| ops.values().filter_map(Value::as_u64).sum::<u64>());
             let ms = l
                 .get("ms")
                 .and_then(Value::as_array)
@@ -528,6 +532,7 @@ fn gql_rows(launch: &Launch) -> Vec<Measurement> {
             Some(GqlRow {
                 row,
                 requests: usize::try_from(requests).unwrap_or(usize::MAX),
+                downloads: usize::try_from(downloads).unwrap_or(usize::MAX),
                 bytes: number(l, "bytes").map_or(0, |b| b as usize),
                 ms,
             })
@@ -628,6 +633,15 @@ fn picker_measurements(launch: &Launch) -> Vec<Measurement> {
             launch,
             "picker-narrow",
             "picker-narrow",
+            Some(50.0),
+            Check::Median,
+        ),
+        // A performer card's portrait from the disk cache, drawn (008 T056a): within the input
+        // acknowledgement budget.
+        from_bench(
+            launch,
+            "chip-portrait",
+            "chip-portrait",
             Some(50.0),
             Check::Median,
         ),

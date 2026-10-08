@@ -367,6 +367,14 @@ changing a rule's colour on Testing recolours chips at once.
   `gql-chip-rest` (1), `gql-chip-sweep` (0) in `native-ui/src/measure/bench.rs` and
   `crates/perf-harness/src/report.rs`
 - [X] T056 [US2] Run quickstart V2 with the user (the tag colours part on Testing only), then the gate
+- [X] T056a [US2] Performer images (FR-011a/b, clarified 2026-10-07): 40 px round chip icons in
+  `native-ui/src/screens/scene.rs`, decoded at drawn size × display scale (not the fixed 64 px in
+  `native-ui/src/session/mod.rs` `thumbnails()`); a ≈ 240 px portrait in the performer card under
+  its own UI key (for example `portrait:<id>`) in `native-ui/src/screens/scenes/thumbs.rs` and
+  `native-ui/src/effects.rs` `fetch_thumb`, mapped to the same `ThumbService` entry
+  (`performer`, id, version `0`) so it never downloads again; tests in `native-ui/tests/scene.rs`
+  (icon and portrait handles are separate; showing the portrait emits no new download); the
+  `gql-chip-rest` bench row also reports image downloads (expected 0) and the portrait decode time
 
 **Checkpoint**: US1 and US2 both work on their own.
 
