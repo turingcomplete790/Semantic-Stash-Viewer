@@ -22,6 +22,7 @@ fn tags() -> Arc<Choices> {
                 id: i.to_string(),
                 name: format!("Tag {i}"),
                 aliases: vec![],
+                image: None,
             })
             .collect(),
     };
@@ -75,5 +76,40 @@ fn the_tags_picker_survives_the_vocabulary_arriving() {
         size,
         cache,
         &mut renderer,
+    );
+}
+
+// ---- 008 T056c: performer picture versions (FR-011c) -----------------------------------------
+
+#[test]
+fn picker_rows_ask_only_for_pictures_that_exist_at_their_version() {
+    let list = ChoiceList {
+        kind: ChoiceKind::Performers,
+        entries: vec![
+            Choice {
+                id: "2".into(),
+                name: "A".into(),
+                aliases: vec![],
+                image: Some("1791406802".into()),
+            },
+            Choice {
+                id: "3".into(),
+                name: "B".into(),
+                aliases: vec![],
+                image: None,
+            },
+        ],
+    };
+    let folded = list.folded();
+    let mut library = Library::default();
+    library.choices.insert(
+        ChoiceKind::Performers,
+        Loadable::Ready(Arc::new(Choices { list, folded })),
+    );
+    let editor = Editor::new(CriterionKind::Performers);
+    assert_eq!(
+        picker::visible_performers(&library, &editor),
+        vec![picker::performer_key("2", "1791406802")],
+        "the performer without a picture asks for nothing"
     );
 }

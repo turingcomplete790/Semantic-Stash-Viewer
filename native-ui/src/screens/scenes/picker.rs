@@ -13,7 +13,7 @@ use stash_core::semantic::{Rgb, SemanticKind};
 
 use super::editor::{Editor, EditorMsg};
 use super::state::{ScenesMsg, PICKER_ID};
-use super::thumbs::Thumbs;
+use super::thumbs::{ThumbKey, Thumbs};
 use crate::library::{Library, Loadable};
 use crate::shell::ShellMsg;
 use crate::widgets::theme;
@@ -37,6 +37,8 @@ pub enum Row {
         item: Item,
         colour: Option<Rgb>,
         badge: Option<SemanticKind>,
+        /// A performer's picture version (008 FR-011c); `None` for no picture and other kinds.
+        picture: Option<String>,
     },
 }
 
@@ -70,6 +72,7 @@ pub fn rows(library: &Library, editor: &Editor) -> Option<Vec<Row>> {
                         },
                         colour: vocabulary.colour_of(&t.id, &rules),
                         badge: Some(sk),
+                        picture: None,
                     });
                 }
             }
@@ -90,6 +93,7 @@ pub fn rows(library: &Library, editor: &Editor) -> Option<Vec<Row>> {
                     },
                     colour: vocabulary.colour_of(&t.id, &rules),
                     badge: None,
+                    picture: None,
                 });
             }
             out.extend(ordinary.into_iter().map(|i| {
@@ -101,6 +105,7 @@ pub fn rows(library: &Library, editor: &Editor) -> Option<Vec<Row>> {
                     },
                     colour: vocabulary.colour_of(&c.id, &rules),
                     badge: None,
+                    picture: None,
                 }
             }));
             return Some(out);
@@ -118,6 +123,7 @@ pub fn rows(library: &Library, editor: &Editor) -> Option<Vec<Row>> {
                     },
                     colour: None,
                     badge: None,
+                    picture: c.image.clone(),
                 }
             }),
     );
@@ -144,8 +150,9 @@ pub fn highlighted(library: &Library, editor: &Editor) -> Option<Item> {
     Some(list[editor.picker_highlight.min(list.len() - 1)].clone())
 }
 
-/// The performers in the list's visible rows (their images load, nothing else does).
-pub fn visible_performers(library: &Library, editor: &Editor) -> Vec<String> {
+/// The picture keys of the performers in the list's visible rows (their pictures load, nothing
+/// else does; performers without a picture ask for nothing, 008 FR-011c).
+pub fn visible_performers(library: &Library, editor: &Editor) -> Vec<ThumbKey> {
     if editor.picker() != Some(ChoiceKind::Performers) {
         return Vec::new();
     }
@@ -158,21 +165,26 @@ pub fn visible_performers(library: &Library, editor: &Editor) -> Vec<String> {
         .skip(first)
         .take(shown)
         .filter_map(|r| match r {
-            Row::Entry { item, .. } => Some(item.id.clone()),
-            Row::Header(_) => None,
+            Row::Entry {
+                item,
+                picture: Some(version),
+                ..
+            } => Some(performer_key(&item.id, version)),
+            _ => None,
         })
         .collect()
 }
 
-/// A performer image's thumbnail key.
-pub fn performer_key(id: &str) -> super::thumbs::ThumbKey {
-    (format!("performer:{id}"), "0".to_owned())
+/// A performer picture's thumbnail key, at its version (008 FR-011c: a changed picture is a new
+/// key, so the old one is never shown again).
+pub fn performer_key(id: &str, version: &str) -> ThumbKey {
+    (format!("performer:{id}"), version.to_owned())
 }
 
 /// A performer's portrait (the scene page's chip card, 008 FR-011b): its own handle, decoded
 /// larger, from the same cached image as [`performer_key`] (never a second download).
-pub fn portrait_key(id: &str) -> super::thumbs::ThumbKey {
-    (format!("portrait:{id}"), "0".to_owned())
+pub fn portrait_key(id: &str, version: &str) -> ThumbKey {
+    (format!("portrait:{id}"), version.to_owned())
 }
 
 /// Where the list must scroll to keep `highlight` (an entry index) in view, if it isn't.
@@ -276,6 +288,7 @@ fn window<'a>(
                 item,
                 colour: c,
                 badge,
+                picture,
             } => {
                 let chosen = editor.items.iter().any(|x| x.id == item.id);
                 let excluded = editor.excluded.iter().any(|x| x.id == item.id);
@@ -290,7 +303,10 @@ fn window<'a>(
                     .spacing(8)
                     .align_y(Alignment::Center);
                 if kind == Some(ChoiceKind::Performers) {
-                    let handle = thumbs.get(&performer_key(&item.id)).cloned();
+                    let handle = picture
+                        .as_deref()
+                        .and_then(|v| thumbs.get(&performer_key(&item.id, v)))
+                        .cloned();
                     if let Some(h) = handle {
                         line = line.push(
                             image(h)

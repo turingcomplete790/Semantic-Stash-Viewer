@@ -24,7 +24,7 @@ fn details(id: &str) -> SceneDetails {
         performers: vec![stash_core::scenes::PerformerChip {
             id: "2".into(),
             name: "Someone".into(),
-            has_image: true,
+            image: Some("1791406802".into()),
         }],
         tags: vec![stash_core::scenes::Named {
             id: "6".into(),
@@ -346,7 +346,7 @@ fn a_portrait_is_wanted_only_for_a_rested_performer_chip_with_an_image() {
     let generation = rest_generation(&s.update(SceneMsg::ChipEnter(chip("2")), TAB).effects);
     assert_eq!(s.portrait_wanted(), None, "not rested yet");
     let _ = s.chip_rested(generation);
-    assert_eq!(s.portrait_wanted(), Some("2"));
+    assert_eq!(s.portrait_wanted(), Some(portrait_key("2", "1791406802")));
     let _ = s.update(SceneMsg::CloseCard, TAB);
     assert_eq!(s.portrait_wanted(), None, "card closed");
 
@@ -360,7 +360,7 @@ fn a_portrait_is_wanted_only_for_a_rested_performer_chip_with_an_image() {
     assert_eq!(s.portrait_wanted(), None);
 
     let mut d = details("7");
-    d.performers[0].has_image = false;
+    d.performers[0].image = None;
     let mut s = SceneState::new("7", "Seven");
     let _ = s.enter(TAB);
     s.details_loaded(Ok(d));
@@ -372,7 +372,7 @@ fn a_portrait_is_wanted_only_for_a_rested_performer_chip_with_an_image() {
 #[test]
 fn icon_and_portrait_are_separate_handles_from_one_cached_image() {
     use semantic_stash_viewer_native::effects::thumb_source;
-    let (icon, portrait) = (performer_key("2"), portrait_key("2"));
+    let (icon, portrait) = (performer_key("2", "7"), portrait_key("2", "7"));
     assert_ne!(icon, portrait, "separate handles");
     assert_eq!(
         (thumb_source(&icon), &icon.1),
@@ -410,4 +410,30 @@ fn pictures_are_decoded_at_their_drawn_size_on_this_display() {
     assert_eq!(layout.scaled(1.25).physical(PERFORMER_ICON), 50);
     assert_eq!(layout.scaled(f32::NAN).scale, 1.0, "a bad scale is ignored");
     assert_eq!(layout.scaled(0.0).scale, 1.0);
+}
+
+#[test]
+fn a_changed_picture_is_a_new_key_and_one_load() {
+    use semantic_stash_viewer_native::effects::thumb_source;
+    let (old, new) = (performer_key("2", "100"), performer_key("2", "200"));
+    assert_ne!(old, new, "a new version never reuses the old handle");
+    assert_eq!(thumb_source(&old), thumb_source(&new), "same performer");
+    let mut thumbs = Thumbs::default();
+    let _ = thumbs.want([&old], 80);
+    thumbs.insert(old.clone(), None);
+    assert_eq!(
+        thumbs.want([&new], 80),
+        vec![Effect::LoadThumbnails {
+            keys: vec![new.clone()],
+            width: 80
+        }],
+        "the new picture loads once"
+    );
+    assert!(thumbs.want([&new], 80).is_empty());
+    // Icon and portrait at one version still share one cached picture.
+    let portrait = portrait_key("2", "200");
+    assert_eq!(
+        (thumb_source(&new), &new.1),
+        (thumb_source(&portrait), &portrait.1)
+    );
 }

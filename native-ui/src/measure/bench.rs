@@ -81,7 +81,7 @@ enum Cond {
     GalleriesReady,
     /// The resting chip's card is here (with its portrait, for a performer with an image).
     CardReady,
-    /// The open performer card's portrait is here (at once when it has none).
+    /// The open performer card's portrait is here (never, when no portrait is wanted).
     PortraitReady,
     /// The semantic vocabulary is here.
     VocabularyReady,
@@ -575,12 +575,9 @@ impl Bench {
                     matches!(scene.galleries, Section::Ready { .. } | Section::Failed(_))
                 }
                 _ => {
-                    let portrait = scene.portrait_wanted().is_none_or(|id| {
-                        session
-                            .thumbs
-                            .get(&crate::screens::scenes::picker::portrait_key(id))
-                            .is_some()
-                    });
+                    let portrait = scene
+                        .portrait_wanted()
+                        .is_none_or(|key| session.thumbs.get(&key).is_some());
                     let card = scene.chip_hover.as_ref().is_some_and(|(chip, _, rested)| {
                         *rested
                             && session
@@ -589,7 +586,11 @@ impl Bench {
                                 .get(&(chip.kind, chip.id.clone()))
                                 .is_some_and(|c| c.ready().is_some())
                     });
-                    portrait && (card || matches!(cond, Cond::PortraitReady))
+                    if matches!(cond, Cond::PortraitReady) {
+                        // Only a portrait actually shown counts: none wanted is "not measured".
+                        return scene.portrait_wanted().is_some() && portrait;
+                    }
+                    portrait && card
                 }
             };
         }
@@ -685,9 +686,7 @@ impl Bench {
             }
             Act::ForgetPortrait => {
                 let key = match session.shell.active().current() {
-                    Screen::Scene(s) => s
-                        .portrait_wanted()
-                        .map(crate::screens::scenes::picker::portrait_key),
+                    Screen::Scene(s) => s.portrait_wanted(),
                     _ => None,
                 };
                 match key {

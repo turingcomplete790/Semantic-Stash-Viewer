@@ -335,6 +335,7 @@ fn tags_list() -> ChoiceList {
                 id: i.to_string(),
                 name: format!("Tag {i}"),
                 aliases: vec![],
+                image: None,
             })
             .collect(),
     }

@@ -8,8 +8,8 @@ use super::gql::{schema, Int64, PlayableFileFields};
 use super::StashClient;
 use crate::error::AppError;
 use crate::scenes::{
-    display_title, screenshot_version, FileFacts, GalleryChip, GroupRef, Marker, Named,
-    PerformerChip, SceneDetails as Details,
+    display_title, picture_version, screenshot_version, FileFacts, GalleryChip, GroupRef, Marker,
+    Named, PerformerChip, SceneDetails as Details,
 };
 
 #[derive(cynic::QueryVariables, Debug)]
@@ -171,11 +171,7 @@ pub async fn scene_details(client: &StashClient, id: &str) -> Result<Details, Ap
             .performers
             .into_iter()
             .map(|p| PerformerChip {
-                // Stash serves a generic picture (`?default=true`) when there's none.
-                has_image: p
-                    .image_path
-                    .as_deref()
-                    .is_some_and(|path| !path.contains("default=true")),
+                image: picture_version(p.image_path.as_deref()),
                 id: p.id.into_inner(),
                 name: p.name,
             })

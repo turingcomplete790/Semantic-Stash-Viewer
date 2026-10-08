@@ -21,6 +21,7 @@ use stash_core::AppError;
 
 use super::scenes::grid::duration;
 use super::scenes::layout::Layout;
+use super::scenes::thumbs::ThumbKey;
 use super::scenes::Thumbs;
 use crate::effects::Effect;
 use crate::library::{Library, Loadable};
@@ -315,9 +316,7 @@ impl SceneState {
         // widget when a card appears.
         let card: Element<'a, ShellMsg> = match &self.chip_hover {
             Some((chip, _, true)) => {
-                let portrait = self
-                    .portrait_wanted()
-                    .map(|id| thumbs.get(&super::scenes::picker::portrait_key(id)));
+                let portrait = self.portrait_wanted().map(|key| thumbs.get(&key));
                 chip_card(chip, portrait, library)
             }
             _ => Space::new().into(),
@@ -325,19 +324,21 @@ impl SceneState {
         stack![page, card].into()
     }
 
-    /// The performer whose portrait the open chip card shows: a rested performer chip, for a
-    /// performer Stash has an image of.
-    pub fn portrait_wanted(&self) -> Option<&str> {
+    /// The portrait the open chip card shows, as its thumbnail key: a rested performer chip, for
+    /// a performer Stash has a picture of, at that picture's version (008 FR-011b/c).
+    pub fn portrait_wanted(&self) -> Option<ThumbKey> {
         let Some((chip, _, true)) = &self.chip_hover else {
             return None;
         };
         let Details::Ready(d) = &self.details else {
             return None;
         };
-        (chip.kind == ChipKind::Performer)
-            .then(|| d.performers.iter().find(|p| p.id == chip.id && p.has_image))
-            .flatten()
-            .map(|p| p.id.as_str())
+        if chip.kind != ChipKind::Performer {
+            return None;
+        }
+        let p = d.performers.iter().find(|p| p.id == chip.id)?;
+        let version = p.image.as_deref()?;
+        Some(super::scenes::picker::portrait_key(&p.id, version))
     }
 
     /// The whole screen when the cover shows.
@@ -504,8 +505,8 @@ fn performer_chip<'a>(
         name: p.name.clone(),
     };
     let mut label = row![].spacing(6).align_y(Alignment::Center);
-    if p.has_image {
-        let key = super::scenes::picker::performer_key(&p.id);
+    if let Some(version) = &p.image {
+        let key = super::scenes::picker::performer_key(&p.id, version);
         label = label.push(match thumbs.get(&key) {
             Some(h) => Element::from(
                 image(h.clone())

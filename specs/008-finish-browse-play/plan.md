@@ -18,7 +18,7 @@ performance harness ([research R1–R2](research.md), [contracts/query-budget.md
 version Stash puts in each performer's `image_path` (`?t=<updated_at>`), as scene thumbnails
 already are, instead of a fixed `0`, so a picture changed in Stash replaces the old one; the
 picker's performer list carries `image_path` too, which also stops it downloading pictures for
-performers that have none ([research R13](research.md#r13-performer-picture-versions)).
+performers that have none ([research R13](research.md#r13-performer-picture-versions-fr-011c)).
 
 ## Technical Context
 
@@ -157,13 +157,13 @@ crates/perf-harness/             # gql-* rows and budgets
 **Structure Decision**: the 007 workspace layout, unchanged. Stash I/O, the filter model, and
 play-history rules go in `stash-core` (Principle III); the UI adds screens and views.
 
-## Performer picture versions (amendment 2026-10-07)
+## Performer picture versions (amendment 2026-10-07, FR-011c)
 
 **Problem**: performer pictures are cached as `thumb:performer:<id>:0`. The version never changes,
 so a picture replaced in Stash keeps showing the old one until the disk cache evicts it. Scene
 thumbnails don't have this problem: their key carries the `t` stamp from the screenshot path.
 
-**Design** ([research R13](research.md#r13-performer-picture-versions)):
+**Design** ([research R13](research.md#r13-performer-picture-versions-fr-011c)):
 
 - The version is the `t` query value of the performer's `image_path` (Stash sets it to the
   performer's `updated_at`), parsed by the same function as scene screenshots. A path marked

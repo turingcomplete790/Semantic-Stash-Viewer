@@ -1,7 +1,7 @@
 //! Filter picker choice lists, cached per server (spec FR-003a, research R4;
 //! contracts/query-budget.md `ChoiceList<Kind>`).
 //!
-//! Names and aliases only: no images or counts. Tags are the ordinary ones (every semantic flag
+//! Names and aliases only, plus each performer's picture version (FR-011c); no images or counts. Tags are the ordinary ones (every semantic flag
 //! and `variantOfTagId` null, filtered by Stash); semantic tags come from the vocabulary.
 
 use cynic::QueryBuilder;
@@ -44,12 +44,17 @@ impl ChoiceKind {
     }
 }
 
-/// One choice: id, name, aliases.
+/// One choice: id, name, aliases, and for performers their picture's version.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Choice {
     pub id: String,
     pub name: String,
     pub aliases: Vec<String>,
+    /// Performers only: the picture version from `image_path`'s `t`; `None` when the path says
+    /// `default=true` or for other kinds (008 FR-011c). Required when reading, so lists cached
+    /// before versions existed don't parse and are fetched again.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub image: Option<String>,
 }
 
 /// A whole list, sorted by name.
@@ -83,6 +88,8 @@ struct PerformerChoice {
     name: String,
     #[cynic(rename = "alias_list")]
     alias_list: Vec<String>,
+    #[cynic(rename = "image_path")]
+    image_path: Option<String>,
 }
 
 #[derive(cynic::QueryFragment, Debug)]
@@ -223,6 +230,7 @@ fn choice(id: cynic::Id, name: String, aliases: Vec<String>) -> Choice {
         id: id.into_inner(),
         name,
         aliases,
+        image: None,
     }
 }
 
@@ -236,7 +244,10 @@ pub async fn choice_list(client: &StashClient, kind: ChoiceKind) -> Result<Choic
             .find_performers
             .performers
             .into_iter()
-            .map(|p| choice(p.id, p.name, p.alias_list))
+            .map(|p| Choice {
+                image: crate::scenes::picture_version(p.image_path.as_deref()),
+                ..choice(p.id, p.name, p.alias_list)
+            })
             .collect(),
         ChoiceKind::Tags => client
             .graphql(&ChoiceListTags::build(TagChoiceVariables {

@@ -4,6 +4,7 @@ query ChoiceListPerformers($filter: FindFilterType!) {
       id
       name
       alias_list
+      image_path
     }
   }
 }

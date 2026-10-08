@@ -281,15 +281,73 @@ fn local_search_folds_case_and_accents_over_names_and_aliases() {
                 id: "1".into(),
                 name: "Émilie".into(),
                 aliases: vec![],
+                image: None,
             },
             stash_core::adapter::choices::Choice {
                 id: "2".into(),
                 name: "Zoe".into(),
                 aliases: vec!["Émma".into()],
+                image: None,
             },
         ],
     };
     let folded = list.folded();
     assert_eq!(search(&folded, "emi"), vec![0]);
     assert_eq!(search(&folded, "EMMA"), vec![1]);
+}
+
+// ---- 008 T056b: performer picture versions (FR-011c) -----------------------------------------
+
+#[tokio::test]
+async fn performer_choices_carry_their_picture_version() {
+    let (server, client) = server(json!({"data": {"findPerformers": {"performers": [
+        {"id": "2", "name": "A", "alias_list": [],
+         "image_path": "http://h/performer/2/image?t=1791406802"},
+        {"id": "3", "name": "B", "alias_list": [],
+         "image_path": "http://h/performer/3/image?t=1791406802&default=true"},
+        {"id": "4", "name": "C", "alias_list": [], "image_path": null}
+    ]}}}))
+    .await;
+    let list = choice_list(&client, ChoiceKind::Performers)
+        .await
+        .expect("performers");
+    let images: Vec<Option<&str>> = list.entries.iter().map(|c| c.image.as_deref()).collect();
+    assert_eq!(images, vec![Some("1791406802"), None, None]);
+    let body = first_body(&server).await;
+    assert!(body["query"]
+        .as_str()
+        .is_some_and(|q| q.contains("image_path")));
+}
+
+#[tokio::test]
+async fn other_kinds_have_no_picture_version() {
+    let (_s, client) = server(json!({"data": {"findStudios": {"studios": [
+        {"id": "1", "name": "S", "aliases": []}
+    ]}}}))
+    .await;
+    let list = choice_list(&client, ChoiceKind::Studios)
+        .await
+        .expect("studios");
+    assert_eq!(list.entries[0].image, None);
+}
+
+#[test]
+fn lists_and_chips_cached_before_picture_versions_are_read_again() {
+    use stash_core::adapter::choices::Choice;
+    use stash_core::scenes::PerformerChip;
+    let old_choice = json!({"id": "2", "name": "A", "aliases": []});
+    assert!(serde_json::from_value::<Choice>(old_choice).is_err());
+    let old_chip = json!({"id": "2", "name": "A", "has_image": true});
+    assert!(serde_json::from_value::<PerformerChip>(old_chip).is_err());
+    // A versioned entry round-trips, with or without a picture.
+    for image in [Some("1791406802".to_owned()), None] {
+        let chip = PerformerChip {
+            id: "2".into(),
+            name: "A".into(),
+            image,
+        };
+        let back: PerformerChip =
+            serde_json::from_value(serde_json::to_value(&chip).expect("json")).expect("parse");
+        assert_eq!(back, chip);
+    }
 }

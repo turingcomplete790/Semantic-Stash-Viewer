@@ -124,6 +124,10 @@ Focus: performer images on the scene page (20 px icons were too small to see).
 - Q: Should the performer details card show the performer's picture? → A: Yes, a portrait about
   240 px wide from the same cached image (no extra request or download; about 1 ms to decode, off
   the UI thread); none when the performer has no image.
+- Q: When a performer's picture changes in Stash, when should the viewer show the new one? → A:
+  As soon as the scene page or the performer list it appears in next refreshes (no extra checks
+  or requests); the old picture never shows again after that. Performers without a picture
+  cost no picture download.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -292,6 +296,9 @@ error offers the fallback, that choosing it plays the transcoded stream with a v
 
 - **A filter with no matches, or an empty library**: a clear empty state with a way back (clear
   filters), never a blank grid.
+- **A performer's picture changes or is removed in Stash**: the new picture (or none) shows once
+  the scene page or performer list showing it refreshes (FR-011c); until then the previous one
+  may show.
 - **Colour rules**: a rule for a flag no tag has colours nothing (shown with a count of 0); a
   tag with a flag of 0 isn't coloured by that rule; when another machine or the plugin changes
   the rules, this viewer picks them up with its quiet refresh of the UI settings; saving while
@@ -441,6 +448,11 @@ error offers the fallback, that choosing it plays the transcoded stream with a v
   quickly MUST NOT start requests for chips only passed over. A performer's card MUST also show
   their portrait (about 240 px wide) when they have an image, taken from the image the chip
   already cached: no extra request and no second download.
+- **FR-011c**: A performer picture changed in Stash MUST replace the old one wherever the viewer
+  shows it (scene page chips, the chip card's portrait, picker rows) once the scene page or
+  performer list carrying it next refreshes, without extra requests to check for changes; the old
+  picture MUST NOT show again after that. Performers without a picture MUST cost no picture
+  download.
 
 **Playback (US3)**
 

@@ -107,8 +107,11 @@ fn forbidden_for(doc: &OperationDocument) -> Vec<&'static str> {
                 "scenes.galleries",
                 "files.path",
                 "files.fingerprints",
-                "image_path",
             ];
+            // The performer list carries each picture's version (008 FR-011c, research R13).
+            if doc.name != "ChoiceListPerformers" {
+                fields.push("image_path");
+            }
             if doc.name != "TagCard" {
                 fields.push("description");
             }

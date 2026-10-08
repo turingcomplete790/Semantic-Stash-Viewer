@@ -196,8 +196,8 @@ async fn a_scene_page_is_one_request_even_with_40_performers() {
         .expect("details");
     budget(&log, &[("SceneDetails", 1)]);
     assert_eq!(d.performers.len(), 40);
-    assert!(
-        !d.performers[0].has_image,
+    assert_eq!(
+        d.performers[0].image, None,
         "Stash's default picture means no image"
     );
     assert_eq!(d.markers[0].title, "First", "markers in time order");

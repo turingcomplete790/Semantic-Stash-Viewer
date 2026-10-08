@@ -375,6 +375,36 @@ changing a rule's colour on Testing recolours chips at once.
   (`performer`, id, version `0`) so it never downloads again; tests in `native-ui/tests/scene.rs`
   (icon and portrait handles are separate; showing the portrait emits no new download); the
   `gql-chip-rest` bench row also reports image downloads (expected 0) and the portrait decode time
+- [X] T056b [US2] Performer picture versions in the core (FR-011c; research R13; data-model
+  `Choice`, `SceneDetails`): add `image: Option<String>` to `Choice` in
+  `crates/stash-core/src/adapter/choices.rs` ("performers only, the picture version from
+  `image_path`'s `t`; `None` when the path says `default=true` or for other kinds") and replace
+  `PerformerChip.has_image` with `image: Option<String>` in `crates/stash-core/src/scenes/mod.rs`;
+  both fields required when deserializing (`#[serde(deserialize_with = "Option::deserialize")]`)
+  so entries cached before the change fail to parse and refetch once. Add
+  `picture_version(path: Option<&str>) -> Option<String>` next to `screenshot_version` (`None` for
+  no path or `default=true`, otherwise the `t` value) and use it in `adapter/choices.rs`
+  (`ChoiceListPerformers` selects `image_path`) and `adapter/scene_page.rs`. Regenerate
+  `crates/stash-core/graphql/operations/ChoiceListPerformers.graphql` (`UPDATE_GOLDEN=1`). Tests:
+  `picture_version` (`?t=1791406802` → `1791406802`, `default=true` → none, no path → none) in
+  `crates/stash-core/src/scenes/mod.rs`; performer choices carry their version and other kinds
+  `None` in `crates/stash-core/tests/choices.rs`; a cached `PerformerChip` with `has_image` and no
+  `image` fails to parse; `crates/stash-core/tests/query_budget.rs` still counts one
+  `ChoiceListPerformers` request
+- [X] T056c [US2] Picture versions in the UI (FR-011c): `performer_key(id, version)` and
+  `portrait_key(id, version)` in `native-ui/src/screens/scenes/picker.rs`, the version as the
+  `ThumbKey`'s second part (so `thumb_source` in `native-ui/src/effects.rs` still maps both to
+  the same `ThumbService` entry, now `thumb:performer:<id>:<version>`); callers in
+  `native-ui/src/session/mod.rs` `thumbnails()` (scene page performers, and picker rows only for
+  choices with `image: Some`), `native-ui/src/screens/scene.rs` (`performer_chip`,
+  `portrait_wanted` returning the id and version), the picker row view in `picker.rs`, and
+  `native-ui/src/measure/bench.rs`. Tests in `native-ui/tests/scene.rs` and
+  `native-ui/tests/picker.rs`: a new version is a new key and one `LoadThumbnails`; icon and
+  portrait still share one source; picker rows for performers without a picture ask for nothing
+- [X] T056d [US2] Validate FR-011c: the bench on Testing (`gql-picker-cold-payload` records the
+  list's new size; `gql-chip-rest-downloads` and `gql-chip-portrait-downloads` stay 0), then
+  quickstart V2a with the user on Testing (replace performer 2's picture, remove performer 3's),
+  then the gate
 
 **Checkpoint**: US1 and US2 both work on their own.
 
@@ -545,6 +575,8 @@ thumbnails on the seek bar.
   lives in US1, and T052's semantic chip marking reads the vocabulary from T027. Without US1 the
   page still works with unmarked chips. The colour manager (T049–T051) needs T009's colour rules
   and T027's rule aliases, and writes Stash's UI configuration, so check it on Testing only.
+  The picture versions run in order T056b → T056c → T056d (the UI keys need the core's
+  versions); T056b changes T026's performer list, so its payload row grows once.
 - **US3 (P3)**: after Foundational (uses T011's start position and T009's `minimumPlayPercent`).
   Chapters read markers from US2's `SceneDetails` (T043); without US2 the seek bar has no
   chapters.

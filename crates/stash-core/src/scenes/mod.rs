@@ -80,6 +80,21 @@ pub fn screenshot_version(path: &str) -> String {
         .unwrap_or_else(|| "0".to_owned())
 }
 
+/// A performer picture's version, from their `image_path` (008 FR-011c, research R13): the `t`
+/// value Stash sets to the performer's last update, as for scene screenshots. `None` when there's
+/// no path or Stash serves its default picture (`default=true`), so nothing is downloaded.
+pub fn picture_version(path: Option<&str>) -> Option<String> {
+    let path = path?;
+    let url = Url::parse(path).ok()?;
+    if url
+        .query_pairs()
+        .any(|(k, v)| k == "default" && v == "true")
+    {
+        return None;
+    }
+    Some(screenshot_version(path))
+}
+
 /// A labelled group of scenes (the spike's test set: 4K, WMV, …).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -102,13 +117,16 @@ pub struct SceneFile {
     pub size: Option<u64>,
 }
 
-/// A performer on the scene page: id, name, and whether Stash has an image for them (the image
-/// itself comes through the thumbnail service).
+/// A performer on the scene page: id, name, and their picture's version (the picture itself comes
+/// through the thumbnail service, keyed by it; 008 FR-011c).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PerformerChip {
     pub id: String,
     pub name: String,
-    pub has_image: bool,
+    /// [`picture_version`]: `None` when Stash has no picture of them. Required when reading, so
+    /// details cached before versions existed don't parse and are fetched again.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub image: Option<String>,
 }
 
 /// A group the scene is in, with the scene's number there.
@@ -320,5 +338,29 @@ pub(crate) fn resolution(width: Option<i64>, height: Option<i64>) -> Option<Stri
     match (width, height) {
         (Some(w), Some(h)) if w > 0 && h > 0 => Some(format!("{w}×{h}")),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::picture_version;
+
+    #[test]
+    fn a_picture_version_is_the_paths_update_stamp() {
+        assert_eq!(
+            picture_version(Some("http://h:9998/performer/2/image?t=1791406802")),
+            Some("1791406802".into())
+        );
+        assert_eq!(
+            picture_version(Some("http://h/performer/2/image?t=1791406802&default=true")),
+            None,
+            "Stash's default picture: nothing to download"
+        );
+        assert_eq!(picture_version(None), None);
+        assert_eq!(
+            picture_version(Some("http://h/performer/2/image")),
+            Some("0".into()),
+            "a picture with no stamp still has one version"
+        );
     }
 }

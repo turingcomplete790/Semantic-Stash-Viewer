@@ -225,14 +225,17 @@ impl Session {
                 let keys: Vec<_> = d
                     .performers
                     .iter()
-                    .filter(|p| p.has_image)
-                    .map(|p| crate::screens::scenes::picker::performer_key(&p.id))
+                    .filter_map(|p| {
+                        let version = p.image.as_deref()?;
+                        Some(crate::screens::scenes::picker::performer_key(
+                            &p.id, version,
+                        ))
+                    })
                     .collect();
                 let icon = self.shell.layout.physical(PERFORMER_ICON);
                 effects.extend(self.thumbs.want(&keys, icon));
             }
-            if let Some(id) = scene.portrait_wanted() {
-                let key = crate::screens::scenes::picker::portrait_key(id);
+            if let Some(key) = scene.portrait_wanted() {
                 let portrait = self.shell.layout.physical(PORTRAIT);
                 effects.extend(self.thumbs.want([&key], portrait));
             }
@@ -241,11 +244,7 @@ impl Session {
         if let Some(crate::screens::scenes::Panel::Editor(editor)) =
             self.active_scenes().map(|s| &s.panel)
         {
-            let keys: Vec<_> =
-                crate::screens::scenes::picker::visible_performers(&self.library, editor)
-                    .iter()
-                    .map(|id| crate::screens::scenes::picker::performer_key(id))
-                    .collect();
+            let keys = crate::screens::scenes::picker::visible_performers(&self.library, editor);
             effects.extend(self.thumbs.want(&keys, 64));
         }
         effects

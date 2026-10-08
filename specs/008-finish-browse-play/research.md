@@ -220,7 +220,7 @@ semantic-tagging plugin's README; and what 006–007 built.
   plugin, and Principle I keeps library data in Stash); `custom_fields` on `SceneDetails` tags
   (rejected: semantic tags carry large JSON fields, multiplied per scene page).
 
-## R13. Performer picture versions
+## R13. Performer picture versions (FR-011c)
 
 - **Problem**: performer pictures are cached under `thumb:performer:<id>:0`; the fixed version
   means a picture replaced in Stash never shows (found while building T056a).
