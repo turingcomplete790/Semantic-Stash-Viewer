@@ -34,6 +34,8 @@ struct Options {
     scenes: String,
     /// The scene for the long playback (`auto`: the newest 1080p one).
     long: String,
+    /// Run the rows that write to the server (play history, colour rules): Testing only.
+    allow_writes: bool,
 }
 
 fn parse_args() -> Result<Options, String> {
@@ -41,6 +43,7 @@ fn parse_args() -> Result<Options, String> {
     let mut quick = false;
     let mut scenes = "auto".to_owned();
     let mut long = "auto".to_owned();
+    let mut allow_writes = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -49,6 +52,7 @@ fn parse_args() -> Result<Options, String> {
             // Pin the scenes so both apps (and runs on different days) play the same files.
             "--scenes" => scenes = args.next().ok_or("--scenes takes a list of ids")?,
             "--long" => long = args.next().ok_or("--long takes a scene id")?,
+            "--allow-writes" => allow_writes = true,
             "-h" | "--help" => return Err(String::new()),
             other => return Err(format!("unknown argument: {other}")),
         }
@@ -58,6 +62,7 @@ fn parse_args() -> Result<Options, String> {
         quick,
         scenes,
         long,
+        allow_writes,
     })
 }
 
@@ -70,7 +75,7 @@ fn main() -> ExitCode {
             }
             eprintln!(
                 "usage: perf-harness --profile \"<display name>\" [--quick] \
-                 [--scenes <id,id,…>] [--long <id>]"
+                 [--scenes <id,id,…>] [--long <id>] [--allow-writes (Testing only)]"
             );
             return ExitCode::from(2);
         }
@@ -138,7 +143,11 @@ fn run(options: &Options) -> Result<Report, String> {
     }
 
     step("UI bench");
-    let bench = launch(&app, &base, &[("SSV_DEBUG_BENCH", "1")])?;
+    let mut bench_env = vec![("SSV_DEBUG_BENCH", "1")];
+    if options.allow_writes {
+        bench_env.push(("SSV_BENCH_WRITES", "1"));
+    }
+    let bench = launch(&app, &base, &bench_env)?;
 
     step("Playback");
     let long_secs = LONG_PLAYBACK_SECS.to_string();
@@ -636,6 +645,14 @@ fn picker_measurements(launch: &Launch) -> Vec<Measurement> {
             Some(50.0),
             Check::Median,
         ),
+        // A card preview starts within 300 ms of the 200 ms hover delay ending (008 SC-007).
+        from_bench(
+            launch,
+            "preview-start",
+            "preview-start",
+            Some(300.0),
+            Check::Median,
+        ),
         // A performer card's portrait from the disk cache, drawn (008 T056a): within the input
         // acknowledgement budget.
         from_bench(
@@ -667,7 +684,8 @@ fn scenes_measurements(launch: &Launch) -> Vec<Measurement> {
             Check::P95,
         ),
     ];
-    for mode in ["grid", "list"] {
+    // The wall (008 SC-007) is held to the grid's smoothness budget.
+    for mode in ["grid", "list", "wall"] {
         let line = bench_line(launch, &format!("scenes-scroll-1000-{mode}"));
         let invalid = line
             .and_then(|l| l.get("invalid").and_then(Value::as_str).map(str::to_owned))

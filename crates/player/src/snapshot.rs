@@ -39,6 +39,8 @@ pub struct PlayerSnapshot {
     /// Embedded tracks (FR-014); read-only in the spike.
     pub tracks: Vec<Track>,
     pub error: Option<PlayerError>,
+    /// Playing Stash's transcode, not the file itself (008 R10): the player says so.
+    pub transcoded: bool,
 }
 
 impl Default for PlayerSnapshot {
@@ -57,6 +59,7 @@ impl Default for PlayerSnapshot {
             hwdec: None,
             tracks: Vec::new(),
             error: None,
+            transcoded: false,
         }
     }
 }

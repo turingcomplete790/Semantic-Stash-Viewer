@@ -60,6 +60,9 @@ pub struct OpenRequest {
     /// Where to start, in seconds (a resume point or a marker, 008 research R7); `None` starts at
     /// the beginning. Pass it through [`start_position`] first.
     pub start_seconds: Option<f64>,
+    /// The source is Stash's transcode, chosen by the user after a decode failure (008 R10). The
+    /// guard refuses a transcode without it.
+    pub transcoded: bool,
 }
 
 /// The start to open a file at: `requested`, unless it isn't a usable time or lies at or past the
@@ -238,6 +241,7 @@ impl Player {
                 scene_id: request.scene_id.clone(),
                 title: request.title.clone(),
                 state: PlayerStateKind::Loading,
+                transcoded: request.transcoded,
                 volume: s.volume,
                 muted: s.muted,
                 speed: 1.0,
@@ -246,6 +250,10 @@ impl Player {
             };
         });
 
+        if !crate::commands::source_allowed(&request.source, request.transcoded) {
+            inner.fail(PlayerError::RefusedSource);
+            return;
+        }
         lock(&inner.timing).opened();
         let header = request
             .api_key

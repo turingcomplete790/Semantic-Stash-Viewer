@@ -53,6 +53,8 @@ pub struct Shell {
 pub enum ShellMsg {
     /// The navigation bar.
     Section(Section),
+    /// Settings → Playback: a switch flipped (008).
+    PlaybackChange(crate::screens::settings::playback::PlaybackChange),
     /// Open a screen in the active tab.
     Open(Screen),
     /// Open a screen in a new tab next to the active one.
@@ -105,6 +107,8 @@ pub enum Up {
         id: String,
         seconds: f64,
     },
+    /// Settings → Playback changed (008).
+    PlaybackChange(crate::screens::settings::playback::PlaybackChange),
 }
 
 impl Shell {
@@ -329,6 +333,7 @@ impl Shell {
                 effects
             }
             ShellMsg::FilterTo { criterion, new_tab } => self.filter_to(criterion, new_tab),
+            ShellMsg::PlaybackChange(change) => return Step::up(Up::PlaybackChange(change)),
             ShellMsg::Scene(m) => {
                 let tab = self.active().id;
                 let Screen::Scene(state) = self.active_mut().current_mut() else {

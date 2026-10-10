@@ -2,6 +2,7 @@
 //! About. The page shown is saved with the tab; each page's data loads when it opens.
 
 pub mod about;
+pub mod playback;
 pub mod servers;
 pub mod tag_colours;
 pub mod troubleshooting;
@@ -24,6 +25,7 @@ use crate::widgets::theme;
 pub enum SettingsPage {
     #[default]
     Servers,
+    Playback,
     Keyboard,
     TagColours,
     Troubleshooting,
@@ -31,8 +33,9 @@ pub enum SettingsPage {
 }
 
 impl SettingsPage {
-    pub const ALL: [SettingsPage; 5] = [
+    pub const ALL: [SettingsPage; 6] = [
         SettingsPage::Servers,
+        SettingsPage::Playback,
         SettingsPage::Keyboard,
         SettingsPage::TagColours,
         SettingsPage::Troubleshooting,
@@ -42,6 +45,7 @@ impl SettingsPage {
     pub fn label(self) -> &'static str {
         match self {
             SettingsPage::Servers => "Servers",
+            SettingsPage::Playback => "Playback",
             SettingsPage::Keyboard => "Keyboard",
             SettingsPage::TagColours => "Tag colours",
             SettingsPage::Troubleshooting => "Troubleshooting",
@@ -94,7 +98,10 @@ impl SettingsState {
         match self.page {
             SettingsPage::Servers => vec![Effect::LoadProfiles],
             SettingsPage::Troubleshooting => self.troubleshooting.enter(),
-            SettingsPage::Keyboard | SettingsPage::About | SettingsPage::TagColours => Vec::new(),
+            SettingsPage::Keyboard
+            | SettingsPage::About
+            | SettingsPage::TagColours
+            | SettingsPage::Playback => Vec::new(),
         }
     }
 
@@ -144,6 +151,7 @@ impl SettingsState {
                 self.troubleshooting.view(logs)
             }
             SettingsPage::About => about::view(ctx),
+            SettingsPage::Playback => playback::view(ctx.playback),
             SettingsPage::TagColours => self.tag_colours.view(ctx.library),
         };
         let body: Element<'a, ShellMsg> = if self.page == SettingsPage::Keyboard {

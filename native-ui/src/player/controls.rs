@@ -18,6 +18,10 @@ const IDLE: Duration = Duration::from_millis(3000);
 const ARRIVED_WITHIN: f64 = 1.0;
 /// …or until this long has passed.
 const TARGET_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long "Start from the beginning" shows after a resume (008 FR-013).
+pub const RESTART_OFFER: Duration = Duration::from_secs(8);
+/// Within this of a chapter's start, "previous chapter" goes to the one before (as mpv does).
+const CHAPTER_GRACE: f64 = 2.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
@@ -38,6 +42,8 @@ pub enum Action {
     ToggleMute,
     /// Leave fullscreen if fullscreen, otherwise close the player.
     Escape,
+    /// The next or previous chapter (a scene marker, 008 FR-011).
+    Chapter(Direction),
 }
 
 /// The 002 FR-009 key map. Frame stepping only while paused.
@@ -49,6 +55,8 @@ pub fn key_action(key: &Key, paused: bool) -> Option<Action> {
         Key::Named(Named::ArrowUp) => Some(Action::Volume(VOLUME_STEP)),
         Key::Named(Named::ArrowDown) => Some(Action::Volume(-VOLUME_STEP)),
         Key::Named(Named::Escape) => Some(Action::Escape),
+        Key::Named(Named::PageDown) => Some(Action::Chapter(Direction::Forward)),
+        Key::Named(Named::PageUp) => Some(Action::Chapter(Direction::Back)),
         Key::Character(c) => match c.as_str() {
             "[" => Some(Action::Speed(Direction::Back)),
             "]" => Some(Action::Speed(Direction::Forward)),
@@ -104,6 +112,37 @@ impl AutoHide {
     pub fn hides_at(&self) -> Instant {
         self.last_activity + IDLE
     }
+}
+
+/// Where the next or previous chapter starts from `position`, if there is one. `chapters` are
+/// `(start seconds, title)` in time order. Back from a little way into a chapter goes to its
+/// start; from its start, to the one before.
+pub fn chapter_target(
+    chapters: &[(f64, String)],
+    position: f64,
+    direction: Direction,
+) -> Option<f64> {
+    match direction {
+        Direction::Forward => chapters
+            .iter()
+            .map(|(t, _)| *t)
+            .find(|t| *t > position + 0.5),
+        Direction::Back => chapters
+            .iter()
+            .rev()
+            .map(|(t, _)| *t)
+            .find(|t| *t < position - CHAPTER_GRACE)
+            .or_else(|| (position > CHAPTER_GRACE).then_some(0.0)),
+    }
+}
+
+/// The chapter playing at `time`: the last one starting at or before it.
+pub fn chapter_at(chapters: &[(f64, String)], time: f64) -> Option<&str> {
+    chapters
+        .iter()
+        .rev()
+        .find(|(t, _)| *t <= time)
+        .map(|(_, title)| title.as_str())
 }
 
 /// The time under the pointer at `x` on a seek bar `width` wide.

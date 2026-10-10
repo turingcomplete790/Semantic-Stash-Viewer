@@ -415,7 +415,7 @@ fn stars(rating100: u8) -> String {
 }
 
 /// The criterion "scenes with exactly this performer / tag / studio" (008 FR-006).
-fn only(kind: CriterionKind, item: &Named) -> Criterion {
+pub(crate) fn only(kind: CriterionKind, item: &Named) -> Criterion {
     let modifier = match kind {
         CriterionKind::Studios => Modifier::Includes,
         _ => Modifier::IncludesAll,

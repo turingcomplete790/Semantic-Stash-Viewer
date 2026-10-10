@@ -353,6 +353,8 @@ pub fn bindings() -> Vec<Binding> {
         (Char("f"), "Fullscreen"),
         (Char("m"), "Mute"),
         (N(Named::Escape), "Leave fullscreen, or close the player"),
+        (N(Named::PageDown), "Next chapter"),
+        (N(Named::PageUp), "Previous chapter"),
     ] {
         all.push(b(Level::Player, Chord::plain(key), Action::Player, label));
     }

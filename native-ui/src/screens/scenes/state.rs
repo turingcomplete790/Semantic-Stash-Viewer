@@ -179,6 +179,10 @@ pub enum ScenesMsg {
         index: usize,
         new_tab: bool,
     },
+    /// The pointer moved onto card `index` (its preview may start, 008 FR-019).
+    Hover(usize),
+    /// The pointer left card `index`.
+    HoverEnd(usize),
     Retry,
     /// The search box changed.
     SearchInput(String),
@@ -309,8 +313,9 @@ impl ScenesState {
         match filter.mode {
             Some(DisplayMode::Grid) => self.mode = Mode::Grid,
             Some(DisplayMode::List) => self.mode = Mode::List,
-            // Wall arrives with US4; the tagger is Phase 3.
-            Some(DisplayMode::Wall | DisplayMode::Tagger) | None => {}
+            Some(DisplayMode::Wall) => self.mode = Mode::Wall,
+            // The tagger is Phase 3.
+            Some(DisplayMode::Tagger) | None => {}
         }
         self.applied = (filter.id != "default").then(|| Applied {
             id: filter.id.clone(),
@@ -551,6 +556,8 @@ impl ScenesState {
                 self.focused = Some(index);
                 Step::up(up)
             }
+            // The session handles these for the preview (it needs no screen state).
+            ScenesMsg::Hover(_) | ScenesMsg::HoverEnd(_) => Step::none(),
             ScenesMsg::AutoScroll(auto) => {
                 self.auto_scroll = auto;
                 Step::none()

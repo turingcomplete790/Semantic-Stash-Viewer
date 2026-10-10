@@ -6,6 +6,7 @@
 
 use cynic::{MutationBuilder, QueryBuilder};
 
+use super::activity::{AddPlay, AddPlayVariables, SaveActivity, SaveActivityVariables};
 use super::chips::{ChipVariables, PerformerCard, StudioCard, TagCard};
 use super::choices::{
     all_by_name, ordinary_tags_filter, ChoiceListGalleries, ChoiceListGroups, ChoiceListPerformers,
@@ -124,6 +125,24 @@ pub fn documents() -> Vec<OperationDocument> {
             name: "UiConfig",
             tier: Tier::Other,
             query: UiConfig::build(()).query,
+        },
+        OperationDocument {
+            name: "SaveActivity",
+            tier: Tier::Other,
+            query: SaveActivity::build(SaveActivityVariables {
+                id: cynic::Id::new("0"),
+                resume_time: None,
+                play_duration: None,
+            })
+            .query,
+        },
+        OperationDocument {
+            name: "AddPlay",
+            tier: Tier::Other,
+            query: AddPlay::build(AddPlayVariables {
+                id: cynic::Id::new("0"),
+            })
+            .query,
         },
         OperationDocument {
             name: "SaveTagColours",

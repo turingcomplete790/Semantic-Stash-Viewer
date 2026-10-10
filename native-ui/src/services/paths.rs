@@ -50,6 +50,16 @@ impl Paths {
         self.data.join("session.json")
     }
 
+    /// Play history waiting for Stash (008 contracts/play-history.md).
+    pub fn play_history(&self) -> PathBuf {
+        self.data.join("play-history.json")
+    }
+
+    /// Settings → Playback (008 FR-012, FR-017).
+    pub fn playback_preferences(&self) -> PathBuf {
+        self.config.join("playback.json")
+    }
+
     pub fn notifications(&self) -> PathBuf {
         self.data.join("notifications.json")
     }

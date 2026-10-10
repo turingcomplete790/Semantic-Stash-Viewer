@@ -267,7 +267,7 @@ impl App {
             v.stop();
         }
         let mut effects = Vec::new();
-        if let State::Session(session) = &self.state {
+        if let State::Session(session) = &mut self.state {
             effects.extend(session.leave());
         }
         effects.push(Effect::Quit);
@@ -297,8 +297,14 @@ impl App {
             // Leave this session for another saved server (001 US4).
             tracing::info!(to = %id, known = session.servers.len(), "switching server");
             if let Some(profile) = session.servers.iter().find(|p| p.id == *id).cloned() {
-                // Each server keeps its own tabs; playback stops with the session.
+                // Each server keeps its own tabs; playback stops with the session, and the old
+                // server's play history gets a couple of seconds to send in the background.
+                let old = session.profile.id;
                 effects.extend(session.leave());
+                effects.push(Effect::FlushPlayHistory {
+                    profile: old,
+                    deadline: Some(stash_core::playback::history::FLUSH_DEADLINE),
+                });
                 let (mut next, entry) = Session::enter(profile, false);
                 next.shell.layout = self.layout;
                 self.state = State::Session(Box::new(next));
@@ -406,9 +412,16 @@ impl App {
             subs.push(window::frames().map(Message::Frame));
         }
         if let State::Session(session) = &self.state {
+            // A card preview's frame timer, only while one plays (idle CPU unchanged otherwise).
+            if session.previews.playing() {
+                subs.push(
+                    iced::time::every(Duration::from_millis(16))
+                        .map(|now| Message::Session(session::Msg::PreviewFrame(now))),
+                );
+            }
             if session.playback.active() {
                 subs.push(Subscription::run(video::frames).map(|()| Message::FrameReady));
-                if session.playback.screen.playing() && session.playback.screen.controls_visible() {
+                if session.playback.screen.needs_tick() {
                     subs.push(iced::time::every(Duration::from_millis(250)).map(|_| Message::Tick));
                 }
                 if self.video.as_ref().is_some_and(|v| v.shared().resizing()) {

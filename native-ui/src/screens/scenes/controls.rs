@@ -152,7 +152,8 @@ pub fn top(state: &ScenesState) -> Element<'_, ShellMsg> {
             .padding([4, 8]),
         )
         .push(mode(Mode::Grid, "Grid"))
-        .push(mode(Mode::List, "List"));
+        .push(mode(Mode::List, "List"))
+        .push(mode(Mode::Wall, "Wall"));
     container(bar)
         .padding([8.0, PAD])
         .width(Length::Fill)

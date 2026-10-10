@@ -164,6 +164,8 @@ fn keyboard_lists_the_keymap() {
         thumbs: &thumbs,
         library: &semantic_stash_viewer_native::library::Library::default(),
         layout: Layout::new(1400.0, 1000.0),
+        playback: Default::default(),
+        previews: &Default::default(),
     };
     let mut ui = iced_test::simulator(s.view(&ctx));
     for label in [

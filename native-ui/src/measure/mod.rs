@@ -48,6 +48,12 @@ pub fn bench_requested() -> bool {
     var("SSV_DEBUG_BENCH").is_some()
 }
 
+/// The bench may run its rows that write to the server (`perf-harness --allow-writes`, Testing
+/// only): the colour rules save and the simulated viewing's play history.
+pub fn bench_writes_allowed() -> bool {
+    var("SSV_BENCH_WRITES").is_some()
+}
+
 /// Every request the app sends while the bench runs (008 research R2), for its `gql` lines.
 /// `None` outside a bench run: nothing is recorded then.
 pub fn request_log() -> Option<std::sync::Arc<stash_core::adapter::record::RequestLog>> {

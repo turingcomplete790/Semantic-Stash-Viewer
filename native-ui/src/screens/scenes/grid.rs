@@ -10,7 +10,8 @@ use iced::{Alignment, ContentFit, Element, Length};
 use stash_core::scenes::SceneCard;
 
 use super::controls;
-use super::layout::{Layout, CARD_TEXT, GAP, LIST_ROW, PAD};
+use super::layout::{Layout, CARD_TEXT, LIST_ROW, PAD};
+use super::preview::Previews;
 use super::state::{scroll_id, Data, ScenesMsg, ScenesState};
 use super::thumbs::{placeholder, thumb_key, Thumbs};
 use crate::screens::{Context, Mode};
@@ -47,9 +48,24 @@ pub fn details(card: &SceneCard) -> String {
     .join(" · ")
 }
 
-fn thumb(thumbs: &Thumbs, card: &SceneCard, width: f32, height: f32) -> Element<'static, ShellMsg> {
-    let handle = thumb_key(card)
-        .and_then(|k| thumbs.get(&k).cloned())
+/// What a card draws: its still, or its preview's frame while that plays (008 FR-019).
+#[derive(Clone, Copy)]
+struct Pictures<'a> {
+    thumbs: &'a Thumbs,
+    previews: &'a Previews,
+}
+
+fn thumb(
+    pictures: Pictures<'_>,
+    card: &SceneCard,
+    width: f32,
+    height: f32,
+) -> Element<'static, ShellMsg> {
+    let handle = pictures
+        .previews
+        .frame_for(&card.id)
+        .cloned()
+        .or_else(|| thumb_key(card).and_then(|k| pictures.thumbs.get(&k).cloned()))
         .unwrap_or_else(placeholder);
     image(handle)
         .width(Length::Fixed(width))
@@ -81,6 +97,8 @@ fn clickable(
         index,
         new_tab: true,
     }))
+    .on_enter(msg(ScenesMsg::Hover(index)))
+    .on_exit(msg(ScenesMsg::HoverEnd(index)))
     .into()
 }
 
@@ -125,11 +143,11 @@ fn card(
     index: usize,
     focused: bool,
     layout: &Layout,
-    thumbs: &Thumbs,
+    pictures: Pictures<'_>,
 ) -> Element<'static, ShellMsg> {
     let w = layout.card_width();
     let body = column![
-        thumb(thumbs, c, w, layout.thumb_height()),
+        thumb(pictures, c, w, layout.thumb_height()),
         lines(c, w, 14.0, 12.0, 2.0).padding([4, 8]),
     ];
     clickable(
@@ -146,11 +164,11 @@ fn list_row(
     index: usize,
     focused: bool,
     layout: &Layout,
-    thumbs: &Thumbs,
+    pictures: Pictures<'_>,
 ) -> Element<'static, ShellMsg> {
     let list_text_width = layout.width - 2.0 * PAD - 128.0 - 12.0;
     let body = row![
-        thumb(thumbs, c, 128.0, 72.0),
+        thumb(pictures, c, 128.0, 72.0),
         lines(c, list_text_width, 15.0, 13.0, 4.0),
     ]
     .spacing(12)
@@ -159,11 +177,29 @@ fn list_row(
     clickable(body.into(), index, focused, Length::Fill, LIST_ROW)
 }
 
+/// A wall tile (008 FR-020): the still alone; the title shows on hover as the tooltip would.
+fn wall_tile(
+    c: &SceneCard,
+    index: usize,
+    focused: bool,
+    layout: &Layout,
+    pictures: Pictures<'_>,
+) -> Element<'static, ShellMsg> {
+    let (w, h) = (layout.wall_width(), layout.wall_height());
+    clickable(
+        thumb(pictures, c, w, h),
+        index,
+        focused,
+        Length::Fixed(w),
+        h,
+    )
+}
+
 /// The rows in the window, with spacers for the rest so the scrolled height stays exact.
 fn cards(
     state: &ScenesState,
     layout: &Layout,
-    thumbs: &Thumbs,
+    pictures: Pictures<'_>,
     (first, end): (usize, usize),
 ) -> Element<'static, ShellMsg> {
     let all = state.cards();
@@ -175,7 +211,7 @@ fn cards(
     let mut rows = keyed_column::<usize, ShellMsg, iced::Theme, iced::Renderer>([]);
     rows = rows.push(usize::MAX - 1, Space::new().height(first as f32 * row_h));
     for r in first..end {
-        let mut line = row![].spacing(GAP);
+        let mut line = row![].spacing(layout.gap(state.mode));
         for (j, c) in all[r * cols..((r + 1) * cols).min(all.len())]
             .iter()
             .enumerate()
@@ -183,35 +219,53 @@ fn cards(
             let i = r * cols + j;
             let focused = state.focused == Some(i);
             line = line.push(match state.mode {
-                Mode::Grid => card(c, i, focused, layout, thumbs),
-                Mode::List => list_row(c, i, focused, layout, thumbs),
+                Mode::Grid => card(c, i, focused, layout, pictures),
+                Mode::List => list_row(c, i, focused, layout, pictures),
+                Mode::Wall => wall_tile(c, i, focused, layout, pictures),
             });
         }
-        rows = rows.push(r, container(line).height(Length::Fixed(row_h)));
+        rows = rows.push(
+            r,
+            container(line)
+                .width(Length::Fill)
+                .height(Length::Fixed(row_h)),
+        );
     }
     rows = rows.push(
         usize::MAX,
         Space::new().height((total_rows - end) as f32 * row_h),
     );
-    rows.into()
+    // Fill the width: a list row stretches across the page (its cards aren't a fixed width).
+    rows.width(Length::Fill).into()
 }
 
 /// The cards, rebuilt only when what they show changes: scrolling (which updates the saved
 /// position on every frame) then only redraws.
 fn cached_cards<'a>(state: &'a ScenesState, ctx: &Context<'a>) -> Element<'a, ShellMsg> {
     let layout = ctx.layout;
-    let thumbs = ctx.thumbs;
+    let pictures = Pictures {
+        thumbs: ctx.thumbs,
+        previews: ctx.previews,
+    };
     let window = layout.window(state.scroll, state.mode, state.cards().len());
+    // A playing preview changes the cards at each of its frames.
+    let preview = ctx.previews.key().map(|(scene, frame)| {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        scene.hash(&mut h);
+        (h.finish(), frame)
+    });
     let key = (
         state.loaded,
-        state.mode == Mode::Grid,
+        state.mode,
         state.focused,
         layout.width.to_bits(),
         layout.height.to_bits(),
-        thumbs.revision(),
+        ctx.thumbs.revision(),
         window,
+        preview,
     );
-    lazy(key, move |_| cards(state, &layout, thumbs, window)).into()
+    lazy(key, move |_| cards(state, &layout, pictures, window)).into()
 }
 
 pub fn view<'a>(state: &'a ScenesState, ctx: &Context<'a>, tab: TabId) -> Element<'a, ShellMsg> {
@@ -253,6 +307,7 @@ pub fn view<'a>(state: &'a ScenesState, ctx: &Context<'a>, tab: TabId) -> Elemen
                     Space::new().height(8),
                     controls::pager(state),
                 ]
+                .width(Length::Fill)
                 .padding(iced::Padding {
                     top: 4.0,
                     right: PAD,

@@ -89,7 +89,9 @@ fn the_player_keeps_002s_shortcuts_exactly() {
     let expected = [
         "Space", "←", "→", "↑", "↓", "[", "]", "\\", ".", ",", "F", "M", "Esc",
     ];
-    assert_eq!(player, expected);
+    assert_eq!(&player[..expected.len()], expected);
+    // 008 FR-011 adds the chapter keys after them (mpv's convention).
+    assert_eq!(player.len(), expected.len() + 2, "{player:?}");
 }
 
 #[test]

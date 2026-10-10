@@ -84,7 +84,9 @@ fn entering_a_session_connects_and_loads_the_server_list() {
             Effect::LoadSummary {
                 tab: session.shell.tabs[0].id
             },
-            // 008: the server's UI settings (default filter, play settings, tag colours).
+            // 008: Settings → Playback, and the server's UI settings (default filter, play
+            // settings, tag colours).
+            Effect::LoadPlaybackPreferences,
             Effect::LoadUiSettings,
         ]
     );

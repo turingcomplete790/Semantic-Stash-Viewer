@@ -444,15 +444,29 @@ async fn image_bytes(
     resource: &str,
     max_bytes: usize,
 ) -> Result<Option<(Vec<u8>, String)>, AppError> {
-    let mut url = endpoint(&endpoint(client.base_url(), kind), id);
-    if let Ok(mut segments) = url.path_segments_mut() {
-        segments.push(resource);
-    }
     let record_as = if kind == "performer" {
         "performer-image"
     } else {
         "screenshot"
     };
+    resource_bytes(client, kind, id, resource, record_as, max_bytes).await
+}
+
+/// `{base}/{kind}/{id}/{resource}` (`resource` may have several segments, as `vtt/thumbs`) with
+/// the key in a header, recorded as `record_as`. `None` when Stash has none (a 404) or it's
+/// larger than `max_bytes`. The content type is the response's, or `image/jpeg`.
+pub(crate) async fn resource_bytes(
+    client: &StashClient,
+    kind: &str,
+    id: &str,
+    resource: &str,
+    record_as: &str,
+    max_bytes: usize,
+) -> Result<Option<(Vec<u8>, String)>, AppError> {
+    let mut url = endpoint(&endpoint(client.base_url(), kind), id);
+    if let Ok(mut segments) = url.path_segments_mut() {
+        segments.extend(resource.split('/'));
+    }
     let started = std::time::Instant::now();
     let response = client
         .get_with_key(url)
@@ -485,4 +499,26 @@ async fn image_bytes(
         return Ok(None);
     }
     Ok(Some((bytes.to_vec(), content_type)))
+}
+
+/// Stash's MP4 transcode of a scene (`{base}/scene/<id>/stream.mp4`; the key goes in a header).
+/// Only offered after the direct stream fails to decode, and opened with the player's
+/// `transcoded` flag (008 R10); never used otherwise (constitution Principle V).
+pub fn transcode_url(base: &url::Url, scene_id: &str) -> url::Url {
+    let mut url = endpoint(&endpoint(base, "scene"), scene_id);
+    if let Ok(mut segments) = url.path_segments_mut() {
+        segments.push("stream.mp4");
+    }
+    url
+}
+
+#[cfg(test)]
+mod transcode_tests {
+    #[test]
+    fn the_transcode_is_the_scenes_stream_mp4_with_no_query() {
+        let base = url::Url::parse("http://h:9999/stash/").expect("url");
+        let url = super::transcode_url(&base, "7");
+        assert_eq!(url.as_str(), "http://h:9999/stash/scene/7/stream.mp4");
+        assert!(url.query().is_none());
+    }
 }

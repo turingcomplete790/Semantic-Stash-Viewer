@@ -25,6 +25,10 @@ pub struct Context<'a> {
     pub library: &'a crate::library::Library,
     /// The window's size, for the grid's columns.
     pub layout: scenes::layout::Layout,
+    /// Settings → Playback (008).
+    pub playback: crate::services::settings::PlaybackPreferences,
+    /// The one card preview (008 FR-019).
+    pub previews: &'a scenes::preview::Previews,
 }
 
 pub use scene::SceneState;
@@ -39,11 +43,13 @@ pub enum Section {
     Settings,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum Mode {
     #[default]
     Grid,
     List,
+    /// Dense stills, no text (008 FR-020; Stash's Wall mode).
+    Wall,
 }
 
 /// One screen state, externally tagged by variant in the saved session.

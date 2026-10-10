@@ -8,6 +8,7 @@ pub mod grid;
 pub mod keyboard;
 pub mod layout;
 pub mod picker;
+pub mod preview;
 pub mod state;
 pub mod thumbs;
 

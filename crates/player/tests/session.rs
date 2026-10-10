@@ -44,6 +44,7 @@ fn request(source: &str) -> OpenRequest {
         strict_tls: false,
         cache: None,
         start_seconds: None,
+        transcoded: false,
     }
 }
 

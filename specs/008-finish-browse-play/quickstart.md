@@ -30,7 +30,7 @@ real flags set to 0).
 ```bash
 cargo test -p stash-core --test graphql_operations   # selection snapshots and tier rules
 cargo test -p stash-core --test query_budget         # request counts per action (mock server)
-cargo run -p perf-harness -- --profile "localhost:9998" --quick   # adds the gql-* audit rows
+cargo run -p perf-harness -- --profile "localhost:9998" --quick --allow-writes   # gql-* audit rows; --allow-writes (Testing only) adds the colour save and the 10-minute viewing
 ```
 
 Expected: snapshots and counts pass; every `gql-*` row within its budget

@@ -67,6 +67,7 @@ async fn lists_embedded_audio_and_subtitle_tracks() {
         strict_tls: false,
         cache: None,
         start_seconds: None,
+        transcoded: false,
     });
 
     let snapshot = tokio::time::timeout(Duration::from_secs(10), async {

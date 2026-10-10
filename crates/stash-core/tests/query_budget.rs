@@ -287,3 +287,50 @@ async fn saving_tag_colours_is_one_write_of_that_key_only() {
         .expect("query")
         .contains("configureUISetting"));
 }
+
+// ---- 008 T059: play history writes -----------------------------------------------------------
+
+/// A 10-minute viewing as the player reports it (an update every quarter-second), sent through
+/// the real write path: the reports that would leave for Stash.
+async fn ten_minute_viewing(save_history: bool) -> Arc<RequestLog> {
+    use stash_core::adapter::activity::send_report;
+    use stash_core::playback::history::Viewing;
+    let (_server, client, log) =
+        recorded(r#"{"data": {"sceneSaveActivity": true, "sceneAddPlay": {"count": 3}}}"#).await;
+    let Some(mut viewing) = Viewing::start("7", None, save_history) else {
+        return log;
+    };
+    let mut reports = Vec::new();
+    for i in 0..=(600 * 4) {
+        let t = f64::from(i) * 0.25;
+        reports.extend(viewing.observe(t, true, t, Some(1800.0)));
+    }
+    reports.extend(viewing.end(600.0));
+    for r in &reports {
+        send_report(&client, r).await.expect("sent");
+    }
+    log
+}
+
+#[tokio::test]
+async fn ten_minutes_of_viewing_is_at_most_eleven_saves_and_one_play() {
+    let log = ten_minute_viewing(true).await;
+    let counts = log.counts();
+    let saves = counts
+        .iter()
+        .find(|(n, _)| n == "SaveActivity")
+        .map_or(0, |(_, c)| *c);
+    let plays = counts
+        .iter()
+        .find(|(n, _)| n == "AddPlay")
+        .map_or(0, |(_, c)| *c);
+    assert!(saves <= 11, "{counts:?}");
+    assert!(saves >= 10, "a checkpoint each minute: {counts:?}");
+    assert_eq!(plays, 1, "{counts:?}");
+}
+
+#[tokio::test]
+async fn with_history_off_a_viewing_writes_nothing() {
+    let log = ten_minute_viewing(false).await;
+    assert!(log.counts().is_empty());
+}

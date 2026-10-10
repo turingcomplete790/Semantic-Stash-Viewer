@@ -94,6 +94,9 @@ mpv.
       scenes from their saved resume point instead of the beginning
 - [ ] Scene previews and sprite/scrubber thumbnails
 - [ ] Transcoding fallback: explicit, user-visible, and logged, only when mpv can't play a file
+- [ ] Queue view: the list on one side and the selected scene's player and details on the
+      other, so a run of scenes can be clicked through without leaving the list (suggested
+      2026-10-10 from the narrow list layout); might also serve as an alternative gallery view
 
 ### Images
 - [ ] Image grid (sized thumbnails), filters, and sorting
@@ -116,6 +119,8 @@ lost, not as a design to copy.
 - [ ] Which scenes belong with a gallery, and any custom ordering of the mixed sequence, come from
       or are saved to Stash (relationships, tags, or `custom_fields`), never kept only locally
 - [ ] An images-only view of a gallery, for users who want Stash's behaviour
+- [ ] A queue-style gallery view: the gallery's items listed beside the viewer (see the Scenes
+      queue view)
 - [ ] Gallery chapters, covers, zip and folder galleries, and image details (Stash parity)
 
 ### Other entities

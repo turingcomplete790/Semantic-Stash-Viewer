@@ -419,18 +419,18 @@ with a queue on disk so nothing is lost.
 
 ### Tests for User Story 3 ⚠️ write first, check they fail
 
-- [ ] T057 [P] [US3] Rule tests in `crates/stash-core/tests/play_history.rs`: a checkpoint after
+- [X] T057 [P] [US3] Rule tests in `crates/stash-core/tests/play_history.rs`: a checkpoint after
   every 60 s of playing (paused time doesn't count) with `play_duration` since the previous save;
   a final report on end; resume point 0 when the position is at 98% of the duration or more;
   `add_play` once per viewing, on the first report whose watched share is at least
   `minimumPlayPercent` (0 when unset); nothing when "Save play history" is off
-- [ ] T058 [P] [US3] Queue tests in `crates/stash-core/tests/play_history.rs`: append before send,
+- [X] T058 [P] [US3] Queue tests in `crates/stash-core/tests/play_history.rs`: append before send,
   remove on confirm, atomic write; two pending reports for the same scene merge (durations add,
   the latest resume point wins, `add_play` kept if either had it); per profile; sent in order;
   the 2 s flush deadline leaves the rest queued
-- [ ] T059 [P] [US3] Request-count test in `crates/stash-core/tests/query_budget.rs`: a simulated
+- [X] T059 [P] [US3] Request-count test in `crates/stash-core/tests/query_budget.rs`: a simulated
   10-minute viewing makes at most 11 `SaveActivity` and 1 `AddPlay`; with history off, 0
-- [ ] T060 [P] [US3] Transition tests in `native-ui/tests/playback.rs`: Play with a resume point and
+- [X] T060 [P] [US3] Transition tests in `native-ui/tests/playback.rs`: Play with a resume point and
   resume on starts there and offers "Start from the beginning"; resume off starts at 0; every way
   a viewing ends (stop, close, tab close, scene change, server switch, quit, disconnect) emits
   the final report; next/previous chapter keys seek to markers; after 3 failed sends one
@@ -438,38 +438,38 @@ with a queue on disk so nothing is lost.
 
 ### Implementation for User Story 3
 
-- [ ] T061 [US3] Viewing rules in `crates/stash-core/src/playback/history.rs`:
+- [X] T061 [US3] Viewing rules in `crates/stash-core/src/playback/history.rs`:
   `PlayHistoryReport { scene_id, resume_time: f64 (0 when ≥ 98% complete), play_duration_delta:
   f64, add_play: bool, ended: bool, recorded_at }` and a pure `Viewing` accumulator fed by
   play/pause/position/end events
-- [ ] T062 [US3] The queue in `crates/stash-core/src/playback/history.rs`: the file
+- [X] T062 [US3] The queue in `crates/stash-core/src/playback/history.rs`: the file
   `<data>/dev.semantic-stash-viewer/play-history.json` in the contract's format (`version: 1`,
   `pending` by profile uuid), merging, in-order sending, and `flush(deadline)`
-- [ ] T063 [P] [US3] `SaveActivity` (`sceneSaveActivity(id, resume_time, playDuration)`) and
+- [X] T063 [P] [US3] `SaveActivity` (`sceneSaveActivity(id, resume_time, playDuration)`) and
   `AddPlay` (`sceneAddPlay(id){count}`) in `crates/stash-core/src/adapter/activity.rs` with golden
   files; after a confirmed save, patch `scene:details:<id>` (resume time, play duration, play
   count) instead of invalidating it
-- [ ] T064 [P] [US3] Playback preferences `{ resume: bool (default true), save_history: bool
+- [X] T064 [P] [US3] Playback preferences `{ resume: bool (default true), save_history: bool
   (default true) }` in a settings file in the config folder, in
   `native-ui/src/services/settings.rs`
-- [ ] T065 [US3] Viewing region in `native-ui/src/session/playback.rs` (`{ scene_id, started_at,
+- [X] T065 [US3] Viewing region in `native-ui/src/session/playback.rs` (`{ scene_id, started_at,
   playing_since, played_seconds, played_since_save, add_play_sent, last_checkpoint }`): feeds the
   core accumulator, emits `SavePlayHistory` effects at checkpoints and on every kind of end
-- [ ] T066 [US3] Queue flushing in `native-ui/src/effects.rs` and `native-ui/src/session/connection.rs`:
+- [X] T066 [US3] Queue flushing in `native-ui/src/effects.rs` and `native-ui/src/session/connection.rs`:
   at once, on reconnect, when a session for that server starts; on quit (`native-ui/src/app.rs`)
   and server switch, queue the final report and flush for up to 2 s; the failure notification
   through the notification centre
-- [ ] T067 [US3] Resume on Play (T011's start position from `resume_time` when resume is on) and a
+- [X] T067 [US3] Resume on Play (T011's start position from `resume_time` when resume is on) and a
   "Start from the beginning" control shown for 8 seconds in `native-ui/src/player/controls.rs`
-- [ ] T068 [US3] Markers as chapters on the seek bar (titles on hover) in
+- [X] T068 [US3] Markers as chapters on the seek bar (titles on hover) in
   `native-ui/src/player/controls.rs`; next/previous chapter keys (PageUp/PageDown) at the player
   level in `native-ui/src/shell/keymap.rs`, listed in keyboard help and Settings → Keyboard
-- [ ] T069 [P] [US3] Settings → Playback page in `native-ui/src/screens/settings/playback.rs`
+- [X] T069 [P] [US3] Settings → Playback page in `native-ui/src/screens/settings/playback.rs`
   ("Resume where you left off", "Save play history"), registered in
   `native-ui/src/screens/settings/mod.rs`
-- [ ] T070 [US3] Bench row `gql-viewing-10min-writes` (≤ 11 + 1, Testing only) in
+- [X] T070 [US3] Bench row `gql-viewing-10min-writes` (≤ 11 + 1, Testing only) in
   `native-ui/src/measure/bench.rs` and `crates/perf-harness/src/report.rs`
-- [ ] T071 [US3] Run quickstart V3 with the user on Testing, then the gate
+- [X] T071 [US3] Run quickstart V3 with the user on Testing, then the gate
 
 **Checkpoint**: US1–US3 work on their own.
 
@@ -484,11 +484,11 @@ thumbnails on the seek bar.
 
 ### Tests for User Story 4 ⚠️ write first, check they fail
 
-- [ ] T072 [P] [US4] Core tests in `crates/stash-core/tests/previews.rs`: an animated WebP fixture in
+- [X] T072 [P] [US4] Core tests in `crates/stash-core/tests/previews.rs`: an animated WebP fixture in
   `crates/stash-core/tests/fixtures/` decodes to frames at the requested width with delays; the
   VTT parser reads `start --> end` cues with `#xywh=x,y,w,h` and looks up a time; a missing
   preview or sprite is a quiet "none"
-- [ ] T073 [P] [US4] Transition tests in `native-ui/tests/previews.rs`: `PreviewState` goes `Waiting
+- [X] T073 [P] [US4] Transition tests in `native-ui/tests/previews.rs`: `PreviewState` goes `Waiting
   { since } → (after a 200 ms rest) Loading → Playing { frames, frame index, next at } → gone`;
   keyboard focus starts a preview the same way and arrows move through the wall; only one exists across
   the session; a sweep fetches nothing; leaving drops the frames; no `paths.webp` keeps the
@@ -496,26 +496,26 @@ thumbnails on the seek bar.
 
 ### Implementation for User Story 4
 
-- [ ] T074 [P] [US4] Previews in `crates/stash-core/src/previews.rs`: fetch `paths.webp` (API key in
+- [X] T074 [P] [US4] Previews in `crates/stash-core/src/previews.rs`: fetch `paths.webp` (API key in
   a header) through the disk cache as `preview:<id>`, decode the animated WebP with the `image`
   crate into RGBA frames at card width, off the UI thread
-- [ ] T075 [P] [US4] Sprites in `crates/stash-core/src/sprites.rs`: fetch `paths.vtt` and
+- [X] T075 [P] [US4] Sprites in `crates/stash-core/src/sprites.rs`: fetch `paths.vtt` and
   `paths.sprite` once (cached as `sprite:<id>`), parse the VTT, `lookup(time) -> Option<Rect>`
-- [ ] T076 [US4] Preview service in `native-ui/src/services/previews.rs`: one preview at a time,
+- [X] T076 [US4] Preview service in `native-ui/src/services/previews.rs`: one preview at a time,
   cancelled when the pointer or focus leaves; effects `StartPreview`, `StopPreview`
-- [ ] T077 [US4] Hover and focus previews on grid and list cards in
+- [X] T077 [US4] Hover and focus previews on grid and list cards in
   `native-ui/src/screens/scenes/preview.rs` (after a 200 ms rest; the frame replaces the still in place; a frame-timer
   subscription only while playing, so idle CPU is unchanged)
-- [ ] T078 [US4] Wall mode in `native-ui/src/screens/scenes/wall.rs` and
+- [X] T078 [US4] Wall mode in `native-ui/src/screens/scenes/wall.rs` and
   `native-ui/src/screens/scenes/layout.rs` (dense stills, windowed like the grid, hovered one
   animates; keyboard moves like the grid's), the mode switch in `native-ui/src/screens/scenes/controls.rs`, saved with the tab in
   `native-ui/src/session/snapshot.rs`
-- [ ] T079 [US4] Seek-bar thumbnail and time on hover in `native-ui/src/player/controls.rs` (crop of
+- [X] T079 [US4] Seek-bar thumbnail and time on hover in `native-ui/src/player/controls.rs` (crop of
   the sprite sheet's image handle)
-- [ ] T080 [US4] Bench rows in `native-ui/src/measure/bench.rs` and
+- [X] T080 [US4] Bench rows in `native-ui/src/measure/bench.rs` and
   `crates/perf-harness/src/report.rs`: preview start (≤ 300 ms after the 200 ms hover delay on LAN),
   wall scroll of a 250-scene page within the grid's smoothness budget (SC-007)
-- [ ] T081 [US4] Run quickstart V4 with the user, then the gate
+- [X] T081 [US4] Run quickstart V4 with the user, then the gate
 
 **Checkpoint**: US1–US4 work on their own.
 
@@ -529,23 +529,23 @@ thumbnails on the seek bar.
 
 ### Tests for User Story 5 ⚠️ write first, check they fail
 
-- [ ] T082 [P] [US5] Player tests in `crates/player/src/commands.rs` (`#[cfg(test)]`): the
+- [X] T082 [P] [US5] Player tests in `crates/player/src/commands.rs` (`#[cfg(test)]`): the
   direct-stream guard rejects a non-direct URL without the `transcoded` flag and accepts it with
   the flag; a decode failure is classified apart from a network failure
-- [ ] T083 [P] [US5] Transition tests in `native-ui/tests/playback.rs`: a decode error offers "Play
+- [X] T083 [P] [US5] Transition tests in `native-ui/tests/playback.rs`: a decode error offers "Play
   transcoded" (a network error doesn't); choosing it opens the transcode with the badge; a
   transcode that also fails shows both reasons and doesn't retry; a normal scene never opens a
   transcode
 
 ### Implementation for User Story 5
 
-- [ ] T084 [US5] The `transcoded` open flag through the guard in `crates/player/src/commands.rs` and
+- [X] T084 [US5] The `transcoded` open flag through the guard in `crates/player/src/commands.rs` and
   error classification in `crates/player/src/error.rs`
-- [ ] T085 [P] [US5] The transcode URL (`/scene/<id>/stream.mp4` from the profile's base URL, API key
+- [X] T085 [P] [US5] The transcode URL (`/scene/<id>/stream.mp4` from the profile's base URL, API key
   in a header) in `crates/stash-core/src/adapter/scenes.rs`
-- [ ] T086 [US5] The offer, the "Transcoded" badge, and the log line (scene id and mpv's reason, no
+- [X] T086 [US5] The offer, the "Transcoded" badge, and the log line (scene id and mpv's reason, no
   title or path) in `native-ui/src/session/playback.rs` and `native-ui/src/player/view.rs`
-- [ ] T087 [US5] Run quickstart V5 with the user on Testing, then the gate
+- [X] T087 [US5] Run quickstart V5 with the user on Testing, then the gate
 
 **Checkpoint**: all five stories work.
 

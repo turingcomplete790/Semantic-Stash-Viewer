@@ -4,6 +4,7 @@
 
 pub mod cache;
 pub mod paths;
+pub mod settings;
 
 use std::future::Future;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -21,6 +22,7 @@ use stash_core::connection::manager::{
 };
 use stash_core::connection::snapshot::{ConnectionSnapshot, SessionState};
 use stash_core::jobs::watcher::JobsWatcher;
+use stash_core::playback::history::{flush, FlushOutcome, HistoryQueue, PlayHistoryReport};
 use stash_core::profiles::{service, ProfileDraft, ProfileStore, ServerProfile};
 use stash_core::scenes::{is_direct_stream, PlayableScene};
 use stash_core::shell::notifications::NotificationCenter;
@@ -48,6 +50,10 @@ pub struct Services {
     pub notifications: Arc<NotificationCenter>,
     pub player: Option<Arc<Player>>,
     thumbs: Mutex<Option<(Uuid, Arc<ThumbService>)>>,
+    /// Play history waiting for Stash, on disk (008 contracts/play-history.md).
+    pub history: Arc<Mutex<HistoryQueue>>,
+    /// The card preview generation being decoded (0: none).
+    preview_wanted: std::sync::atomic::AtomicU64,
 }
 
 impl Services {
@@ -93,6 +99,7 @@ impl Services {
                 None
             }
         };
+        let history = Arc::new(Mutex::new(HistoryQueue::open(paths.play_history())));
         Ok(Arc::new(Self {
             paths,
             runtime,
@@ -102,6 +109,8 @@ impl Services {
             notifications,
             player,
             thumbs: Mutex::new(None),
+            history,
+            preview_wanted: std::sync::atomic::AtomicU64::new(0),
         }))
     }
 
@@ -219,6 +228,85 @@ impl Services {
         Ok((client, profile.api_key, profile.strict_tls))
     }
 
+    /// A client for any saved server (a server switch flushes the old server's play history).
+    pub fn client_for(&self, id: Uuid) -> Result<StashClient, AppError> {
+        let profile = lock(&self.profiles)
+            .get(id)
+            .cloned()
+            .ok_or(AppError::ProfileNotFound { id })?;
+        let mut client = StashClient::new(profile.base_url, profile.strict_tls, profile.api_key)?;
+        if let Some(log) = crate::measure::request_log() {
+            client = client.with_recorder(log);
+        }
+        Ok(client)
+    }
+
+    /// Queue a play history report for `profile`: in memory at once (no disk on the UI thread),
+    /// written to disk by the flush that follows, before anything is sent.
+    pub fn queue_play_history(&self, profile: Uuid, report: PlayHistoryReport) {
+        lock(&self.history).stage(&profile.to_string(), report);
+    }
+
+    /// Send `profile`'s queued play history in order (until `deadline`, if any). Each confirmed
+    /// report patches that scene's cached page (resume point, playing time, play count), so it
+    /// shows the new values without a request.
+    pub async fn flush_play_history(
+        &self,
+        profile: Uuid,
+        deadline: Option<std::time::Instant>,
+    ) -> FlushOutcome {
+        // Written before anything is sent (contracts/play-history.md).
+        let history = Arc::clone(&self.history);
+        let written = tokio::task::spawn_blocking(move || lock(&history).persist()).await;
+        if let Ok(Err(e)) = written {
+            tracing::warn!(error = %e, "couldn't write the play history queue");
+        }
+        let client = match self.client_for(profile) {
+            Ok(c) => c,
+            Err(e) => {
+                return FlushOutcome {
+                    sent: 0,
+                    failed: Some(e.to_string()),
+                    left: lock(&self.history).pending(&profile.to_string()).len(),
+                }
+            }
+        };
+        let caches = self.caches.for_profile(profile);
+        flush(&self.history, &profile.to_string(), deadline, |report| {
+            let client = client.clone();
+            let caches = caches.clone();
+            async move {
+                let count = stash_core::adapter::activity::send_report(&client, &report).await?;
+                if let Some(r) = caches {
+                    let key = stash_core::cache::keys::scene_details(&report.scene_id);
+                    let mut cache = lock(r.cache());
+                    if let Some(mut cached) = cache.get::<stash_core::scenes::SceneDetails>(&key) {
+                        stash_core::adapter::activity::patch_details(
+                            &mut cached.data,
+                            &report,
+                            count,
+                        );
+                        if let Err(e) = cache.put(&key, &cached.data) {
+                            tracing::warn!(error = %e, "couldn't patch the cached scene page");
+                        }
+                    }
+                }
+                Ok(())
+            }
+        })
+        .await
+    }
+
+    /// The resume point cached with a scene's page (no request; patched after each save).
+    fn cached_resume_point(&self, scene_id: &str) -> Option<f64> {
+        let r = self
+            .current_profile()
+            .and_then(|id| self.caches.for_profile(id))?;
+        let key = stash_core::cache::keys::scene_details(scene_id);
+        let details = lock(r.cache()).get::<stash_core::scenes::SceneDetails>(&key)?;
+        details.data.resume_time.filter(|t| *t > 0.0)
+    }
+
     /// The last server summary read for the current profile, or the live connection's.
     pub fn cached_server_info(&self) -> Option<stash_core::connection::ServerInfo> {
         let cached = self
@@ -298,12 +386,15 @@ impl Services {
         })
     }
 
-    /// Look up a scene and play its direct stream (never a transcode, Principle V).
+    /// Look up a scene and play its direct stream (never a transcode, Principle V). Without a
+    /// `start`, and with `resume`, it starts at the scene's cached resume point (008 FR-013);
+    /// returns the scene and that resume point when one was used.
     pub async fn open_scene(
         &self,
         scene_id: &str,
         start: Option<f64>,
-    ) -> Result<PlayableScene, AppError> {
+        resume: bool,
+    ) -> Result<(PlayableScene, Option<f64>), AppError> {
         let player = Arc::clone(self.player()?);
         let (_, api_key, strict_tls) = self.active_client()?;
         if !matches!(self.manager.snapshot().state, SessionState::Connected) {
@@ -331,7 +422,13 @@ impl Services {
             forward_bytes: c.forward_bytes,
             back_bytes: c.back_bytes,
         });
-        tracing::info!(scene = %scene.id, "opening scene");
+        let resumed = match start {
+            None if resume => {
+                player::start_position(self.cached_resume_point(&scene.id), scene.duration_seconds)
+            }
+            _ => None,
+        };
+        tracing::info!(scene = %scene.id, resumed = resumed.is_some(), "opening scene");
         player.open(OpenRequest {
             source: scene.stream_url.to_string(),
             scene_id: Some(scene.id.clone()),
@@ -339,9 +436,36 @@ impl Services {
             api_key,
             strict_tls,
             cache,
-            start_seconds: player::start_position(start, scene.duration_seconds),
+            start_seconds: player::start_position(start.or(resumed), scene.duration_seconds),
+            transcoded: false,
         });
-        Ok(scene)
+        Ok((scene, resumed))
+    }
+
+    /// Play Stash's MP4 transcode of a scene, after its direct stream couldn't be decoded and the
+    /// user chose to (008 R10). `reason` is mpv's, for the log (no title or path there).
+    pub async fn open_transcoded(&self, scene_id: &str, reason: &str) -> Result<(), AppError> {
+        let player = Arc::clone(self.player()?);
+        let (client, api_key, strict_tls) = self.active_client()?;
+        let id = scene_id.trim().to_owned();
+        let title = self
+            .current_profile()
+            .and_then(|p| self.caches.for_profile(p))
+            .and_then(|r| lock(r.cache()).get::<PlayableScene>(&format!("scene:{id}")))
+            .map(|c| c.data.title);
+        let url = stash_core::adapter::scenes::transcode_url(client.base_url(), &id);
+        tracing::info!(scene = %id, %reason, "playing the server's transcode");
+        player.open(OpenRequest {
+            source: url.to_string(),
+            scene_id: Some(id),
+            title,
+            api_key,
+            strict_tls,
+            cache: None,
+            start_seconds: None,
+            transcoded: true,
+        });
+        Ok(())
     }
 
     /// A scene's cover (its screenshot or uploaded cover) through the current profile's cache
@@ -368,6 +492,102 @@ impl Services {
             }
         }
         Some(bytes)
+    }
+
+    /// Bytes through the current profile's disk cache under `key`, fetched with `fetch` on a miss.
+    async fn cached_bytes<F, Fut>(&self, key: &str, fetch: F) -> Result<Option<Vec<u8>>, AppError>
+    where
+        F: FnOnce(StashClient) -> Fut,
+        Fut: Future<Output = Result<Option<Vec<u8>>, AppError>>,
+    {
+        let refresher = self
+            .current_profile()
+            .and_then(|profile| self.caches.for_profile(profile));
+        if let Some(bytes) = refresher
+            .as_ref()
+            .and_then(|r| lock(r.cache()).get_bytes(key))
+        {
+            return Ok(Some(bytes));
+        }
+        let (client, _, _) = self.active_client()?;
+        let Some(bytes) = fetch(client).await? else {
+            return Ok(None);
+        };
+        if let Some(r) = refresher {
+            if let Err(e) = lock(r.cache()).put_bytes(key, &bytes) {
+                tracing::warn!(error = %e, "couldn't cache {key}");
+            }
+        }
+        Ok(Some(bytes))
+    }
+
+    /// A scene's animated preview file (008 FR-019): one GET the first time, then the disk
+    /// cache. `None` when Stash has no preview.
+    pub async fn preview_file(&self, scene_id: &str) -> Result<Option<Vec<u8>>, AppError> {
+        let id = scene_id.to_owned();
+        let key = stash_core::cache::keys::preview(scene_id);
+        self.cached_bytes(&key, |client| async move {
+            stash_core::previews::preview_bytes(&client, &id).await
+        })
+        .await
+    }
+
+    /// The preview that may decode now; others stop at their next frame (the pointer left).
+    pub fn want_preview(&self, generation: Option<u64>) {
+        self.preview_wanted
+            .store(generation.unwrap_or(0), std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub fn preview_wanted(&self, generation: u64) -> bool {
+        self.preview_wanted
+            .load(std::sync::atomic::Ordering::SeqCst)
+            == generation
+    }
+
+    /// A scene's sprite sheet and index for the seek bar (008 FR-021): two GETs the first time,
+    /// then the disk cache; decoded off the UI thread. `None` when Stash hasn't generated them.
+    pub async fn sprite_sheet(
+        &self,
+        scene_id: &str,
+    ) -> Result<Option<stash_core::sprites::SpriteSheet>, AppError> {
+        let key = stash_core::cache::keys::sprite(scene_id);
+        let vtt_key = format!("{key}:vtt");
+        let refresher = self
+            .current_profile()
+            .and_then(|profile| self.caches.for_profile(profile));
+        let cached = refresher.as_ref().and_then(|r| {
+            let cache = lock(r.cache());
+            Some((cache.get_bytes(&vtt_key)?, cache.get_bytes(&key)?))
+        });
+        let (vtt, sheet) = match cached {
+            Some((vtt, sheet)) => (String::from_utf8_lossy(&vtt).into_owned(), sheet),
+            None => {
+                let (client, _, _) = self.active_client()?;
+                let Some((vtt, sheet)) =
+                    stash_core::sprites::sprite_sources(&client, scene_id).await?
+                else {
+                    return Ok(None);
+                };
+                if let Some(r) = refresher {
+                    let mut cache = lock(r.cache());
+                    if let Err(e) = cache
+                        .put_bytes(&vtt_key, vtt.as_bytes())
+                        .and_then(|()| cache.put_bytes(&key, &sheet))
+                    {
+                        tracing::warn!(error = %e, "couldn't cache a sprite sheet");
+                    }
+                }
+                (vtt, sheet)
+            }
+        };
+        let decoded =
+            tokio::task::spawn_blocking(move || stash_core::sprites::decode_sheet(&vtt, &sheet))
+                .await
+                .map_err(|e| AppError::Internal {
+                    message: e.to_string(),
+                })?
+                .map_err(|message| AppError::Internal { message })?;
+        Ok(Some(decoded))
     }
 
     /// The current profile's thumbnail service (one per profile, so its concurrency limit covers

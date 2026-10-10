@@ -141,6 +141,8 @@ fn opening_a_card_and_going_back_returns_the_exact_place() {
             layout: semantic_stash_viewer_native::screens::scenes::layout::Layout::new(
                 1100.0, 2400.0,
             ),
+            playback: Default::default(),
+            previews: &Default::default(),
         };
         let mut ui = simulator(s.shell.content(&ctx));
         // Let the grid settle first (its first event restores the remembered scroll).
@@ -206,6 +208,8 @@ fn a_rebuilt_grid_starts_where_its_state_says() {
         thumbs: &thumbs,
         library: &s.library,
         layout,
+        playback: Default::default(),
+        previews: &Default::default(),
     };
     let mut ui = iced_test::simulator::Simulator::with_size(
         iced::Settings::default(),
@@ -222,4 +226,45 @@ fn a_rebuilt_grid_starts_where_its_state_says() {
     let visible = (2000.0 / row).floor() as u32 + 2;
     ui.click(format!("Scene {visible}").as_str())
         .expect("the remembered rows are on screen");
+}
+
+#[test]
+fn list_rows_span_the_whole_width() {
+    let mut s = session_on_scenes();
+    let _ = s.update(Msg::Shell(ShellMsg::Scenes(ScenesMsg::Mode(Mode::List))));
+    let messages: Vec<ShellMsg> = {
+        let thumbs = Thumbs::default();
+        let connection = Connection::default();
+        let ctx = Context {
+            profile: &s.profile,
+            connection: &connection,
+            thumbs: &thumbs,
+            library: &s.library,
+            layout: semantic_stash_viewer_native::screens::scenes::layout::Layout::new(
+                1400.0, 900.0,
+            ),
+            playback: Default::default(),
+            previews: &Default::default(),
+        };
+        let mut ui = iced_test::simulator::Simulator::with_size(
+            iced::Settings::default(),
+            (1400.0, 900.0),
+            s.shell.content(&ctx),
+        );
+        let _ = ui.simulate([iced::Event::Mouse(iced::mouse::Event::CursorMoved {
+            position: iced::Point::new(10.0, 10.0),
+        })]);
+        let target = ui.find("Scene 3").expect("on screen");
+        let y = target.visible_bounds().expect("visible").center().y;
+        // Near the right edge of the row, far from its text.
+        ui.point_at(iced::Point::new(1300.0, y));
+        let _ = ui.simulate(iced_test::simulator::click());
+        ui.into_messages().collect()
+    };
+    assert!(
+        messages
+            .iter()
+            .any(|m| matches!(m, ShellMsg::Scenes(ScenesMsg::Open { index: 2, .. }))),
+        "the row reaches the right edge: {messages:?}"
+    );
 }
