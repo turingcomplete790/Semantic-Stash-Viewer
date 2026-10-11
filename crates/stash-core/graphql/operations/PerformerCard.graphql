@@ -1,0 +1,12 @@
+query PerformerCard($id: ID!) {
+  findPerformer(id: $id) {
+    id
+    name
+    disambiguation
+    gender
+    birthdate
+    country
+    favorite
+    scene_count
+  }
+}

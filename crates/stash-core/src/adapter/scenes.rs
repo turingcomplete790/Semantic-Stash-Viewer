@@ -4,8 +4,8 @@ use cynic::QueryBuilder;
 
 use super::gql::{
     schema, CriterionModifier, FindFilterType, PlayableFileFields, PlayableSceneFields,
-    ResolutionCriterionInput, ResolutionEnum, SceneCardFields, SceneDetailFields, SceneFilterType,
-    SceneRowFields, SortDirectionEnum, StringCriterionInput,
+    ResolutionCriterionInput, ResolutionEnum, SceneCardFields, SceneFilterType, SceneRowFields,
+    SortDirectionEnum, StringCriterionInput,
 };
 use super::{endpoint, StashClient};
 use crate::error::AppError;
@@ -13,7 +13,7 @@ use crate::scenes::paging::{last_page, validate_page_size};
 use crate::scenes::query::{SceneQuery, SortDirection};
 use crate::scenes::{
     self, direct_stream_url, display_title, resolution, screenshot_version, thumb_url, SceneCard,
-    SceneDetails, SceneFile, SceneGroup, SceneListItem, ScenePage,
+    SceneFile, SceneGroup, SceneListItem, ScenePage,
 };
 
 // ---- Recent scenes: the 20 most recently added (002 FR-001) ------------------------------------
@@ -50,33 +50,25 @@ struct PlayableScene {
     find_scene: Option<PlayableSceneFields>,
 }
 
-// ---- One scene for its view (detail tier) ------------------------------------------------------
-
-#[derive(cynic::QueryFragment, Debug)]
-#[cynic(graphql_type = "Query", variables = "PlayableSceneVariables")]
-struct SceneDetailsQuery {
-    #[arguments(id: $id)]
-    find_scene: Option<SceneDetailFields>,
-}
-
 // ---- One page of scene cards (card tier) ------------------------------------------------------
 
 #[derive(cynic::QueryVariables, Debug)]
-struct ScenesPageVariables {
-    filter: FindFilterType,
+pub(crate) struct ScenesPageVariables {
+    pub(crate) filter: FindFilterType,
+    pub(crate) scene_filter: Option<SceneFilterType>,
 }
 
 #[derive(cynic::QueryFragment, Debug)]
 #[cynic(graphql_type = "FindScenesResultType")]
-struct SceneCards {
+pub(crate) struct SceneCards {
     count: i32,
     scenes: Vec<SceneCardFields>,
 }
 
 #[derive(cynic::QueryFragment, Debug)]
 #[cynic(graphql_type = "Query", variables = "ScenesPageVariables")]
-struct FindScenesPage {
-    #[arguments(filter: $filter)]
+pub(crate) struct ScenesPage {
+    #[arguments(filter: $filter, scene_filter: $scene_filter)]
     find_scenes: SceneCards,
 }
 
@@ -165,7 +157,10 @@ async fn fetch_scenes_page(
         }),
     };
     let data = client
-        .graphql(&FindScenesPage::build(ScenesPageVariables { filter }))
+        .graphql(&ScenesPage::build(ScenesPageVariables {
+            filter,
+            scene_filter: crate::scenes::filter::to_stash::scene_filter(&q.criteria),
+        }))
         .await?;
     let found = data.find_scenes;
     Ok((u32::try_from(found.count).unwrap_or(u32::MAX), found.scenes))
@@ -396,7 +391,7 @@ pub async fn playable_scene(
 }
 
 /// A file's technical facts.
-fn scene_file(file: &PlayableFileFields) -> SceneFile {
+pub(crate) fn scene_file(file: &PlayableFileFields) -> SceneFile {
     SceneFile {
         container: Some(file.format.clone()).filter(|s| !s.is_empty()),
         video_codec: Some(file.video_codec.clone()).filter(|s| !s.is_empty()),
@@ -409,42 +404,8 @@ fn scene_file(file: &PlayableFileFields) -> SceneFile {
     }
 }
 
-/// One scene as its view shows it (007 T048). Read-only.
-pub async fn scene_details(client: &StashClient, id: &str) -> Result<SceneDetails, AppError> {
-    let data = client
-        .graphql(&SceneDetailsQuery::build(PlayableSceneVariables {
-            id: cynic::Id::new(id),
-        }))
-        .await?;
-    let scene = data
-        .find_scene
-        .ok_or_else(|| AppError::SceneNotFound { id: id.to_owned() })?;
-    let file = scene.files.first();
-    let text = |s: Option<String>| s.filter(|s| !s.trim().is_empty());
-    let count = |n: Option<i32>| n.and_then(|n| u32::try_from(n).ok()).unwrap_or(0);
-    Ok(SceneDetails {
-        title: display_title(scene.title.as_deref(), file.map(|f| f.basename.as_str())),
-        code: text(scene.code),
-        date: text(scene.date),
-        details: text(scene.details),
-        director: text(scene.director),
-        studio: scene.studio.map(|s| s.name),
-        performers: scene.performers.into_iter().map(|p| p.name).collect(),
-        tags: scene.tags.into_iter().map(|t| t.name).collect(),
-        rating100: scene.rating100.and_then(|r| u8::try_from(r).ok()),
-        play_count: count(scene.play_count),
-        o_count: count(scene.o_counter),
-        duration_seconds: file.map(|f| f.duration),
-        file_name: file.map(|f| f.basename.clone()),
-        file: file.map(scene_file),
-        cover_version: scene
-            .paths
-            .screenshot
-            .as_deref()
-            .map_or_else(|| "0".to_owned(), screenshot_version),
-        id: scene.id.into_inner(),
-    })
-}
+/// One scene as its view shows it (008 US2; the detail tier).
+pub use super::scene_page::scene_details;
 
 /// Thumbnail sources are resized right away, so large uploaded covers are fine (005 R5).
 const MAX_THUMB_SOURCE_BYTES: usize = 16 * 1024 * 1024;
@@ -458,21 +419,62 @@ pub async fn scene_screenshot_bytes(
     screenshot_bytes(client, id, MAX_THUMB_SOURCE_BYTES).await
 }
 
+/// A performer's image as bytes and content type, for picker rows and chips (008 FR-003a); the
+/// key goes in a header; `None` when the performer has none.
+pub async fn performer_image_bytes(
+    client: &StashClient,
+    id: &str,
+) -> Result<Option<(Vec<u8>, String)>, AppError> {
+    image_bytes(client, "performer", id, "image", MAX_THUMB_SOURCE_BYTES).await
+}
+
 async fn screenshot_bytes(
     client: &StashClient,
     id: &str,
     max_bytes: usize,
 ) -> Result<Option<(Vec<u8>, String)>, AppError> {
-    let mut url = endpoint(&endpoint(client.base_url(), "scene"), id);
+    image_bytes(client, "scene", id, "screenshot", max_bytes).await
+}
+
+/// `{base}/{kind}/{id}/{resource}` with the key in a header.
+async fn image_bytes(
+    client: &StashClient,
+    kind: &str,
+    id: &str,
+    resource: &str,
+    max_bytes: usize,
+) -> Result<Option<(Vec<u8>, String)>, AppError> {
+    let record_as = if kind == "performer" {
+        "performer-image"
+    } else {
+        "screenshot"
+    };
+    resource_bytes(client, kind, id, resource, record_as, max_bytes).await
+}
+
+/// `{base}/{kind}/{id}/{resource}` (`resource` may have several segments, as `vtt/thumbs`) with
+/// the key in a header, recorded as `record_as`. `None` when Stash has none (a 404) or it's
+/// larger than `max_bytes`. The content type is the response's, or `image/jpeg`.
+pub(crate) async fn resource_bytes(
+    client: &StashClient,
+    kind: &str,
+    id: &str,
+    resource: &str,
+    record_as: &str,
+    max_bytes: usize,
+) -> Result<Option<(Vec<u8>, String)>, AppError> {
+    let mut url = endpoint(&endpoint(client.base_url(), kind), id);
     if let Ok(mut segments) = url.path_segments_mut() {
-        segments.push("screenshot");
+        segments.extend(resource.split('/'));
     }
+    let started = std::time::Instant::now();
     let response = client
         .get_with_key(url)
         .send()
         .await
         .map_err(|e| AppError::from(client.classify_transport_error(&e)))?;
     if !response.status().is_success() {
+        client.record_get(record_as, 0, started);
         return Ok(None);
     }
     let content_type = response
@@ -486,13 +488,37 @@ async fn screenshot_bytes(
         .content_length()
         .is_some_and(|len| len > max_bytes as u64)
     {
+        client.record_get(record_as, 0, started);
         return Ok(None);
     }
     let bytes = response.bytes().await.map_err(|e| AppError::Internal {
-        message: format!("couldn't read the screenshot: {e}"),
+        message: format!("couldn't read the {resource}: {e}"),
     })?;
+    client.record_get(record_as, bytes.len(), started);
     if bytes.len() > max_bytes {
         return Ok(None);
     }
     Ok(Some((bytes.to_vec(), content_type)))
+}
+
+/// Stash's MP4 transcode of a scene (`{base}/scene/<id>/stream.mp4`; the key goes in a header).
+/// Only offered after the direct stream fails to decode, and opened with the player's
+/// `transcoded` flag (008 R10); never used otherwise (constitution Principle V).
+pub fn transcode_url(base: &url::Url, scene_id: &str) -> url::Url {
+    let mut url = endpoint(&endpoint(base, "scene"), scene_id);
+    if let Ok(mut segments) = url.path_segments_mut() {
+        segments.push("stream.mp4");
+    }
+    url
+}
+
+#[cfg(test)]
+mod transcode_tests {
+    #[test]
+    fn the_transcode_is_the_scenes_stream_mp4_with_no_query() {
+        let base = url::Url::parse("http://h:9999/stash/").expect("url");
+        let url = super::transcode_url(&base, "7");
+        assert_eq!(url.as_str(), "http://h:9999/stash/scene/7/stream.mp4");
+        assert!(url.query().is_none());
+    }
 }

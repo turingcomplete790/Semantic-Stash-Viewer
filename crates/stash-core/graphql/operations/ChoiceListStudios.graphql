@@ -1,0 +1,9 @@
+query ChoiceListStudios($filter: FindFilterType!) {
+  findStudios(filter: $filter) {
+    studios {
+      id
+      name
+      aliases
+    }
+  }
+}

@@ -38,6 +38,9 @@ pub struct Session {
     pub thumbs: Thumbs,
     /// The notification centre's entries and toasts.
     pub notifications: crate::shell::notifications::Notifications,
+    /// What every tab of this server shares: UI settings, saved filters, picker lists, the
+    /// semantic vocabulary (008).
+    pub library: crate::library::Library,
     /// Held modifier keys (Ctrl+click opens in a new tab).
     modifiers: Modifiers,
     ever_connected: bool,
@@ -47,7 +50,18 @@ pub struct Session {
     save_generation: u64,
     /// The UI bench is running: its tabs aren't saved.
     pub saving_suspended: bool,
+    /// Settings → Playback (008), the same for every server.
+    pub prefs: crate::services::settings::PlaybackPreferences,
+    /// Play history sends that failed this session, and whether the centre was told (once per
+    /// server, contracts/play-history.md).
+    history_failures: u32,
+    history_notified: bool,
+    /// The one card preview (008 FR-019).
+    pub previews: crate::screens::scenes::preview::Previews,
 }
+
+/// Failed play history sends before the notification centre says so.
+const HISTORY_FAILURES_NOTIFIED: u32 = 3;
 
 #[derive(Debug, Clone)]
 pub enum Msg {
@@ -58,7 +72,10 @@ pub enum Msg {
     SwitchServer(Uuid),
     /// The "Add a server" overlay's form.
     AddServer(onboarding::Msg),
-    SceneOpened(Result<(), AppError>),
+    /// A preview's frame timer (only while a preview plays).
+    PreviewFrame(std::time::Instant),
+    /// The player opened a scene; the resume point it started at, if it resumed.
+    SceneOpened(Result<Option<f64>, AppError>),
     Reply(Reply),
     Key(Key, Modifiers),
     Shell(ShellMsg),
@@ -104,12 +121,18 @@ impl Session {
             },
         ];
         effects.extend(shell_effects);
+        effects.push(Effect::LoadPlaybackPreferences);
+        let mut library = crate::library::Library::default();
+        effects.extend(library.want_ui());
+        let mut playback = playback::Playback::default();
+        playback.profile = Some(profile_id);
         (
             Self {
+                library,
                 servers: vec![profile.clone()],
                 profile,
                 connection: connection::Connection::default(),
-                playback: playback::Playback::default(),
+                playback,
                 overlay: Overlay::None,
                 shell,
                 thumbs: Thumbs::default(),
@@ -119,6 +142,10 @@ impl Session {
                 restored: false,
                 save_generation: 0,
                 saving_suspended: false,
+                prefs: crate::services::settings::PlaybackPreferences::default(),
+                history_failures: 0,
+                history_notified: false,
+                previews: Default::default(),
             },
             effects,
         )
@@ -133,9 +160,11 @@ impl Session {
         })
     }
 
-    /// Leaving this session (quit or a server switch): save its tabs and stop playback.
-    pub fn leave(&self) -> Vec<Effect> {
+    /// Leaving this session (quit or a server switch): save its tabs, end the viewing (its final
+    /// play history report), and stop playback.
+    pub fn leave(&mut self) -> Vec<Effect> {
         let mut effects: Vec<Effect> = self.save_now().into_iter().collect();
+        effects.extend(self.playback.finish());
         if self.playback.active() {
             effects.extend(self.playback_close());
         }
@@ -207,9 +236,41 @@ impl Session {
     }
 
     /// Thumbnails for what the active screen shows.
-    fn thumbnails(&mut self) -> Vec<Effect> {
+    pub(crate) fn thumbnails(&mut self) -> Vec<Effect> {
+        use crate::screens::scene::{PERFORMER_ICON, PORTRAIT};
         let width = self.thumb_width();
-        self.thumbs.want_cards(self.shell.active_cards(), width)
+        let mut effects = self.thumbs.want_cards(self.shell.active_cards(), width);
+        // Performer images on the scene page (008 FR-011a), only those Stash has, decoded at
+        // their drawn size on this display; and the open performer card's portrait (FR-011b)
+        // from the same cached image.
+        if let crate::screens::Screen::Scene(scene) = self.shell.active().current() {
+            if let crate::screens::scene::Details::Ready(d) = &scene.details {
+                let keys: Vec<_> = d
+                    .performers
+                    .iter()
+                    .filter_map(|p| {
+                        let version = p.image.as_deref()?;
+                        Some(crate::screens::scenes::picker::performer_key(
+                            &p.id, version,
+                        ))
+                    })
+                    .collect();
+                let icon = self.shell.layout.physical(PERFORMER_ICON);
+                effects.extend(self.thumbs.want(&keys, icon));
+            }
+            if let Some(key) = scene.portrait_wanted() {
+                let portrait = self.shell.layout.physical(PORTRAIT);
+                effects.extend(self.thumbs.want([&key], portrait));
+            }
+        }
+        // Performer images for the picker's visible rows only (008 FR-003a).
+        if let Some(crate::screens::scenes::Panel::Editor(editor)) =
+            self.active_scenes().map(|s| &s.panel)
+        {
+            let keys = crate::screens::scenes::picker::visible_performers(&self.library, editor);
+            effects.extend(self.thumbs.want(&keys, 64));
+        }
+        effects
     }
 
     /// The width thumbnails are decoded at: a grid card's (list rows draw them smaller), in steps
@@ -220,6 +281,29 @@ impl Session {
     }
 
     fn shell(&mut self, msg: ShellMsg) -> Step<Up> {
+        // The pointer crossing cards (also as they scroll under it): only the preview cares, so
+        // none of the rest below runs for it (008 FR-019).
+        if let ShellMsg::Scenes(ScenesMsg::Hover(index) | ScenesMsg::HoverEnd(index)) = msg {
+            let on = matches!(msg, ShellMsg::Scenes(ScenesMsg::Hover(_)));
+            let scene = self
+                .active_scenes()
+                .and_then(|s| s.cards().get(index))
+                .map(|c| c.id.clone());
+            let Some(scene) = scene else {
+                return Step::none();
+            };
+            // Stash doesn't say whether a preview was generated, so the first rest tries.
+            return Step::effects(if on {
+                self.previews.enter(scene, true)
+            } else {
+                self.previews.left(&scene)
+            });
+        }
+        let scrolled = if matches!(msg, ShellMsg::Scenes(ScenesMsg::Scrolled { .. })) {
+            self.previews.scrolled(std::time::Instant::now())
+        } else {
+            Vec::new()
+        };
         // A click with Ctrl held opens the scene in a new tab.
         let msg = match msg {
             ShellMsg::Scenes(ScenesMsg::Open {
@@ -229,10 +313,23 @@ impl Session {
                 index,
                 new_tab: true,
             }),
+            ShellMsg::FilterTo {
+                criterion,
+                new_tab: false,
+            } if self.modifiers.control() => ShellMsg::FilterTo {
+                criterion,
+                new_tab: true,
+            },
             other => other,
         };
         let Step { mut effects, up } = self.shell.update(msg);
+        effects.extend(scrolled);
         effects.extend(self.thumbnails());
+        effects.extend(self.sync_tag_colours());
+        // Another screen: no cards, so no preview.
+        if self.active_scenes().is_none() {
+            effects.extend(self.previews.clear());
+        }
         if self.restored {
             self.save_generation += 1;
             effects.push(Effect::SaveSessionLater {
@@ -247,7 +344,14 @@ impl Session {
             None => step,
             Some(shell_mod::Up::Play(id)) => {
                 let owner = self.shell.active().id;
-                step.with_all(self.playback.open(id, owner))
+                let step = step.with_all(self.playback.open(id, owner));
+                self.sync_chapters();
+                step
+            }
+            Some(shell_mod::Up::PlaybackChange(change)) => {
+                let prefs = change.apply(self.prefs);
+                self.apply_prefs(prefs);
+                step.with(Effect::SavePlaybackPreferences(prefs))
             }
             Some(shell_mod::Up::AddServer) => {
                 self.overlay = Overlay::AddServer(onboarding::ServerForm::default());
@@ -266,6 +370,13 @@ impl Session {
             }
             Some(shell_mod::Up::KeyboardHelp) => {
                 self.overlay = Overlay::KeyboardHelp;
+                step
+            }
+            Some(shell_mod::Up::Need(need)) => step.with_all(self.library.want(need)),
+            Some(shell_mod::Up::PlayAt { id, seconds }) => {
+                let owner = self.shell.active().id;
+                let step = step.with_all(self.playback.open_at(id, owner, Some(seconds)));
+                self.sync_chapters();
                 step
             }
             Some(shell_mod::Up::Notifications) => {
@@ -298,6 +409,20 @@ impl Session {
                 return Step::none();
             }
         }
+        if let Some(step) = self.scenes_panel_key(key, mods) {
+            return step;
+        }
+        if let Some(step) = self.tag_colours_key(key, mods) {
+            return step;
+        }
+        // Escape closes a chip's card on the scene page (the overlay rules).
+        if *key == Key::Named(iced::keyboard::key::Named::Escape) {
+            if let crate::screens::Screen::Scene(scene) = self.shell.active().current() {
+                if scene.chip_hover.is_some() {
+                    return self.shell(ShellMsg::Scene(crate::screens::scene::SceneMsg::CloseCard));
+                }
+            }
+        }
         if let Some(Step { mut effects, up }) = self.shell.screen_key(key, mods) {
             effects.extend(self.thumbnails());
             if self.restored {
@@ -321,9 +446,142 @@ impl Session {
             Some(Action::KeyboardHelp) => ShellMsg::KeyboardHelp,
             Some(Action::FocusNext) => return Step::effect(Effect::FocusNext),
             Some(Action::FocusPrevious) => return Step::effect(Effect::FocusPrevious),
-            Some(Action::Player | Action::Scenes) | None => return Step::none(),
+            Some(Action::Player | Action::Scenes) | None => {
+                return self.scenes_key(key, mods).unwrap_or_else(Step::none)
+            }
+            Some(
+                Action::FocusSearch | Action::FilterMenu | Action::SavedFilters | Action::Settings,
+            ) => return Step::none(),
         };
         self.shell(msg)
+    }
+
+    /// Settings → Tag colours shows the server's rules (once they're here) and their counts.
+    fn sync_tag_colours(&mut self) -> Vec<Effect> {
+        if self.library.ui.ready().is_some() {
+            let rules = self.library.colour_rules();
+            self.shell.sync_tag_colours(&rules);
+        }
+        if self.shell.tag_colours_open() {
+            self.library.want(crate::library::Need::Vocabulary)
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// The active Scenes screen, if that's what shows.
+    fn active_scenes(&self) -> Option<&crate::screens::ScenesState> {
+        match self.shell.active().current() {
+            crate::screens::Screen::Scenes(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Keys for an open filter panel on Scenes (008 FR-003f): move, choose, remove, exclude,
+    /// close. Keys a focused field takes (typing, Enter in a field) never get here.
+    fn scenes_panel_key(&mut self, key: &Key, mods: Modifiers) -> Option<Step<Up>> {
+        use crate::screens::scenes::editor::EditorMsg;
+        use crate::screens::scenes::filters::{menu_target, MenuRow};
+        use crate::screens::scenes::{picker, Panel};
+        use iced::keyboard::key::Named;
+        let state = self.active_scenes()?;
+        let scenes = |m: ScenesMsg| ShellMsg::Scenes(m);
+        let named = match key {
+            Key::Named(n) => Some(*n),
+            _ => None,
+        };
+        let msg = match (&state.panel, named) {
+            (Panel::None, _) => return None,
+            (Panel::Editor(_), Some(Named::Escape)) => scenes(ScenesMsg::Editor(EditorMsg::Cancel)),
+            (Panel::Menu { .. }, Some(Named::Escape)) => scenes(ScenesMsg::FilterMenu(false)),
+            (Panel::Saved { .. }, Some(Named::Escape)) => scenes(ScenesMsg::SavedMenu(false)),
+            (_, Some(Named::ArrowDown)) => scenes(ScenesMsg::MenuMove(1)),
+            (_, Some(Named::ArrowUp)) => scenes(ScenesMsg::MenuMove(-1)),
+            (Panel::Menu { highlight }, Some(Named::Enter)) => {
+                match menu_target(state, *highlight)? {
+                    MenuRow::Active { key, .. } => scenes(ScenesMsg::Edit(key)),
+                    MenuRow::Kind(kind) => scenes(ScenesMsg::Add(kind)),
+                    _ => return Some(Step::none()),
+                }
+            }
+            (Panel::Menu { highlight }, Some(Named::Delete | Named::Backspace)) => {
+                match menu_target(state, *highlight)? {
+                    MenuRow::Active { key, .. } => scenes(ScenesMsg::Remove(key)),
+                    _ => return Some(Step::none()),
+                }
+            }
+            (Panel::Saved { highlight }, Some(Named::Enter)) => {
+                let list = self.library.saved.ready()?;
+                let filter = list.get((*highlight).min(list.len().checked_sub(1)?))?;
+                scenes(ScenesMsg::ApplySaved(Box::new(filter.clone())))
+            }
+            (Panel::Editor(editor), Some(Named::Enter)) => {
+                match picker::highlighted(&self.library, editor) {
+                    Some(item) if editor.picker().is_some() && !mods.control() => {
+                        scenes(ScenesMsg::Editor(EditorMsg::Toggle(item)))
+                    }
+                    _ => scenes(ScenesMsg::Editor(EditorMsg::Apply)),
+                }
+            }
+            (Panel::Editor(editor), None)
+                if mods.control()
+                    && matches!(key, Key::Character(c) if c.eq_ignore_ascii_case("e")) =>
+            {
+                let item = picker::highlighted(&self.library, editor)?;
+                scenes(ScenesMsg::Editor(EditorMsg::Exclude(item)))
+            }
+            _ => return None,
+        };
+        let mut step = self.shell(msg);
+        // Keep the picker's highlighted row in view.
+        if let Some(Panel::Editor(editor)) = self.active_scenes().map(|s| &s.panel) {
+            if let Some(y) = picker::reveal(&self.library, editor) {
+                step.effects.push(Effect::ScrollTo {
+                    id: picker::LIST_ID.to_owned(),
+                    y,
+                });
+            }
+        }
+        Some(step)
+    }
+
+    /// Settings → Tag colours' keys (008 FR-003g): move, reorder, change, remove, save.
+    fn tag_colours_key(&mut self, key: &Key, mods: Modifiers) -> Option<Step<Up>> {
+        use crate::screens::settings::tag_colours::TagColoursMsg as T;
+        use iced::keyboard::key::Named;
+        if !self.shell.tag_colours_open() {
+            return None;
+        }
+        let crate::screens::Screen::Settings(s) = self.shell.active().current() else {
+            return None;
+        };
+        let at = s.tag_colours.highlight;
+        let msg = match key {
+            Key::Named(Named::ArrowUp) if mods.alt() => T::MoveUp(at),
+            Key::Named(Named::ArrowDown) if mods.alt() => T::MoveDown(at),
+            Key::Named(Named::ArrowUp) => T::Highlight(-1),
+            Key::Named(Named::ArrowDown) => T::Highlight(1),
+            Key::Named(Named::Enter) => T::Edit(at),
+            Key::Named(Named::Delete) => T::Remove(at),
+            Key::Character(c) if mods.control() && c.eq_ignore_ascii_case("s") => T::Save,
+            _ => return None,
+        };
+        Some(self.shell(ShellMsg::Settings(
+            crate::screens::settings::SettingsMsg::TagColours(msg),
+        )))
+    }
+
+    /// The Scenes level's own keys (008 FR-003f): search, filter menu, saved filters.
+    fn scenes_key(&mut self, key: &Key, mods: Modifiers) -> Option<Step<Up>> {
+        self.active_scenes()?;
+        match keymap::resolve(key, mods, &[Level::Scenes])? {
+            Action::FocusSearch => Some(Step::effect(Effect::Focus(
+                crate::screens::scenes::state::SEARCH_ID,
+            ))),
+            Action::FilterMenu => Some(self.shell(ShellMsg::Scenes(ScenesMsg::FilterMenu(true)))),
+            Action::SavedFilters => Some(self.shell(ShellMsg::Scenes(ScenesMsg::SavedMenu(true)))),
+            _ => None,
+        }
     }
 
     pub fn update(&mut self, msg: Msg) -> Step<Up> {
@@ -337,7 +595,14 @@ impl Session {
                     self.shell.unreachable();
                 }
                 let retry = if up == Some(connection::Up::BecameConnected) {
-                    self.shell.retry_active()
+                    let mut retry = self.shell.retry_active();
+                    retry.extend(self.library.want_ui());
+                    // Play history waiting for this server goes now (contracts/play-history.md).
+                    retry.push(Effect::FlushPlayHistory {
+                        profile: self.profile.id,
+                        deadline: None,
+                    });
+                    retry
                 } else {
                     Vec::new()
                 };
@@ -351,7 +616,79 @@ impl Session {
                 self.shell.layout = layout;
                 Step::none()
             }
-            Msg::CacheChanged(key) => Step::effects(self.shell.cache_changed(&key)),
+            Msg::CacheChanged(key) => {
+                let mut effects = self.shell.cache_changed(&key);
+                effects.extend(self.library.cache_changed(&key));
+                Step::effects(effects)
+            }
+            Msg::Reply(Reply::UiSettings(result)) => {
+                let default = result
+                    .as_ref()
+                    .ok()
+                    .and_then(|s| s.default_scene_filter.as_ref())
+                    .map(stash_core::scenes::filter::saved::decode_default_filter);
+                if let Ok(settings) = &result {
+                    self.shell.default_scenes = default;
+                    self.playback.minimum_percent = Some(settings.minimum_play_percent);
+                }
+                let mut effects = self.library.ui_loaded(result);
+                effects.extend(self.sync_tag_colours());
+                Step::effects(effects)
+            }
+            Msg::Reply(Reply::SavedFilters(result)) => {
+                self.library.saved_loaded(result);
+                Step::none()
+            }
+            Msg::Reply(Reply::Choices { kind, result }) => {
+                self.library.choices_loaded(kind, result);
+                Step::effects(self.thumbnails())
+            }
+            Msg::Reply(Reply::Vocabulary(result)) => {
+                self.library.vocabulary_loaded(result);
+                Step::none()
+            }
+            Msg::Reply(Reply::SceneFiles { tab, id, result }) => {
+                self.shell.scene_files(tab, &id, result);
+                Step::none()
+            }
+            Msg::Reply(Reply::SceneGalleries { tab, id, result }) => {
+                self.shell.scene_galleries(tab, &id, result);
+                Step::none()
+            }
+            Msg::Reply(Reply::ChipRestDue { tab, generation }) => {
+                match self.shell.chip_rested(tab, generation) {
+                    Some(chip) => {
+                        let mut effects = self.library.want_chip(chip.kind, &chip.id);
+                        // A performer's card shows their portrait (008 FR-011b).
+                        effects.extend(self.thumbnails());
+                        Step::effects(effects)
+                    }
+                    None => Step::none(),
+                }
+            }
+            Msg::Reply(Reply::ChipDetails { kind, id, result }) => {
+                self.library.chip_loaded(kind, id, result);
+                Step::none()
+            }
+            Msg::Reply(Reply::TagColoursSaved(result)) => {
+                let effects = match &result {
+                    Ok(settings) => self.library.colours_saved(settings.clone()),
+                    Err(_) => Vec::new(),
+                };
+                self.shell.tag_colours_saved(&result);
+                Step::effects(effects)
+            }
+            Msg::Reply(Reply::SearchDue { tab, generation }) => {
+                let mut effects = self.shell.search_due(tab, generation);
+                effects.extend(self.thumbnails());
+                if self.restored && !effects.is_empty() {
+                    self.save_generation += 1;
+                    effects.push(Effect::SaveSessionLater {
+                        generation: self.save_generation,
+                    });
+                }
+                Step::effects(effects)
+            }
             Msg::Reply(Reply::ScenesPage {
                 tab,
                 generation,
@@ -431,7 +768,17 @@ impl Session {
                     Step::up(Up::Switch(id))
                 }
             }
-            Msg::SceneOpened(Ok(())) => Step::none(),
+            Msg::SceneOpened(Ok(resumed)) => {
+                self.playback.resumed(resumed);
+                Step::none()
+            }
+            Msg::Reply(Reply::PlaybackPreferences(prefs)) => {
+                self.apply_prefs(prefs);
+                Step::none()
+            }
+            Msg::Reply(Reply::PlayHistoryFlushed { profile, outcome }) => {
+                self.history_flushed(profile, &outcome)
+            }
             Msg::SceneOpened(Err(e)) => {
                 tracing::warn!(error = %e, "couldn't open the scene");
                 let m = crate::messages::for_error(&e);
@@ -472,8 +819,17 @@ impl Session {
                 }
             }
             Msg::Reply(Reply::SceneDetails { tab, id, result }) => {
+                let loaded = result.is_ok();
                 self.shell.scene_details(tab, &id, *result);
-                Step::none()
+                self.sync_chapters();
+                // Tag chips need the vocabulary for their types and colours (FR-003d).
+                let mut effects = if loaded {
+                    self.library.want(crate::library::Need::Vocabulary)
+                } else {
+                    Vec::new()
+                };
+                effects.extend(self.thumbnails());
+                Step::effects(effects)
             }
             Msg::Reply(Reply::Cover { tab, id, cover }) => {
                 self.shell.scene_cover(tab, &id, cover);
@@ -553,9 +909,97 @@ impl Session {
                 }
                 Step::none()
             }
+            Msg::Key(key, mods) => {
+                let step = self.key(&key, mods);
+                // The keyboard's card previews as the pointer's does (008 FR-019).
+                let focused = self.active_scenes().and_then(|s| {
+                    s.focused
+                        .and_then(|i| s.cards().get(i))
+                        .map(|c| (c.id.clone(), true))
+                });
+                let more = self.previews.focus(focused);
+                step.with_all(more)
+            }
+            Msg::PreviewFrame(now) => {
+                self.previews.tick(now);
+                Step::none()
+            }
+            Msg::Reply(Reply::PreviewDue(generation)) => {
+                let width = self.shell.layout.card_width().ceil() as u32;
+                Step::effects(
+                    self.previews
+                        .due(generation, width, std::time::Instant::now()),
+                )
+            }
+            Msg::Reply(Reply::Preview {
+                generation,
+                frames,
+                done,
+            }) => {
+                self.previews
+                    .frames(generation, frames, done, std::time::Instant::now());
+                Step::none()
+            }
+            Msg::Reply(Reply::Sprite { scene_id, sheet }) => {
+                self.playback.sprites_loaded(&scene_id, sheet);
+                Step::none()
+            }
             Msg::Reply(_) => Step::none(),
-            Msg::Key(key, mods) => self.key(&key, mods),
         }
+    }
+
+    /// Settings → Playback: kept here and handed to the player region.
+    fn apply_prefs(&mut self, prefs: crate::services::settings::PlaybackPreferences) {
+        self.prefs = prefs;
+        self.playback.resume = prefs.resume;
+        self.playback.save_history = prefs.save_history;
+    }
+
+    /// The playing scene's markers become the player's chapters once its page is loaded.
+    fn sync_chapters(&mut self) {
+        let Some(playing) = self.playback.scene_id.clone() else {
+            return;
+        };
+        let chapters = self.shell.tabs.iter().find_map(|tab| match tab.current() {
+            crate::screens::Screen::Scene(s) if s.scene_id == playing => match &s.details {
+                crate::screens::scene::Details::Ready(d) => Some(
+                    d.markers
+                        .iter()
+                        .map(|m| (m.seconds, m.title.clone()))
+                        .collect::<Vec<_>>(),
+                ),
+                _ => None,
+            },
+            _ => None,
+        });
+        if let Some(chapters) = chapters {
+            self.playback.set_chapters(chapters);
+        }
+    }
+
+    /// A play history flush finished: after a few failures while connected, the notification
+    /// centre says so, once per server (contracts/play-history.md).
+    fn history_flushed(
+        &mut self,
+        profile: Uuid,
+        outcome: &stash_core::playback::history::FlushOutcome,
+    ) -> Step<Up> {
+        if profile != self.profile.id || outcome.failed.is_none() {
+            return Step::none();
+        }
+        if !self.connection.connected() {
+            // Offline: it's sent on reconnect; that isn't a failure to report.
+            return Step::none();
+        }
+        self.history_failures += 1;
+        if self.history_failures >= HISTORY_FAILURES_NOTIFIED && !self.history_notified {
+            self.history_notified = true;
+            return Step::effect(Effect::PlayHistoryUnsaved {
+                profile,
+                left: outcome.left,
+            });
+        }
+        Step::none()
     }
 
     fn connection_event(&mut self, up: Option<connection::Up>) -> Step<Up> {
@@ -698,7 +1142,9 @@ impl Session {
                     crate::screens::Screen::Scene(scene) if self.player_visible() => {
                         crate::screens::scene::layout(
                             player(),
-                            scene.details_view().map(Msg::Shell),
+                            scene
+                                .details_view(&self.library, &self.thumbs)
+                                .map(Msg::Shell),
                             &self.shell.layout,
                         )
                     }
@@ -707,7 +1153,10 @@ impl Session {
                             profile: &self.profile,
                             connection: &self.connection,
                             thumbs: &self.thumbs,
+                            library: &self.library,
                             layout: self.shell.layout,
+                            playback: self.prefs,
+                            previews: &self.previews,
                         };
                         self.shell.content(&ctx).map(Msg::Shell)
                     }

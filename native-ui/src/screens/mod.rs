@@ -21,8 +21,14 @@ pub struct Context<'a> {
     pub profile: &'a ServerProfile,
     pub connection: &'a Connection,
     pub thumbs: &'a scenes::Thumbs,
+    /// What the server's tabs share: picker lists, saved filters, the vocabulary (008).
+    pub library: &'a crate::library::Library,
     /// The window's size, for the grid's columns.
     pub layout: scenes::layout::Layout,
+    /// Settings → Playback (008).
+    pub playback: crate::services::settings::PlaybackPreferences,
+    /// The one card preview (008 FR-019).
+    pub previews: &'a scenes::preview::Previews,
 }
 
 pub use scene::SceneState;
@@ -37,18 +43,21 @@ pub enum Section {
     Settings,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum Mode {
     #[default]
     Grid,
     List,
+    /// Dense stills, no text (008 FR-020; Stash's Wall mode).
+    Wall,
 }
 
 /// One screen state, externally tagged by variant in the saved session.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Screen {
     Home(home::Home),
-    Scenes(ScenesState),
+    /// Boxed: the Scenes state is large next to the others.
+    Scenes(Box<ScenesState>),
     Scene(SceneState),
     Settings(SettingsState),
 }
@@ -59,7 +68,7 @@ impl Screen {
     }
 
     pub fn scenes() -> Self {
-        Screen::Scenes(ScenesState::default())
+        Screen::Scenes(Box::default())
     }
 
     pub fn scene(id: &str, title: &str) -> Self {
@@ -102,7 +111,7 @@ impl Screen {
     pub fn persistent(&self) -> Screen {
         match self {
             Screen::Home(_) => Screen::home(),
-            Screen::Scenes(s) => Screen::Scenes(s.persistent()),
+            Screen::Scenes(s) => Screen::Scenes(Box::new(s.persistent())),
             Screen::Scene(s) => Screen::Scene(s.persistent()),
             Screen::Settings(s) => Screen::Settings(s.persistent()),
         }
@@ -135,7 +144,7 @@ impl Screen {
         match self {
             Screen::Home(h) => h.view(ctx),
             Screen::Scenes(s) => scenes::view(s, ctx, tab),
-            Screen::Scene(s) => s.view(&ctx.layout),
+            Screen::Scene(s) => s.view(&ctx.layout, ctx.library, ctx.thumbs),
             Screen::Settings(s) => s.view(ctx),
         }
     }

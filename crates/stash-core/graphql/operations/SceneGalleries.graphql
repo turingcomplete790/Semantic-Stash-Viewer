@@ -1,0 +1,9 @@
+query SceneGalleries($id: ID!) {
+  findScene(id: $id) {
+    galleries {
+      id
+      title
+      image_count
+    }
+  }
+}

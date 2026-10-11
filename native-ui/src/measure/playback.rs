@@ -151,7 +151,11 @@ async fn wait_for(timeout: Duration, mut pred: impl FnMut() -> bool) -> bool {
 }
 
 async fn measure_scene(services: &Services, player: &Player, id: &str) {
-    let scene = match services.open_scene(id).await {
+    let scene = match services
+        .open_scene(id, None, false)
+        .await
+        .map(|(scene, _)| scene)
+    {
         Ok(scene) => scene,
         Err(e) => {
             emit(&json!({"scene": id, "result": "open failed", "error": e.to_string()}));
@@ -227,7 +231,7 @@ async fn measure_scene(services: &Services, player: &Player, id: &str) {
 }
 
 async fn measure_long(services: &Services, player: &Player, id: &str, secs: u64) {
-    if let Err(e) = services.open_scene(id).await {
+    if let Err(e) = services.open_scene(id, None, false).await {
         emit(&json!({"long": id, "error": e.to_string()}));
         return;
     }

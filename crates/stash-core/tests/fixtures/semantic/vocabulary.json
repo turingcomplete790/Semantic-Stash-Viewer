@@ -1,0 +1,440 @@
+{
+ "data": {
+  "plugtag": {
+   "tags": [
+    {
+     "id": "6934",
+     "name": "tag-6934",
+     "aliases": [],
+     "custom_fields": {
+      "plugtag": 1
+     }
+    },
+    {
+     "id": "19",
+     "name": "tag-19",
+     "aliases": [],
+     "custom_fields": {
+      "isLabel": 1,
+      "isTrait": 0,
+      "plugtag": 0
+     }
+    },
+    {
+     "id": "227",
+     "name": "tag-227",
+     "aliases": [],
+     "custom_fields": {
+      "plugtag": 1
+     }
+    },
+    {
+     "id": "7",
+     "name": "tag-7",
+     "aliases": [],
+     "custom_fields": {
+      "isTrait": 0,
+      "plugtag": 1
+     }
+    },
+    {
+     "id": "66",
+     "name": "tag-66",
+     "aliases": [],
+     "custom_fields": {
+      "plugtag": 1
+     }
+    }
+   ]
+  },
+  "isTrait": {
+   "tags": [
+    {
+     "id": "1650",
+     "name": "tag-1650",
+     "aliases": [],
+     "custom_fields": {
+      "isTrait": 1
+     }
+    },
+    {
+     "id": "19",
+     "name": "tag-19",
+     "aliases": [],
+     "custom_fields": {
+      "isLabel": 1,
+      "isTrait": 0,
+      "plugtag": 0
+     }
+    },
+    {
+     "id": "7",
+     "name": "tag-7",
+     "aliases": [],
+     "custom_fields": {
+      "isTrait": 0,
+      "plugtag": 1
+     }
+    },
+    {
+     "id": "6938",
+     "name": "tag-6938",
+     "aliases": [],
+     "custom_fields": {
+      "isTrait": 1
+     }
+    }
+   ]
+  },
+  "isRole": {
+   "tags": [
+    {
+     "id": "1679",
+     "name": "tag-1679",
+     "aliases": [],
+     "custom_fields": {
+      "isRole": 1
+     }
+    },
+    {
+     "id": "1625",
+     "name": "tag-1625",
+     "aliases": [],
+     "custom_fields": {
+      "isAction": 0,
+      "isRole": 1
+     }
+    },
+    {
+     "id": "1596",
+     "name": "tag-1596",
+     "aliases": [],
+     "custom_fields": {
+      "isRole": 1
+     }
+    },
+    {
+     "id": "181",
+     "name": "tag-181",
+     "aliases": [],
+     "custom_fields": {
+      "isRole": 1
+     }
+    },
+    {
+     "id": "175",
+     "name": "tag-175",
+     "aliases": [],
+     "custom_fields": {
+      "isRole": 1
+     }
+    },
+    {
+     "id": "229",
+     "name": "tag-229",
+     "aliases": [],
+     "custom_fields": {
+      "isRole": 1
+     }
+    },
+    {
+     "id": "322",
+     "name": "tag-322",
+     "aliases": [
+      "tag-322-alias-0",
+      "tag-322-alias-1",
+      "tag-322-alias-2"
+     ],
+     "custom_fields": {
+      "isRole": 1
+     }
+    },
+    {
+     "id": "9431",
+     "name": "tag-9431",
+     "aliases": [],
+     "custom_fields": {
+      "isRole": 1
+     }
+    },
+    {
+     "id": "105",
+     "name": "tag-105",
+     "aliases": [],
+     "custom_fields": {
+      "isRole": 1
+     }
+    },
+    {
+     "id": "156",
+     "name": "tag-156",
+     "aliases": [
+      "tag-156-alias-0"
+     ],
+     "custom_fields": {
+      "isRole": 1
+     }
+    },
+    {
+     "id": "1557",
+     "name": "tag-1557",
+     "aliases": [],
+     "custom_fields": {
+      "isRole": 1
+     }
+    }
+   ]
+  },
+  "isAction": {
+   "tags": [
+    {
+     "id": "5",
+     "name": "tag-5",
+     "aliases": [
+      "tag-5-alias-0"
+     ],
+     "custom_fields": {
+      "isAction": 1
+     }
+    },
+    {
+     "id": "830",
+     "name": "tag-830",
+     "aliases": [],
+     "custom_fields": {
+      "isAction": 1
+     }
+    },
+    {
+     "id": "1600",
+     "name": "tag-1600",
+     "aliases": [],
+     "custom_fields": {
+      "isAction": 1
+     }
+    },
+    {
+     "id": "1625",
+     "name": "tag-1625",
+     "aliases": [],
+     "custom_fields": {
+      "isAction": 0,
+      "isRole": 1
+     }
+    },
+    {
+     "id": "30",
+     "name": "tag-30",
+     "aliases": [],
+     "custom_fields": {
+      "isAction": 1
+     }
+    },
+    {
+     "id": "139",
+     "name": "tag-139",
+     "aliases": [
+      "tag-139-alias-0",
+      "tag-139-alias-1",
+      "tag-139-alias-2",
+      "tag-139-alias-3"
+     ],
+     "custom_fields": {
+      "isAction": 1
+     }
+    },
+    {
+     "id": "6937",
+     "name": "tag-6937",
+     "aliases": [],
+     "custom_fields": {
+      "isAction": 1
+     }
+    }
+   ]
+  },
+  "isLabel": {
+   "tags": [
+    {
+     "id": "19",
+     "name": "tag-19",
+     "aliases": [],
+     "custom_fields": {
+      "isLabel": 1,
+      "isTrait": 0,
+      "plugtag": 0
+     }
+    },
+    {
+     "id": "6936",
+     "name": "tag-6936",
+     "aliases": [],
+     "custom_fields": {
+      "isLabel": 1
+     }
+    },
+    {
+     "id": "6935",
+     "name": "tag-6935",
+     "aliases": [],
+     "custom_fields": {
+      "isLabel": 1
+     }
+    },
+    {
+     "id": "10",
+     "name": "tag-10",
+     "aliases": [],
+     "custom_fields": {
+      "isLabel": 1
+     }
+    }
+   ]
+  },
+  "isMiseEnScene": {
+   "tags": [
+    {
+     "id": "6240",
+     "name": "tag-6240",
+     "aliases": [
+      "tag-6240-alias-0"
+     ],
+     "custom_fields": {
+      "isMiseEnScene": 1
+     }
+    },
+    {
+     "id": "1155",
+     "name": "tag-1155",
+     "aliases": [
+      "tag-1155-alias-0"
+     ],
+     "custom_fields": {
+      "isMiseEnScene": 1
+     }
+    },
+    {
+     "id": "275",
+     "name": "tag-275",
+     "aliases": [],
+     "custom_fields": {
+      "isMiseEnScene": 1
+     }
+    },
+    {
+     "id": "34",
+     "name": "tag-34",
+     "aliases": [],
+     "custom_fields": {
+      "isMiseEnScene": 1
+     }
+    }
+   ]
+  },
+  "isVariation": {
+   "tags": []
+  },
+  "variant": {
+   "tags": [
+    {
+     "id": "1665",
+     "name": "tag-1665",
+     "aliases": [],
+     "custom_fields": {
+      "variantOfTagId": "6934"
+     }
+    },
+    {
+     "id": "1062",
+     "name": "tag-1062",
+     "aliases": [],
+     "custom_fields": {
+      "variantOfTagId": "30"
+     }
+    },
+    {
+     "id": "230",
+     "name": "tag-230",
+     "aliases": [],
+     "custom_fields": {
+      "variantOfTagId": "6934"
+     }
+    },
+    {
+     "id": "133",
+     "name": "tag-133",
+     "aliases": [],
+     "custom_fields": {
+      "variantOfTagId": "6934"
+     }
+    },
+    {
+     "id": "6",
+     "name": "tag-6",
+     "aliases": [],
+     "custom_fields": {
+      "variantOfTagId": "1600"
+     }
+    },
+    {
+     "id": "26",
+     "name": "tag-26",
+     "aliases": [
+      "tag-26-alias-0"
+     ],
+     "custom_fields": {
+      "variantOfTagId": "5"
+     }
+    },
+    {
+     "id": "38",
+     "name": "tag-38",
+     "aliases": [],
+     "custom_fields": {
+      "variantOfTagId": "66"
+     }
+    },
+    {
+     "id": "215",
+     "name": "tag-215",
+     "aliases": [],
+     "custom_fields": {
+      "variantOfTagId": "105"
+     }
+    },
+    {
+     "id": "140",
+     "name": "tag-140",
+     "aliases": [],
+     "custom_fields": {
+      "variantOfTagId": "105"
+     }
+    },
+    {
+     "id": "1658",
+     "name": "tag-1658",
+     "aliases": [],
+     "custom_fields": {
+      "variantOfTagId": "156"
+     }
+    },
+    {
+     "id": "3",
+     "name": "tag-3",
+     "aliases": [],
+     "custom_fields": {
+      "variantOfTagId": "156"
+     }
+    },
+    {
+     "id": "163",
+     "name": "tag-163",
+     "aliases": [],
+     "custom_fields": {
+      "variantOfTagId": "1600"
+     }
+    }
+   ]
+  }
+ }
+}

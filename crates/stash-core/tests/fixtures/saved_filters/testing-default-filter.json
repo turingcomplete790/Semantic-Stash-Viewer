@@ -1,0 +1,27 @@
+{
+ "find_filter": {
+  "direction": "ASC",
+  "page": 1,
+  "per_page": 40,
+  "sort": "title"
+ },
+ "mode": "SCENES",
+ "object_filter": {
+  "performers": {
+   "modifier": "INCLUDES_ALL",
+   "value": {
+    "excluded": [],
+    "items": [
+     {
+      "id": "3",
+      "label": "SSV Test Performer B"
+     }
+    ]
+   }
+  }
+ },
+ "ui_options": {
+  "display_mode": 0,
+  "zoom_index": 1
+ }
+}

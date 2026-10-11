@@ -40,6 +40,7 @@ async fn a_page_request_asks_for_120_cards_with_the_query() {
         sort: SceneSort::Duration,
         direction: SortDirection::Asc,
         seed: None,
+        criteria: Vec::new(),
     };
     find_scenes_page(&client, &q, 7, 250).await.expect("page");
     let body = &bodies(&server).await[0];

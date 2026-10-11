@@ -1,0 +1,10 @@
+query ChoiceListPerformers($filter: FindFilterType!) {
+  findPerformers(filter: $filter) {
+    performers {
+      id
+      name
+      alias_list
+      image_path
+    }
+  }
+}

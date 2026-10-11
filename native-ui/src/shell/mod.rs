@@ -45,12 +45,16 @@ pub struct Shell {
     pub layout: Layout,
     /// Something changed since the shell was made (a restore then keeps the current tab).
     touched: bool,
+    /// The server's default scene filter: new Scenes screens start from it (008 FR-004).
+    pub default_scenes: Option<stash_core::scenes::filter::saved::SavedFilter>,
 }
 
 #[derive(Debug, Clone)]
 pub enum ShellMsg {
     /// The navigation bar.
     Section(Section),
+    /// Settings → Playback: a switch flipped (008).
+    PlaybackChange(crate::screens::settings::playback::PlaybackChange),
     /// Open a screen in the active tab.
     Open(Screen),
     /// Open a screen in a new tab next to the active one.
@@ -71,6 +75,13 @@ pub enum ShellMsg {
     Settings(crate::screens::settings::SettingsMsg),
     /// For the active Scenes screen.
     Scenes(ScenesMsg),
+    /// For the active Scene screen.
+    Scene(crate::screens::scene::SceneMsg),
+    /// Open Scenes filtered to a performer, tag, or studio (008 FR-006), here or in a new tab.
+    FilterTo {
+        criterion: stash_core::scenes::filter::Criterion,
+        new_tab: bool,
+    },
     // Handled above the shell.
     Play(String),
     ServerMenu,
@@ -79,7 +90,7 @@ pub enum ShellMsg {
 }
 
 /// Events for the session.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Up {
     Play(String),
     /// A tab was closed (playback it owned stops).
@@ -89,9 +100,28 @@ pub enum Up {
     ServerMenu,
     Notifications,
     KeyboardHelp,
+    /// A screen needs something from the library.
+    Need(crate::library::Need),
+    /// Play a scene from a point (a marker).
+    PlayAt {
+        id: String,
+        seconds: f64,
+    },
+    /// Settings → Playback changed (008).
+    PlaybackChange(crate::screens::settings::playback::PlaybackChange),
 }
 
 impl Shell {
+    /// A fresh screen for a section: Scenes starts from the server's default filter.
+    fn fresh(&self, section: Section) -> Screen {
+        match (section, &self.default_scenes) {
+            (Section::Scenes, Some(filter)) => {
+                Screen::Scenes(Box::new(crate::screens::ScenesState::from_saved(filter)))
+            }
+            _ => Screen::for_section(section),
+        }
+    }
+
     /// One Home tab.
     pub fn new() -> (Self, Vec<Effect>) {
         let mut shell = Self {
@@ -100,6 +130,7 @@ impl Shell {
             next_id: 2,
             layout: Layout::default(),
             touched: false,
+            default_scenes: None,
         };
         let effects = shell.active_mut().enter();
         (shell, effects)
@@ -125,6 +156,7 @@ impl Shell {
             next_id,
             layout: Layout::default(),
             touched: false,
+            default_scenes: None,
         };
         let effects = shell.active_mut().enter();
         Some((shell, effects))
@@ -237,7 +269,10 @@ impl Shell {
         self.touched = true;
         let len = self.tabs.len();
         let effects = match msg {
-            ShellMsg::Section(section) => self.active_mut().open_section(section),
+            ShellMsg::Section(section) => {
+                let fresh = self.fresh(section);
+                self.active_mut().open_section_with(section, fresh)
+            }
             ShellMsg::Open(screen) => self.active_mut().open(screen),
             ShellMsg::OpenInNewTab(screen) => self.new_tab(self.selected + 1, screen),
             ShellMsg::Back => self.active_mut().back(),
@@ -278,15 +313,36 @@ impl Shell {
                     return Step::none();
                 };
                 let Step { mut effects, up } = state.update(m, tab, &layout);
-                if let Some(ScenesUp::Open { id, title, new_tab }) = up {
-                    let screen = Screen::scene(&id, &title);
-                    effects.extend(if new_tab {
-                        self.new_tab(self.selected + 1, screen)
-                    } else {
-                        self.active_mut().open(screen)
-                    });
+                match up {
+                    Some(ScenesUp::Open { id, title, new_tab }) => {
+                        let screen = Screen::scene(&id, &title);
+                        effects.extend(if new_tab {
+                            self.new_tab(self.selected + 1, screen)
+                        } else {
+                            self.active_mut().open(screen)
+                        });
+                    }
+                    Some(ScenesUp::Need(need)) => {
+                        return Step {
+                            effects,
+                            up: Some(Up::Need(need)),
+                        }
+                    }
+                    None => {}
                 }
                 effects
+            }
+            ShellMsg::FilterTo { criterion, new_tab } => self.filter_to(criterion, new_tab),
+            ShellMsg::PlaybackChange(change) => return Step::up(Up::PlaybackChange(change)),
+            ShellMsg::Scene(m) => {
+                let tab = self.active().id;
+                let Screen::Scene(state) = self.active_mut().current_mut() else {
+                    return Step::none();
+                };
+                let id = state.scene_id.clone();
+                return state.update(m, tab).map_up(|up| match up {
+                    crate::screens::scene::SceneUp::PlayAt(seconds) => Up::PlayAt { id, seconds },
+                });
             }
             ShellMsg::Play(id) => return Step::up(Up::Play(id)),
             ShellMsg::ServerMenu => return Step::up(Up::ServerMenu),
@@ -317,6 +373,39 @@ impl Shell {
             })
             .map(|state| state.page_loaded(generation, result, waiting))
             .unwrap_or_default()
+    }
+
+    /// A search's debounce came due for tab `tab`.
+    pub fn search_due(&mut self, tab: TabId, generation: u64) -> Vec<Effect> {
+        let Some(i) = self.index_of(tab) else {
+            return Vec::new();
+        };
+        self.tabs[i]
+            .history
+            .iter_mut()
+            .find_map(|screen| match screen {
+                Screen::Scenes(state) if state.awaits_search(generation) => Some(state),
+                _ => None,
+            })
+            .map(|state| state.search_due(generation))
+            .unwrap_or_default()
+    }
+
+    /// Open Scenes filtered to `criterion` (a performer, tag, or studio chip), here or in a new
+    /// tab (008 FR-006).
+    pub fn filter_to(
+        &mut self,
+        criterion: stash_core::scenes::filter::Criterion,
+        new_tab: bool,
+    ) -> Vec<Effect> {
+        let mut state = crate::screens::ScenesState::default();
+        state.query.criteria = vec![criterion];
+        let screen = Screen::Scenes(Box::new(state));
+        if new_tab {
+            self.new_tab(self.selected + 1, screen)
+        } else {
+            self.active_mut().open(screen)
+        }
     }
 
     /// Every Settings screen, in every tab (results for Settings reach them all).
@@ -379,6 +468,74 @@ impl Shell {
         if let Some(state) = self.scene_in(tab, id) {
             state.details_loaded(result);
         }
+    }
+
+    /// A scene's files arrived for tab `tab`.
+    pub fn scene_files(
+        &mut self,
+        tab: TabId,
+        id: &str,
+        result: Result<Vec<stash_core::scenes::FileFacts>, AppError>,
+    ) {
+        if let Some(state) = self.scene_in(tab, id) {
+            state.files_loaded(result);
+        }
+    }
+
+    /// A scene's galleries arrived for tab `tab`.
+    pub fn scene_galleries(
+        &mut self,
+        tab: TabId,
+        id: &str,
+        result: Result<Vec<stash_core::scenes::GalleryChip>, AppError>,
+    ) {
+        if let Some(state) = self.scene_in(tab, id) {
+            state.galleries_loaded(result);
+        }
+    }
+
+    /// The tag colours were saved (or not): every Tag colours page shows it.
+    pub fn tag_colours_saved(
+        &mut self,
+        result: &Result<stash_core::adapter::filters::UiSettings, AppError>,
+    ) {
+        for s in self.settings_screens() {
+            s.tag_colours.saved(match result {
+                Ok(settings) => Ok(settings.colour_rules.clone()),
+                Err(e) => Err(crate::messages::for_error(e).title.to_owned()),
+            });
+        }
+    }
+
+    /// The server's colour rules: Tag colours pages not being edited show them.
+    pub fn sync_tag_colours(&mut self, rules: &[stash_core::semantic::ColourRule]) {
+        for s in self.settings_screens() {
+            s.tag_colours.sync(rules.to_vec());
+        }
+    }
+
+    /// Whether the active screen is Settings → Tag colours.
+    pub fn tag_colours_open(&self) -> bool {
+        matches!(
+            self.active().current(),
+            Screen::Settings(s) if s.page == crate::screens::settings::SettingsPage::TagColours
+        )
+    }
+
+    /// A chip rest came due in tab `tab`: the chip, if the pointer is still on it.
+    pub fn chip_rested(
+        &mut self,
+        tab: TabId,
+        generation: u64,
+    ) -> Option<crate::screens::scene::ChipRef> {
+        let i = self.index_of(tab)?;
+        self.tabs[i]
+            .history
+            .iter_mut()
+            .find_map(|screen| match screen {
+                Screen::Scene(s) if s.awaits_rest(generation) => s.chip_rested(generation),
+                _ => None,
+            })
     }
 
     /// A scene's cover arrived for tab `tab`.

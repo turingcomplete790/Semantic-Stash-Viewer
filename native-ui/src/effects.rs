@@ -96,6 +96,44 @@ pub enum Effect {
         keys: Vec<ThumbKey>,
         width: u32,
     },
+    /// Read the server's UI settings through the cache (008: default filter, play settings,
+    /// tag colour rules).
+    LoadUiSettings,
+    /// Read the saved scene filters through the cache.
+    LoadSavedFilters,
+    /// Read a picker's list through the cache.
+    LoadChoices(stash_core::adapter::choices::ChoiceKind),
+    /// Read the semantic vocabulary (and these colour rules' matches) through the cache.
+    LoadVocabulary(Vec<stash_core::semantic::ColourRule>),
+    /// The search box's debounce: report back after `after` (008 FR-001).
+    SearchDue {
+        tab: TabId,
+        generation: u64,
+        after: std::time::Duration,
+    },
+    /// Read a scene's "All files" section through the cache.
+    LoadSceneFiles {
+        tab: TabId,
+        id: String,
+    },
+    /// Read a scene's galleries through the cache.
+    LoadSceneGalleries {
+        tab: TabId,
+        id: String,
+    },
+    /// Read one chip's card through the cache.
+    LoadChipDetails {
+        kind: stash_core::adapter::chips::ChipKind,
+        id: String,
+    },
+    /// A chip hover's rest: report back after `after` (008 FR-011b: 400 ms).
+    ChipRestDue {
+        tab: TabId,
+        generation: u64,
+        after: std::time::Duration,
+    },
+    /// Save the tag colour rules to Stash (the one settings write, FR-003g).
+    SaveTagColours(Vec<stash_core::semantic::ColourRule>),
     /// Read a scene's details through the cache, for the Scene screen in `tab`.
     LoadSceneDetails {
         tab: TabId,
@@ -162,8 +200,58 @@ pub enum Effect {
     },
     /// Enter or leave fullscreen.
     SetFullscreen(bool),
-    /// Look up a scene and start playing it.
-    OpenScene(String),
+    /// Open a scene in the player, at `start` seconds (a marker) or, with `resume`, at its
+    /// cached resume point, otherwise from the beginning.
+    OpenScene {
+        id: String,
+        start: Option<f64>,
+        resume: bool,
+    },
+    /// Play Stash's transcode after a decode failure the user chose to work around (008 R10).
+    OpenTranscoded {
+        id: String,
+        reason: String,
+    },
+    /// Queue a play history report for a server and send what's queued (008 contracts/play-history.md).
+    SavePlayHistory {
+        profile: Uuid,
+        report: stash_core::playback::history::PlayHistoryReport,
+    },
+    /// Send a server's queued play history (on reconnect; for `deadline` after a server switch).
+    FlushPlayHistory {
+        profile: Uuid,
+        deadline: Option<std::time::Duration>,
+    },
+    /// Play history couldn't be saved yet: one notification per server, updated.
+    PlayHistoryUnsaved {
+        profile: Uuid,
+        left: usize,
+    },
+    /// The bench (Testing only): send a simulated 10-minute viewing's play history.
+    SimulateViewing {
+        scene_id: String,
+    },
+    /// Report back after the preview rest (008 FR-019).
+    PreviewDue {
+        generation: u64,
+        after: std::time::Duration,
+    },
+    /// Load and decode a scene's preview at `width` pixels.
+    LoadPreview {
+        scene_id: String,
+        generation: u64,
+        width: u32,
+    },
+    /// Stop decoding a preview that was left.
+    StopPreview,
+    /// Load and decode the playing scene's seek-bar sprites (008 FR-021).
+    LoadSprite {
+        scene_id: String,
+    },
+    /// Read Settings → Playback from disk.
+    LoadPlaybackPreferences,
+    /// Write Settings → Playback.
+    SavePlaybackPreferences(crate::services::settings::PlaybackPreferences),
     /// A playback control.
     Player(PlayerAction),
     /// Stop playback and the video path, then leave the app.
@@ -181,7 +269,26 @@ pub enum Reply {
     ProfileCreated(Result<ServerProfile, AppError>),
     ProfileUpdated(Result<ServerProfile, AppError>),
     Profiles(Vec<ServerProfile>),
-    SceneOpened(Result<(), AppError>),
+    /// A scene opened; the resume point it started at, if it resumed.
+    SceneOpened(Result<Option<f64>, AppError>),
+    /// A flush of a server's play history finished.
+    PlayHistoryFlushed {
+        profile: Uuid,
+        outcome: stash_core::playback::history::FlushOutcome,
+    },
+    PlaybackPreferences(crate::services::settings::PlaybackPreferences),
+    PreviewDue(u64),
+    /// More of a preview's frames (`done`: that's all of them; none at all: the scene has none).
+    Preview {
+        generation: u64,
+        frames: crate::screens::scenes::preview::Frames,
+        done: bool,
+    },
+    /// The playing scene's seek-bar sprites (`None`: it has none).
+    Sprite {
+        scene_id: String,
+        sheet: Option<crate::player::view::Sprites>,
+    },
     Summary {
         tab: TabId,
         info: Option<ServerInfo>,
@@ -217,6 +324,38 @@ pub enum Reply {
         profile: Uuid,
         saved: Option<SavedSession>,
     },
+    UiSettings(Result<stash_core::adapter::filters::UiSettings, AppError>),
+    SavedFilters(Result<Vec<stash_core::scenes::filter::saved::SavedFilter>, AppError>),
+    Choices {
+        kind: stash_core::adapter::choices::ChoiceKind,
+        result: Result<stash_core::adapter::choices::ChoiceList, AppError>,
+    },
+    Vocabulary(Result<stash_core::semantic::SemanticVocabulary, AppError>),
+    /// A search's debounce is over.
+    SearchDue {
+        tab: TabId,
+        generation: u64,
+    },
+    SceneFiles {
+        tab: TabId,
+        id: String,
+        result: Result<Vec<stash_core::scenes::FileFacts>, AppError>,
+    },
+    SceneGalleries {
+        tab: TabId,
+        id: String,
+        result: Result<Vec<stash_core::scenes::GalleryChip>, AppError>,
+    },
+    ChipDetails {
+        kind: stash_core::adapter::chips::ChipKind,
+        id: String,
+        result: Result<stash_core::adapter::chips::ChipDetails, AppError>,
+    },
+    ChipRestDue {
+        tab: TabId,
+        generation: u64,
+    },
+    TagColoursSaved(Result<stash_core::adapter::filters::UiSettings, AppError>),
 }
 
 /// Turn an effect into a task.
@@ -305,11 +444,167 @@ pub fn run(effect: Effect, services: &Arc<Services>, window: Option<window::Id>)
                 Message::Reply(Reply::Thumbnails(batch))
             })
         }
+        Effect::LoadUiSettings => {
+            let services = Arc::clone(services);
+            Task::perform(
+                async move {
+                    services
+                        .read_cached(
+                            stash_core::cache::keys::UI_SETTINGS,
+                            RefreshPolicy::Auto,
+                            false,
+                            |client| async move {
+                                stash_core::adapter::filters::ui_settings(&client).await
+                            },
+                        )
+                        .await
+                        .map(|c| c.data)
+                },
+                |result| Message::Reply(Reply::UiSettings(result)),
+            )
+        }
+        Effect::LoadSavedFilters => {
+            let services = Arc::clone(services);
+            Task::perform(
+                async move {
+                    services
+                        .read_cached(
+                            stash_core::cache::keys::SAVED_SCENE_FILTERS,
+                            RefreshPolicy::Auto,
+                            false,
+                            |client| async move {
+                                stash_core::adapter::filters::saved_scene_filters(&client).await
+                            },
+                        )
+                        .await
+                        .map(|c| c.data)
+                },
+                |result| Message::Reply(Reply::SavedFilters(result)),
+            )
+        }
+        Effect::LoadChoices(kind) => {
+            let services = Arc::clone(services);
+            Task::perform(
+                async move {
+                    let key = stash_core::cache::keys::choices(kind.key());
+                    services
+                        .read_cached(&key, RefreshPolicy::Auto, false, move |client| async move {
+                            stash_core::adapter::choices::choice_list(&client, kind).await
+                        })
+                        .await
+                        .map(|c| c.data)
+                },
+                move |result| Message::Reply(Reply::Choices { kind, result }),
+            )
+        }
+        Effect::LoadVocabulary(rules) => {
+            let services = Arc::clone(services);
+            let key = stash_core::cache::keys::semantic_vocabulary(
+                &stash_core::semantic::extra_rule_fields(&rules),
+            );
+            let rules = Arc::new(rules);
+            Task::perform(
+                async move {
+                    services
+                        .read_cached(&key, RefreshPolicy::Auto, false, move |client| {
+                            let rules = Arc::clone(&rules);
+                            async move {
+                                stash_core::adapter::semantic::semantic_vocabulary(&client, &rules)
+                                    .await
+                            }
+                        })
+                        .await
+                        .map(|c| c.data)
+                },
+                |result| Message::Reply(Reply::Vocabulary(result)),
+            )
+        }
+        Effect::SearchDue {
+            tab,
+            generation,
+            after,
+        } => Task::perform(tokio::time::sleep(after), move |()| {
+            Message::Reply(Reply::SearchDue { tab, generation })
+        }),
+        Effect::LoadSceneFiles { tab, id } => {
+            let services = Arc::clone(services);
+            Task::perform(
+                async move {
+                    let key = stash_core::cache::keys::scene_files(&id);
+                    let wanted = id.clone();
+                    let result = services
+                        .read_cached(&key, RefreshPolicy::Auto, false, move |client| {
+                            let id = wanted.clone();
+                            async move {
+                                stash_core::adapter::scene_page::scene_files(&client, &id).await
+                            }
+                        })
+                        .await
+                        .map(|c| c.data);
+                    (id, result)
+                },
+                move |(id, result)| Message::Reply(Reply::SceneFiles { tab, id, result }),
+            )
+        }
+        Effect::LoadSceneGalleries { tab, id } => {
+            let services = Arc::clone(services);
+            Task::perform(
+                async move {
+                    let key = stash_core::cache::keys::scene_galleries(&id);
+                    let wanted = id.clone();
+                    let result = services
+                        .read_cached(&key, RefreshPolicy::Auto, false, move |client| {
+                            let id = wanted.clone();
+                            async move {
+                                stash_core::adapter::scene_page::scene_galleries(&client, &id).await
+                            }
+                        })
+                        .await
+                        .map(|c| c.data);
+                    (id, result)
+                },
+                move |(id, result)| Message::Reply(Reply::SceneGalleries { tab, id, result }),
+            )
+        }
+        Effect::LoadChipDetails { kind, id } => {
+            let services = Arc::clone(services);
+            Task::perform(
+                async move {
+                    let key = stash_core::cache::keys::chip(kind.key(), &id);
+                    let wanted = id.clone();
+                    let result = services
+                        .read_cached(&key, RefreshPolicy::Auto, false, move |client| {
+                            let id = wanted.clone();
+                            async move {
+                                stash_core::adapter::chips::chip_details(&client, kind, &id).await
+                            }
+                        })
+                        .await
+                        .map(|c| c.data);
+                    (id, result)
+                },
+                move |(id, result)| Message::Reply(Reply::ChipDetails { kind, id, result }),
+            )
+        }
+        Effect::ChipRestDue {
+            tab,
+            generation,
+            after,
+        } => Task::perform(tokio::time::sleep(after), move |()| {
+            Message::Reply(Reply::ChipRestDue { tab, generation })
+        }),
+        Effect::SaveTagColours(rules) => {
+            let services = Arc::clone(services);
+            Task::perform(
+                async move { services.save_tag_colours(rules).await },
+                |result| Message::Reply(Reply::TagColoursSaved(result)),
+            )
+        }
         Effect::LoadSceneDetails { tab, id } => {
             let services = Arc::clone(services);
             Task::perform(
                 async move {
-                    let key = format!("scene:details:{id}");
+                    let key = stash_core::cache::keys::scene_details(&id);
                     let wanted = id.clone();
                     let result =
                         services
@@ -472,11 +767,155 @@ pub fn run(effect: Effect, services: &Arc<Services>, window: Option<window::Id>)
                 None => Task::none(),
             }
         }
-        Effect::OpenScene(id) => {
+        Effect::OpenScene { id, start, resume } => {
             let services = Arc::clone(services);
             Task::perform(
-                async move { services.open_scene(&id).await.map(|_| ()) },
+                async move {
+                    services
+                        .open_scene(&id, start, resume)
+                        .await
+                        .map(|(_, resumed)| resumed)
+                },
                 |result| Message::Reply(Reply::SceneOpened(result)),
+            )
+        }
+        Effect::OpenTranscoded { id, reason } => {
+            let services = Arc::clone(services);
+            Task::perform(
+                async move { services.open_transcoded(&id, &reason).await.map(|()| None) },
+                |result| Message::Reply(Reply::SceneOpened(result)),
+            )
+        }
+        Effect::SavePlayHistory { profile, report } => {
+            // In memory now, so a flush (or the quit's) that follows includes it.
+            services.queue_play_history(profile, report);
+            flush_play_history(services, profile, None)
+        }
+        Effect::FlushPlayHistory { profile, deadline } => {
+            flush_play_history(services, profile, deadline)
+        }
+        Effect::PlayHistoryUnsaved { profile, left } => {
+            services
+                .notifications
+                .post(stash_core::shell::notifications::NewNotification {
+                    key: Some(format!("play-history:{profile}")),
+                    profile_id: Some(profile),
+                    kind: stash_core::shell::notifications::NotificationKind::Playback,
+                    severity: stash_core::shell::notifications::Severity::Warning,
+                    title: "Play history couldn't be saved yet".into(),
+                    detail: Some(format!(
+                        "{left} {} waiting; it's sent when the server can be reached.",
+                        if left == 1 {
+                            "update is"
+                        } else {
+                            "updates are"
+                        }
+                    )),
+                    toast: false,
+                    job: None,
+                });
+            Task::none()
+        }
+        Effect::SimulateViewing { scene_id } => {
+            let services = Arc::clone(services);
+            Task::perform(
+                async move {
+                    use stash_core::playback::history::Viewing;
+                    let Ok((client, _, _)) = services.active_client() else {
+                        return;
+                    };
+                    let Some(mut viewing) = Viewing::start(&scene_id, None, true) else {
+                        return;
+                    };
+                    // An update every quarter-second for ten minutes, as the player sends them.
+                    let mut reports = Vec::new();
+                    for i in 0..=(600 * 4) {
+                        let t = f64::from(i) * 0.25;
+                        reports.extend(viewing.observe(t, true, t, Some(3600.0)));
+                    }
+                    reports.extend(viewing.end(600.0));
+                    for r in &reports {
+                        if let Err(e) = stash_core::adapter::activity::send_report(&client, r).await
+                        {
+                            tracing::warn!(error = %e, "bench viewing: a report failed");
+                        }
+                    }
+                },
+                |()| Message::Idle,
+            )
+        }
+        Effect::PreviewDue { generation, after } => {
+            Task::perform(tokio::time::sleep(after), move |()| {
+                Message::Reply(Reply::PreviewDue(generation))
+            })
+        }
+        Effect::LoadPreview {
+            scene_id,
+            generation,
+            width,
+        } => {
+            services.want_preview(Some(generation));
+            Task::run(
+                preview_frames(Arc::clone(services), scene_id, generation, width),
+                move |(frames, done)| {
+                    Message::Reply(Reply::Preview {
+                        generation,
+                        frames,
+                        done,
+                    })
+                },
+            )
+        }
+        Effect::StopPreview => {
+            services.want_preview(None);
+            Task::none()
+        }
+        Effect::LoadSprite { scene_id } => {
+            let services = Arc::clone(services);
+            Task::perform(
+                async move {
+                    let sheet = match services.sprite_sheet(&scene_id).await {
+                        Ok(Some(s)) => Some(crate::player::view::Sprites {
+                            cues: Arc::new(s.cues),
+                            sheet: iced::widget::image::Handle::from_rgba(
+                                s.width, s.height, s.rgba,
+                            ),
+                        }),
+                        Ok(None) => None,
+                        Err(e) => {
+                            tracing::debug!(error = %e, "no seek-bar sprites");
+                            None
+                        }
+                    };
+                    (scene_id, sheet)
+                },
+                |(scene_id, sheet)| Message::Reply(Reply::Sprite { scene_id, sheet }),
+            )
+        }
+        Effect::LoadPlaybackPreferences => {
+            let path = services.paths.playback_preferences();
+            Task::perform(
+                async move {
+                    tokio::task::spawn_blocking(move || crate::services::settings::load(&path))
+                        .await
+                        .unwrap_or_default()
+                },
+                |prefs| Message::Reply(Reply::PlaybackPreferences(prefs)),
+            )
+        }
+        Effect::SavePlaybackPreferences(prefs) => {
+            let path = services.paths.playback_preferences();
+            Task::perform(
+                async move {
+                    let saved = tokio::task::spawn_blocking(move || {
+                        crate::services::settings::save(&path, prefs)
+                    })
+                    .await;
+                    if let Ok(Err(e)) = saved {
+                        tracing::warn!(error = %e, "couldn't save the playback settings");
+                    }
+                },
+                |()| Message::Idle,
             )
         }
         Effect::Player(action) => {
@@ -492,15 +931,113 @@ pub fn run(effect: Effect, services: &Arc<Services>, window: Option<window::Id>)
             if let Some(p) = &services.player {
                 p.close();
             }
-            iced::exit()
+            // The final play history report is queued; give the server up to 2 s to take what's
+            // waiting, and leave the rest for next time (contracts/play-history.md).
+            let services = Arc::clone(services);
+            Task::perform(
+                async move {
+                    if let Some(profile) = services.current_profile() {
+                        let deadline = std::time::Instant::now()
+                            + stash_core::playback::history::FLUSH_DEADLINE;
+                        let _ = services.flush_play_history(profile, Some(deadline)).await;
+                    }
+                },
+                |()| (),
+            )
+            .then(|()| iced::exit())
         }
     }
+}
+
+/// How often a decoding preview hands over the frames that are ready, after the first.
+const PREVIEW_BATCH: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// A card preview's frames as they decode: the first at once (the preview starts playing), then
+/// the rest in batches, then `done`. Decoding stops when another preview is wanted.
+fn preview_frames(
+    services: Arc<Services>,
+    scene_id: String,
+    generation: u64,
+    width: u32,
+) -> impl iced::futures::Stream<Item = (crate::screens::scenes::preview::Frames, bool)> {
+    iced::stream::channel(8, async move |mut out| {
+        use iced::futures::SinkExt;
+        let bytes = match services.preview_file(&scene_id).await {
+            Ok(Some(bytes)) => bytes,
+            Ok(None) => {
+                let _ = out.send((Vec::new(), true)).await;
+                return;
+            }
+            Err(e) => {
+                tracing::debug!(error = %e, "no preview");
+                let _ = out.send((Vec::new(), true)).await;
+                return;
+            }
+        };
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let wanted = Arc::clone(&services);
+        let decode = tokio::task::spawn_blocking(move || {
+            stash_core::previews::decode_preview_each(&bytes, width, |frame| {
+                wanted.preview_wanted(generation) && tx.send(frame).is_ok()
+            })
+        });
+        let mut batch = Vec::new();
+        let mut sent_first = false;
+        let mut last = std::time::Instant::now();
+        while let Some(f) = rx.recv().await {
+            batch.push((
+                iced::widget::image::Handle::from_rgba(f.width, f.height, f.rgba),
+                std::time::Duration::from_millis(u64::from(f.delay_ms)),
+            ));
+            if !sent_first || last.elapsed() >= PREVIEW_BATCH {
+                sent_first = true;
+                last = std::time::Instant::now();
+                if out.send((std::mem::take(&mut batch), false)).await.is_err() {
+                    return;
+                }
+            }
+        }
+        if let Ok(Err(e)) = decode.await {
+            tracing::debug!(error = %e, "a preview couldn't be decoded");
+        }
+        let _ = out.send((batch, true)).await;
+    })
+}
+
+/// Send `profile`'s queued play history in the background and report back.
+fn flush_play_history(
+    services: &Arc<Services>,
+    profile: Uuid,
+    deadline: Option<std::time::Duration>,
+) -> Task<Message> {
+    let services = Arc::clone(services);
+    Task::perform(
+        async move {
+            let deadline = deadline.map(|d| std::time::Instant::now() + d);
+            services.flush_play_history(profile, deadline).await
+        },
+        move |outcome| Message::Reply(Reply::PlayHistoryFlushed { profile, outcome }),
+    )
 }
 
 /// How long arriving thumbnails are gathered before they're handed over.
 const THUMB_BATCH: std::time::Duration = std::time::Duration::from_millis(100);
 /// Requests kept in flight (the core's `ThumbService` limits the real concurrency).
 const THUMB_IN_FLIGHT: usize = 12;
+
+/// Which cached image a thumbnail key draws on, as the core's `ThumbService` names it. Performer
+/// images are keyed `performer:<id>`, and their portraits `portrait:<id>`: the same cached image,
+/// decoded larger, so a portrait never downloads again. Scene thumbnails are keyed by scene id.
+pub fn thumb_source(key: &ThumbKey) -> (&'static str, &str) {
+    match key
+        .0
+        .strip_prefix("performer:")
+        .or_else(|| key.0.strip_prefix("portrait:"))
+    {
+        Some(id) => ("performer", id),
+        None => ("scene", key.0.as_str()),
+    }
+}
 
 /// One thumbnail, decoded off the UI thread at the width it's drawn, so iced has nothing to
 /// decode or scale (scrolling stays smooth while rows of them appear).
@@ -509,8 +1046,9 @@ async fn fetch_thumb(
     key: ThumbKey,
     width: u32,
 ) -> (ThumbKey, Option<iced::widget::image::Handle>) {
+    let (kind, id) = thumb_source(&key);
     let bytes = match service {
-        Some(t) => t.get("scene", &key.0, &key.1).await,
+        Some(t) => t.get(kind, id, &key.1).await,
         None => None,
     };
     let Some(bytes) = bytes.filter(|b| b.as_slice() != stash_core::thumbs::PLACEHOLDER) else {

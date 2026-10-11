@@ -1,0 +1,5 @@
+mutation AddPlay($id: ID!) {
+  sceneAddPlay(id: $id) {
+    count
+  }
+}

@@ -9,11 +9,15 @@ Jellyfin server.
 
 > **Status:** pre-alpha. Saved servers with automatic reconnection and a connection-security
 > indicator; a Stash-style navigation bar with tabs that never reset and come back exactly after
-> a restart; the whole scene library as a paged grid or list in every web UI sort, with
-> thumbnails; a scene view; mpv playback inside the window with the viewer's own controls; a
+> a restart; the whole scene library as a paged grid, list, or wall in every web UI sort, with
+> search, every web UI filter, saved and default filters, and animated previews on hover; the full
+> scene page (performers, tags marked by semantic type and coloured by rules you set, groups,
+> markers, files, galleries); mpv playback inside the window with resume, markers as chapters,
+> seek-bar thumbnails, play history saved to Stash, and an explicit transcode fallback; a
 > notification centre with live Stash jobs; and Settings. Screens open from a local cache and stay
-> usable offline, and one command measures every performance budget. Search, filters, and the
-> rest of the library come next (see the [roadmap](ROADMAP.md)). The project is specified with
+> usable offline, every Stash request has a written budget, and one command measures every
+> performance budget. Images, galleries, the other entities, and the semantic recommendations
+> come next (see the [roadmap](ROADMAP.md)). The project is specified with
 > [Spec Kit](https://github.com/github/spec-kit), and its governing rules live in the
 > [constitution](.specify/memory/constitution.md).
 
@@ -45,7 +49,7 @@ Jellyfin server.
 ## Requirements
 
 - Stash **v0.31.1** or newer
-- Linux with a Vulkan driver (Mesa RADV, ANV, or NVIDIA) and libmpv; Wayland or X11
+- Linux with a Vulkan driver (Mesa RADV, ANV, or NVIDIA), libmpv, and RocksDB; Wayland or X11
 - Windows and macOS are planned where iced and mpv allow
 
 ## Development
@@ -56,6 +60,8 @@ Jellyfin server.
 - libmpv with its development headers: `mpv` on Arch/Manjaro, `libmpv-dev` on Debian/Ubuntu.
   VA-API drivers are optional but give hardware decoding.
 - libturbojpeg (`libjpeg-turbo` on Arch/Manjaro, `libturbojpeg0-dev` on Debian/Ubuntu)
+- RocksDB with its development headers: `rocksdb` on Arch/Manjaro, `librocksdb-dev` on
+  Debian/Ubuntu. The semantic engine's on-disk store (Oxigraph) keeps its index there as a cache.
 - A Vulkan driver and libEGL (part of Mesa on most systems)
 
 ### Run
@@ -83,8 +89,10 @@ from inside the app. If you used the earlier web demo, its `semantic-stash-viewe
 - Ctrl+T / Ctrl+W new / close tab, Ctrl+Tab, Ctrl+PageUp/PageDown, and Ctrl+1–9 to switch,
   Ctrl+Shift+PageUp/PageDown to move a tab
 - Alt+←/→ (or the mouse's back and forward buttons) to go back and forward
-- In Scenes: arrows, Home/End, `[` `]` for pages, Enter to open, Ctrl+Enter in a new tab
-- In the player: Space, ←/→, ↑/↓, `[` `]` `\`, `.` `,`, F, M, Esc
+- In Scenes: arrows, Home/End, `[` `]` for pages, Enter to open, Ctrl+Enter in a new tab, `/`
+  to search, F for the filter menu, S for saved filters
+- In the player: Space, ←/→, ↑/↓, `[` `]` `\`, `.` `,`, F, M, Esc, PageUp/PageDown for the
+  previous/next chapter (scene markers)
 - F1 or `?` lists every shortcut
 
 ### Layout
@@ -114,15 +122,20 @@ doing one thing, in the two crates that need it (`player`, `native-ui`); none in
 
 Measures every budget from the constitution against one of your saved servers: cold start,
 navigation, control presses, tab switching with a video playing, Scenes paging and 1000-card
-scrolling, playback (open, seek, dropped and displayed frames), and memory and CPU:
+scrolling (grid, list, and wall), card previews, pickers, playback (open, seek, dropped and
+displayed frames), memory and CPU, and the requests each action sends to Stash against its
+budget (the `gql-*` rows):
 
 ```bash
 cargo run -p perf-harness -- --profile "<server name>"            # --quick for fewer runs
 cargo run -p perf-harness -- --profile "<server name>" --scenes 1,2,3 --long 1   # pin scenes
+cargo run -p perf-harness -- --profile "<test server>" --allow-writes   # also the write rows
 ```
 
-It builds the debug app, launches it several times (keep the window visible), and takes about
-3 minutes. It only reads from Stash. Reports go to
+It builds the debug app, launches it several times (keep the window visible), and takes several
+minutes. It only reads from Stash unless given `--allow-writes`, which adds the rows that write
+(saving the tag colour rules it read, and a simulated 10-minute viewing's play history): use that
+only on a disposable test server. Reports go to
 `~/.local/share/dev.semantic-stash-viewer/perf/<timestamp>.{md,json}`, each with the change since
 the previous run; anything more than 20% slower is flagged, and it exits non-zero if a budget
 fails.

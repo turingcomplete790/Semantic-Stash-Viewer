@@ -1,0 +1,8 @@
+query ChoiceListGalleries($filter: FindFilterType!) {
+  findGalleries(filter: $filter) {
+    galleries {
+      id
+      title
+    }
+  }
+}

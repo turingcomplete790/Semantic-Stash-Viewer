@@ -1,0 +1,22 @@
+query ScenesPage($filter: FindFilterType!, $sceneFilter: SceneFilterType) {
+  findScenes(filter: $filter, scene_filter: $sceneFilter) {
+    count
+    scenes {
+      id
+      title
+      date
+      files {
+        basename
+        duration
+        width
+        height
+      }
+      studio {
+        name
+      }
+      paths {
+        screenshot
+      }
+    }
+  }
+}

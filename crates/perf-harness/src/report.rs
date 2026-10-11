@@ -14,6 +14,8 @@ pub enum Unit {
     Percent,
     /// Megabytes of memory.
     Mb,
+    /// Kilobytes of response payload (`gql-*` rows).
+    Kb,
 }
 
 impl Unit {
@@ -28,6 +30,7 @@ impl Unit {
             Unit::Count => "",
             Unit::Percent => "%",
             Unit::Mb => "MB",
+            Unit::Kb => "KB",
         }
     }
 }
@@ -179,6 +182,147 @@ pub struct Report {
     #[serde(default = "web_app")]
     pub app: String,
     pub measurements: Vec<Measurement>,
+}
+
+/// The request budget of each live audit row (008 contracts/query-budget.md "Live audit rows"):
+/// the most GraphQL requests the scenario may send. Rows not listed are reported as info.
+pub const GQL_BUDGETS: &[(&str, f64)] = &[
+    // A page shown on page 1 also prefetches its one neighbour (contract: 1 per page shown plus
+    // 1 per neighbour).
+    ("gql-page-50", 2.0),
+    ("gql-page-1000", 2.0),
+    ("gql-filter-apply", 2.0),
+    ("gql-scene-page", 1.0),
+    ("gql-scene-files", 1.0),
+    ("gql-scene-galleries", 1.0),
+    ("gql-chip-rest", 1.0),
+    ("gql-chip-portrait", 0.0),
+    ("gql-chip-sweep", 0.0),
+    ("gql-picker-cold", 1.0),
+    ("gql-picker-cached", 0.0),
+    ("gql-vocabulary-cold", 1.0),
+    ("gql-tags-picker-cold", 2.0),
+    ("gql-tag-colours-save", 2.0),
+    ("gql-viewing-10min-writes", 12.0),
+];
+
+/// Scrolling budgets by view (constitution 5.1.0, Principle VI): measured on a 144 Hz display, the
+/// scene grid misses at most 3% of frames and other scrolled views (lists, the wall) at most 1%. A
+/// missed frame takes over 1.5× the display's frame time (007 research R8).
+pub const GRID_SCROLL_BUDGET: f64 = 3.0;
+pub const VIEW_SCROLL_BUDGET: f64 = 1.0;
+/// The refresh rates counted as the 144 Hz display the grid budget is set for.
+pub const GRID_SCROLL_HZ: std::ops::RangeInclusive<f64> = 139.0..=149.0;
+
+/// A scroll row's missed frames against its view's budget. A grid row measured at another refresh
+/// rate (or without one) is invalid: its budget only holds at 144 Hz.
+pub fn scroll_measurement(
+    name: &str,
+    grid: bool,
+    missed: Option<f64>,
+    refresh_hz: Option<f64>,
+    invalid: Option<String>,
+) -> Measurement {
+    let budget = if grid {
+        GRID_SCROLL_BUDGET
+    } else {
+        VIEW_SCROLL_BUDGET
+    };
+    let invalid = invalid
+        .or_else(|| missed.is_none().then(|| "not measured".to_owned()))
+        .or_else(|| {
+            if !grid {
+                return None;
+            }
+            match refresh_hz {
+                Some(hz) if GRID_SCROLL_HZ.contains(&hz) => None,
+                Some(hz) => Some(format!("measured at {hz:.0} Hz, not 144")),
+                None => Some("refresh rate not reported".to_owned()),
+            }
+        });
+    Measurement::from_samples(
+        name,
+        Unit::Percent,
+        Some(budget),
+        &missed.into_iter().collect::<Vec<_>>(),
+        invalid,
+    )
+}
+
+/// One scenario's recorded requests, as the UI bench prints them
+/// (`{"bench": "gql", "row", "requests": {operation: count}, "bytes", "ms": [...]}`).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct GqlRow {
+    pub row: String,
+    pub requests: usize,
+    /// Image downloads (plain GETs) in the same scenario.
+    pub downloads: usize,
+    pub bytes: usize,
+    pub ms: Vec<f64>,
+}
+
+/// Image downloads allowed in a scenario, where the contract sets them (008 T056a: a performer
+/// card's portrait comes from the image its chip already cached).
+pub const DOWNLOAD_BUDGETS: &[(&str, f64)] = &[("gql-chip-rest", 0.0), ("gql-chip-portrait", 0.0)];
+
+/// A scenario's three rows: its request count against the budget, its response size (flagged when
+/// more than 20% larger than the previous report), and the server time per request; plus its
+/// image downloads where [`DOWNLOAD_BUDGETS`] sets a budget.
+pub fn gql_measurements(row: &GqlRow, invalid: Option<String>) -> Vec<Measurement> {
+    let budget = GQL_BUDGETS
+        .iter()
+        .find(|(name, _)| *name == row.row)
+        .map(|(_, b)| *b);
+    #[allow(clippy::cast_precision_loss)]
+    let requests = row.requests as f64;
+    #[allow(clippy::cast_precision_loss)]
+    let kb = row.bytes as f64 / 1024.0;
+    let time = if row.ms.is_empty() {
+        // No requests is a valid outcome (a cached picker); there's just no time to report.
+        Measurement::from_samples(
+            &format!("{}-server-time", row.row),
+            Unit::Ms,
+            None,
+            &[0.0],
+            invalid.clone(),
+        )
+    } else {
+        Measurement::new(
+            &format!("{}-server-time", row.row),
+            Unit::Ms,
+            None,
+            Check::Median,
+            summarise(&row.ms),
+            invalid.clone(),
+        )
+    };
+    let downloads = DOWNLOAD_BUDGETS
+        .iter()
+        .find(|(name, _)| *name == row.row)
+        .map(|(_, b)| {
+            #[allow(clippy::cast_precision_loss)]
+            let n = row.downloads as f64;
+            Measurement::from_samples(
+                &format!("{}-downloads", row.row),
+                Unit::Count,
+                Some(*b),
+                &[n],
+                invalid.clone(),
+            )
+        });
+    let mut out = vec![
+        Measurement::from_samples(&row.row, Unit::Count, budget, &[requests], invalid.clone()),
+        Measurement::from_samples(
+            &format!("{}-payload", row.row),
+            Unit::Kb,
+            None,
+            &[kb],
+            invalid,
+        ),
+        time,
+    ];
+    out.extend(downloads);
+    out
 }
 
 fn web_app() -> String {
@@ -411,6 +555,112 @@ mod tests {
         let json = serde_json::to_string(&r).expect("json");
         let back: Report = serde_json::from_str(&json).expect("round trip");
         assert_eq!(back, r);
+    }
+
+    #[test]
+    fn a_gql_row_over_budget_fails_and_payload_growth_is_flagged() {
+        let row = GqlRow {
+            row: "gql-scene-page".into(),
+            requests: 2,
+            downloads: 0,
+            bytes: 12 * 1024,
+            ms: vec![10.0, 20.0, 30.0],
+        };
+        let rows = gql_measurements(&row, None);
+        assert_eq!(rows[0].name, "gql-scene-page");
+        assert_eq!(
+            rows[0].result,
+            Outcome::Fail,
+            "2 requests against a budget of 1"
+        );
+        assert_eq!(rows[1].name, "gql-scene-page-payload");
+        assert_eq!(rows[1].median, 12.0);
+        assert_eq!(rows[2].median, 20.0);
+
+        let mut now = report(gql_measurements(
+            &GqlRow {
+                bytes: 15 * 1024,
+                ..row.clone()
+            },
+            None,
+        ));
+        now.compare(Some(&report(rows)));
+        assert!(
+            now.measurements[1].regressed,
+            "25% larger payload is flagged"
+        );
+    }
+
+    #[test]
+    fn a_cached_scenario_with_no_requests_passes_its_zero_budget() {
+        let rows = gql_measurements(
+            &GqlRow {
+                row: "gql-picker-cached".into(),
+                ..GqlRow::default()
+            },
+            None,
+        );
+        assert_eq!(rows[0].result, Outcome::Pass);
+        assert_eq!(rows[2].result, Outcome::Info);
+    }
+
+    #[test]
+    fn an_unlisted_row_is_info() {
+        let rows = gql_measurements(
+            &GqlRow {
+                row: "gql-something-new".into(),
+                requests: 3,
+                ..GqlRow::default()
+            },
+            None,
+        );
+        assert_eq!(rows[0].result, Outcome::Info);
+    }
+
+    #[test]
+    fn a_portrait_that_downloads_fails_its_download_budget() {
+        let row = |downloads| GqlRow {
+            row: "gql-chip-portrait".into(),
+            downloads,
+            ..GqlRow::default()
+        };
+        let rows = gql_measurements(&row(0), None);
+        let downloads = rows
+            .iter()
+            .find(|m| m.name == "gql-chip-portrait-downloads")
+            .expect("a downloads row");
+        assert_eq!(downloads.result, Outcome::Pass);
+        let rows = gql_measurements(&row(1), None);
+        assert!(rows
+            .iter()
+            .any(|m| m.name == "gql-chip-portrait-downloads" && m.result == Outcome::Fail));
+        // Rows without a download budget report none.
+        let rows = gql_measurements(
+            &GqlRow {
+                row: "gql-scene-page".into(),
+                downloads: 3,
+                ..GqlRow::default()
+            },
+            None,
+        );
+        assert!(!rows.iter().any(|m| m.name.ends_with("-downloads")));
+    }
+
+    #[test]
+    fn grid_scrolling_is_judged_at_144_hz_against_3_percent() {
+        let pass = scroll_measurement("grid", true, Some(2.5), Some(144.0), None);
+        assert_eq!(pass.result, Outcome::Pass);
+        let fail = scroll_measurement("grid", true, Some(3.5), Some(143.8), None);
+        assert_eq!(fail.result, Outcome::Fail);
+        let other_rate = scroll_measurement("grid", true, Some(0.5), Some(60.0), None);
+        assert_eq!(other_rate.result, Outcome::Invalid);
+        let unknown = scroll_measurement("grid", true, Some(0.5), None, None);
+        assert_eq!(unknown.result, Outcome::Invalid);
+        // Other views keep 1% and aren't tied to a refresh rate.
+        let list = scroll_measurement("list", false, Some(1.5), Some(60.0), None);
+        assert_eq!(list.result, Outcome::Fail);
+        let wall = scroll_measurement("wall", false, Some(0.7), Some(144.0), None);
+        assert_eq!(wall.result, Outcome::Pass);
     }
 
     #[test]

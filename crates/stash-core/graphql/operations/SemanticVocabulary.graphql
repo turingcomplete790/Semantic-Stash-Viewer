@@ -1,0 +1,66 @@
+query SemanticVocabulary {
+  isLabel: findTags(filter: {per_page: -1}, tag_filter: {custom_fields: [{field: "isLabel", modifier: NOT_NULL}]}) {
+    tags {
+      id
+      name
+      aliases
+      custom_fields
+    }
+  }
+  isAction: findTags(filter: {per_page: -1}, tag_filter: {custom_fields: [{field: "isAction", modifier: NOT_NULL}]}) {
+    tags {
+      id
+      name
+      aliases
+      custom_fields
+    }
+  }
+  isRole: findTags(filter: {per_page: -1}, tag_filter: {custom_fields: [{field: "isRole", modifier: NOT_NULL}]}) {
+    tags {
+      id
+      name
+      aliases
+      custom_fields
+    }
+  }
+  isTrait: findTags(filter: {per_page: -1}, tag_filter: {custom_fields: [{field: "isTrait", modifier: NOT_NULL}]}) {
+    tags {
+      id
+      name
+      aliases
+      custom_fields
+    }
+  }
+  plugtag: findTags(filter: {per_page: -1}, tag_filter: {custom_fields: [{field: "plugtag", modifier: NOT_NULL}]}) {
+    tags {
+      id
+      name
+      aliases
+      custom_fields
+    }
+  }
+  isMiseEnScene: findTags(filter: {per_page: -1}, tag_filter: {custom_fields: [{field: "isMiseEnScene", modifier: NOT_NULL}]}) {
+    tags {
+      id
+      name
+      aliases
+      custom_fields
+    }
+  }
+  isVariation: findTags(filter: {per_page: -1}, tag_filter: {custom_fields: [{field: "isVariation", modifier: NOT_NULL}]}) {
+    tags {
+      id
+      name
+      aliases
+      custom_fields
+    }
+  }
+  variant: findTags(filter: {per_page: -1}, tag_filter: {custom_fields: [{field: "variantOfTagId", modifier: NOT_NULL}]}) {
+    tags {
+      id
+      name
+      aliases
+      custom_fields
+    }
+  }
+}

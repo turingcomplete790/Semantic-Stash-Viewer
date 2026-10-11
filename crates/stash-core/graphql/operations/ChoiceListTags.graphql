@@ -1,0 +1,9 @@
+query ChoiceListTags($filter: FindFilterType!, $tagFilter: TagFilterType!) {
+  findTags(filter: $filter, tag_filter: $tagFilter) {
+    tags {
+      id
+      name
+      aliases
+    }
+  }
+}

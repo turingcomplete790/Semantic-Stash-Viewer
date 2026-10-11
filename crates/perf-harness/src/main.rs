@@ -18,7 +18,9 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-use report::{summarise, Check, Measurement, Report, Unit};
+use report::{
+    gql_measurements, scroll_measurement, summarise, Check, GqlRow, Measurement, Report, Unit,
+};
 
 const LAUNCH_TIMEOUT: Duration = Duration::from_secs(300);
 const LONG_PLAYBACK_SECS: u32 = 60;
@@ -34,6 +36,8 @@ struct Options {
     scenes: String,
     /// The scene for the long playback (`auto`: the newest 1080p one).
     long: String,
+    /// Run the rows that write to the server (play history, colour rules): Testing only.
+    allow_writes: bool,
 }
 
 fn parse_args() -> Result<Options, String> {
@@ -41,6 +45,7 @@ fn parse_args() -> Result<Options, String> {
     let mut quick = false;
     let mut scenes = "auto".to_owned();
     let mut long = "auto".to_owned();
+    let mut allow_writes = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -49,6 +54,7 @@ fn parse_args() -> Result<Options, String> {
             // Pin the scenes so both apps (and runs on different days) play the same files.
             "--scenes" => scenes = args.next().ok_or("--scenes takes a list of ids")?,
             "--long" => long = args.next().ok_or("--long takes a scene id")?,
+            "--allow-writes" => allow_writes = true,
             "-h" | "--help" => return Err(String::new()),
             other => return Err(format!("unknown argument: {other}")),
         }
@@ -58,6 +64,7 @@ fn parse_args() -> Result<Options, String> {
         quick,
         scenes,
         long,
+        allow_writes,
     })
 }
 
@@ -70,7 +77,7 @@ fn main() -> ExitCode {
             }
             eprintln!(
                 "usage: perf-harness --profile \"<display name>\" [--quick] \
-                 [--scenes <id,id,…>] [--long <id>]"
+                 [--scenes <id,id,…>] [--long <id>] [--allow-writes (Testing only)]"
             );
             return ExitCode::from(2);
         }
@@ -138,7 +145,11 @@ fn run(options: &Options) -> Result<Report, String> {
     }
 
     step("UI bench");
-    let bench = launch(&app, &base, &[("SSV_DEBUG_BENCH", "1")])?;
+    let mut bench_env = vec![("SSV_DEBUG_BENCH", "1")];
+    if options.allow_writes {
+        bench_env.push(("SSV_BENCH_WRITES", "1"));
+    }
+    let bench = launch(&app, &base, &bench_env)?;
 
     step("Playback");
     let long_secs = LONG_PLAYBACK_SECS.to_string();
@@ -157,6 +168,8 @@ fn run(options: &Options) -> Result<Report, String> {
     measurements.push(cold_start("cold-start-cleared", None, &cleared));
     measurements.extend(bench_measurements(&bench));
     measurements.extend(scenes_measurements(&bench));
+    measurements.extend(picker_measurements(&bench));
+    measurements.extend(gql_rows(&bench));
     measurements.extend(playback_measurements(&playback));
     measurements.extend(resource_measurements(&bench, &playback));
 
@@ -506,6 +519,39 @@ fn from_bench(
     Measurement::new(name, Unit::Ms, budget, check, summary, invalid)
 }
 
+/// The live query-budget audit (008 contracts/query-budget.md): one `gql` line per scenario.
+fn gql_rows(launch: &Launch) -> Vec<Measurement> {
+    launch
+        .lines
+        .iter()
+        .filter(|l| l.get("bench").and_then(Value::as_str) == Some("gql"))
+        .filter_map(|l| {
+            let row = l.get("row").and_then(Value::as_str)?.to_owned();
+            let requests = l
+                .get("requests")
+                .and_then(Value::as_object)
+                .map_or(0, |ops| ops.values().filter_map(Value::as_u64).sum::<u64>());
+            let downloads = l
+                .get("gets")
+                .and_then(Value::as_object)
+                .map_or(0, |ops| ops.values().filter_map(Value::as_u64).sum::<u64>());
+            let ms = l
+                .get("ms")
+                .and_then(Value::as_array)
+                .map(|v| v.iter().filter_map(Value::as_f64).collect())
+                .unwrap_or_default();
+            Some(GqlRow {
+                row,
+                requests: usize::try_from(requests).unwrap_or(usize::MAX),
+                downloads: usize::try_from(downloads).unwrap_or(usize::MAX),
+                bytes: number(l, "bytes").map_or(0, |b| b as usize),
+                ms,
+            })
+        })
+        .flat_map(|row| gql_measurements(&row, launch.invalid()))
+        .collect()
+}
+
 fn bench_measurements(launch: &Launch) -> Vec<Measurement> {
     let scroll = bench_line(launch, "scroll-frame-time");
     let missed = scroll.and_then(|l| number(l, "missedPercent"));
@@ -529,12 +575,13 @@ fn bench_measurements(launch: &Launch) -> Vec<Measurement> {
             Some(50.0),
             Check::Median,
         ),
-        // 60 fps: under 1% of frames take over 1.5 display frames (research R8).
-        Measurement::from_samples(
+        // 007's grid scroll: at 144 Hz, at most 3% of frames take over 1.5 display frames
+        // (constitution 5.1.0; 007 research R8).
+        scroll_measurement(
             "scroll-missed-frames",
-            Unit::Percent,
-            Some(1.0),
-            &missed.into_iter().collect::<Vec<_>>(),
+            true,
+            missed,
+            scroll.and_then(|l| number(l, "refreshHz")),
             scroll_invalid.clone(),
         ),
         from_bench(
@@ -576,8 +623,54 @@ fn bench_measurements(launch: &Launch) -> Vec<Measurement> {
     ]
 }
 
+/// Finding (008 SC-002a): a cached picker of the whole list opens within 150 ms and narrows on
+/// a key within the input budget (50 ms, drawn).
+fn picker_measurements(launch: &Launch) -> Vec<Measurement> {
+    vec![
+        from_bench(
+            launch,
+            "picker-open-cold",
+            "picker-open-cold",
+            None,
+            Check::Median,
+        ),
+        from_bench(
+            launch,
+            "picker-open",
+            "picker-open",
+            Some(150.0),
+            Check::Median,
+        ),
+        from_bench(
+            launch,
+            "picker-narrow",
+            "picker-narrow",
+            Some(50.0),
+            Check::Median,
+        ),
+        // A card preview starts within 300 ms of the 200 ms hover delay ending (008 SC-007).
+        from_bench(
+            launch,
+            "preview-start",
+            "preview-start",
+            Some(300.0),
+            Check::Median,
+        ),
+        // A performer card's portrait from the disk cache, drawn (008 T056a): within the input
+        // acknowledgement budget.
+        from_bench(
+            launch,
+            "chip-portrait",
+            "chip-portrait",
+            Some(50.0),
+            Check::Median,
+        ),
+    ]
+}
+
 /// The paged Scenes view (005 R10): page change (< 150 ms at p95, 50 per page), page jump
-/// (< 1 s at p95), and scrolling a 1000-card page (< 1% missed frames in each mode).
+/// (< 1 s at p95), and scrolling a 1000-card page (constitution 5.1.0: the grid misses at most 3%
+/// of frames at 144 Hz, the list and the wall at most 1%).
 fn scenes_measurements(launch: &Launch) -> Vec<Measurement> {
     let mut out = vec![
         from_bench(
@@ -595,18 +688,18 @@ fn scenes_measurements(launch: &Launch) -> Vec<Measurement> {
             Check::P95,
         ),
     ];
-    for mode in ["grid", "list"] {
+    // Each view at its own budget (the wall, 008 SC-007, at the 1% of views other than the grid).
+    for mode in ["grid", "list", "wall"] {
         let line = bench_line(launch, &format!("scenes-scroll-1000-{mode}"));
         let invalid = line
             .and_then(|l| l.get("invalid").and_then(Value::as_str).map(str::to_owned))
             .or_else(|| launch.invalid())
             .or_else(|| line.is_none().then(|| "not measured".to_owned()));
-        let missed = line.and_then(|l| number(l, "missedPercent"));
-        out.push(Measurement::from_samples(
+        out.push(scroll_measurement(
             &format!("scenes-scroll-1000-{mode}-missed-frames"),
-            Unit::Percent,
-            Some(1.0),
-            &missed.into_iter().collect::<Vec<_>>(),
+            mode == "grid",
+            line.and_then(|l| number(l, "missedPercent")),
+            line.and_then(|l| number(l, "refreshHz")),
             invalid,
         ));
     }

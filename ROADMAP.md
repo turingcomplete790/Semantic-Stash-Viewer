@@ -80,20 +80,26 @@ mpv.
 - [x] Scene grid and list views: paged (default 50 per page, 20–1000 selectable, per tab),
       server-side pagination, neighbouring pages prefetched (constitution IV)
       ([specs/005-browse-scenes-and-play](specs/005-browse-scenes-and-play/), P1)
-- [ ] Sorting, filtering (the web UI's filter criteria), and search (sorting done in 005 P1,
-      including a stable random order; search and filters are 005 US2)
-- [ ] Loading and applying saved filters
-- [ ] Scene detail page: metadata, performers, studio, tags, groups, galleries, files (the scene
-      view in 007 shows the cover, title, date, studio, performers, tags, description, and the
-      file, with Play; groups, galleries, and links to the other entities remain)
-- [ ] mpv playback: direct stream, hardware decode, resume position, markers as chapters (direct
-      stream and hardware decode done, inside the window with every frame shown, 006–007;
-      resume position and markers remain)
-- [ ] Play count, play duration, and resume position sync back to Stash (Principle V)
-- [ ] Resume where you left off: a Settings → Playback option (as in the Stash web UI) to start
-      scenes from their saved resume point instead of the beginning
-- [ ] Scene previews and sprite/scrubber thumbnails
-- [ ] Transcoding fallback: explicit, user-visible, and logged, only when mpv can't play a file
+- [x] Sorting, filtering (every web UI filter criterion), and search; the plugin's semantic
+      filters are placeholders until Phase 4
+      ([specs/008-finish-browse-play](specs/008-finish-browse-play/), US1)
+- [x] Loading and applying saved filters and the server's default filter (008 US1; creating and
+      editing them is Phase 2)
+- [x] Scene detail page: metadata, performers (with pictures and detail cards), studio, tags
+      (marked by semantic type, coloured by flag rules set in Settings → Tag colours), groups,
+      markers, every file, galleries (008 US2)
+- [x] mpv playback: direct stream, hardware decode, resume position, markers as chapters
+      (006–008)
+- [x] Play count, play duration, and resume position sync back to Stash (Principle V), queued on
+      disk so nothing is lost (008 US3)
+- [x] Resume where you left off: a Settings → Playback option (as in the Stash web UI) to start
+      scenes from their saved resume point instead of the beginning (008 US3)
+- [x] Scene previews (animated, on hover), a wall view, and sprite/scrubber thumbnails (008 US4)
+- [x] Transcoding fallback: explicit, user-visible, and logged, only when mpv can't play a file
+      (008 US5)
+- [ ] Queue view: the list on one side and the selected scene's player and details on the
+      other, so a run of scenes can be clicked through without leaving the list (suggested
+      2026-10-10 from the narrow list layout); might also serve as an alternative gallery view
 
 ### Images
 - [ ] Image grid (sized thumbnails), filters, and sorting
@@ -116,6 +122,8 @@ lost, not as a design to copy.
 - [ ] Which scenes belong with a gallery, and any custom ordering of the mixed sequence, come from
       or are saved to Stash (relationships, tags, or `custom_fields`), never kept only locally
 - [ ] An images-only view of a gallery, for users who want Stash's behaviour
+- [ ] A queue-style gallery view: the gallery's items listed beside the viewer (see the Scenes
+      queue view)
 - [ ] Gallery chapters, covers, zip and folder galleries, and image details (Stash parity)
 
 ### Other entities

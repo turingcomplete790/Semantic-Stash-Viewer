@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::cache::identity::hash_hex;
 use crate::error::AppError;
+use crate::scenes::filter::Criterion;
 
 /// Every scene sort the Stash web UI offers (`ui/v2.5/src/models/list-filter/scenes.ts` plus the
 /// media and common options), serialized as Stash's sort names.
@@ -142,6 +143,9 @@ pub struct SceneQuery {
     /// Required when `sort` is `random`; 32-bit because the bindings have no 64-bit integers
     /// (Stash accepts any u64).
     pub seed: Option<u32>,
+    /// Filter criteria (008 FR-002), in the order the user added them (the chips' order). Each
+    /// kind at most once, except custom fields.
+    pub criteria: Vec<Criterion>,
 }
 
 impl SceneQuery {
@@ -157,7 +161,27 @@ impl SceneQuery {
             } else {
                 None
             },
+            criteria: {
+                let mut criteria = self.criteria.clone();
+                criteria.sort_by_key(Criterion::sort_key);
+                criteria
+            },
         }
+    }
+
+    /// Add `criterion`, replacing one of the same kind (custom fields: the same field) so each
+    /// kind appears at most once; a new kind goes at the end, a replaced one keeps its place.
+    pub fn set_criterion(&mut self, criterion: Criterion) {
+        let key = criterion.sort_key();
+        match self.criteria.iter_mut().find(|c| c.sort_key() == key) {
+            Some(existing) => *existing = criterion,
+            None => self.criteria.push(criterion),
+        }
+    }
+
+    /// Remove the criterion with `sort_key`.
+    pub fn remove_criterion(&mut self, sort_key: &str) {
+        self.criteria.retain(|c| c.sort_key() != sort_key);
     }
 
     /// The sort Stash receives: its name, or `random_<seed>`.
@@ -185,6 +209,15 @@ impl SceneQuery {
             },
             n.seed.map_or_else(String::new, |s| s.to_string()),
         );
+        // Without criteria the key is 007's, so existing cache entries stay valid.
+        let key = if n.criteria.is_empty() {
+            key
+        } else {
+            format!(
+                "{key}\0{}",
+                serde_json::to_string(&n.criteria).unwrap_or_default()
+            )
+        };
         hash_hex(key.as_bytes())
     }
 }

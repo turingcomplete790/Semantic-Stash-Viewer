@@ -75,6 +75,10 @@ fn describe(key: &str) -> &'static str {
         "scenes:recent" => "recently added scenes",
         "scenes:test-set" => "the test scenes",
         k if k.starts_with("scene:") => "a scene",
+        k if k.starts_with("choices:") => "a filter list",
+        k if k.starts_with("semantic:vocabulary") => "the semantic tags",
+        "ui:settings" => "the server's UI settings",
+        "saved-filters:scenes" => "the saved filters",
         _ => "some data",
     }
 }

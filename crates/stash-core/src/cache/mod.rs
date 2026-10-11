@@ -9,6 +9,7 @@
 //! dropping the least recently used entries first.
 
 pub mod identity;
+pub mod keys;
 pub mod refresh;
 
 use std::path::{Path, PathBuf};

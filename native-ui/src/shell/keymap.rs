@@ -15,6 +15,7 @@ use crate::widgets::theme;
 pub enum Level {
     Player,
     Scenes,
+    Settings,
     Shell,
 }
 
@@ -23,6 +24,7 @@ impl Level {
         match self {
             Level::Player => "Player",
             Level::Scenes => "Scenes",
+            Level::Settings => "Settings → Tag colours",
             Level::Shell => "Everywhere",
         }
     }
@@ -143,6 +145,14 @@ pub enum Action {
     Player,
     /// Handled by the Scenes grid (`screens::scenes::keyboard`; 005 FR-006).
     Scenes,
+    /// Put the cursor in the Scenes search box (008 FR-003f).
+    FocusSearch,
+    /// Open the filter menu.
+    FilterMenu,
+    /// Open the saved filters.
+    SavedFilters,
+    /// Handled by Settings → Tag colours.
+    Settings,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -271,10 +281,62 @@ pub fn bindings() -> Vec<Binding> {
         (Chord::plain(N(Named::End)), "Last scene on the page"),
         (Chord::plain(Char("]")), "Next page"),
         (Chord::plain(Char("[")), "Previous page"),
-        (Chord::plain(N(Named::Enter)), "Open the scene"),
+        (
+            Chord::plain(N(Named::Enter)),
+            "Open the scene (in a filter menu or list: choose)",
+        ),
         (Chord::ctrl(N(Named::Enter)), "Open in a new tab"),
     ] {
         all.push(b(Level::Scenes, chord, Action::Scenes, label));
+    }
+    // Finding scenes (008 FR-003f).
+    all.push(b(
+        Level::Scenes,
+        Chord::plain(Char("/")),
+        Action::FocusSearch,
+        "Search",
+    ));
+    all.push(b(
+        Level::Scenes,
+        Chord::plain(Char("f")),
+        Action::FilterMenu,
+        "Filter menu",
+    ));
+    all.push(b(
+        Level::Scenes,
+        Chord::plain(Char("s")),
+        Action::SavedFilters,
+        "Saved filters",
+    ));
+    for (chord, label) in [
+        (
+            Chord::plain(N(Named::ArrowDown)),
+            "In a filter menu or list: move (↑ ↓)",
+        ),
+        (
+            Chord::plain(N(Named::Delete)),
+            "In the filter menu: remove the filter",
+        ),
+        (Chord::ctrl(Char("e")), "In a list: exclude"),
+        (
+            Chord::plain(N(Named::Escape)),
+            "Close the filter menu or list",
+        ),
+    ] {
+        all.push(b(Level::Scenes, chord, Action::Scenes, label));
+    }
+    // Settings → Tag colours (008 FR-003g); the page applies them.
+    for (chord, label) in [
+        (Chord::plain(N(Named::ArrowUp)), "Move between rules (↑ ↓)"),
+        (
+            Chord::alt(N(Named::ArrowUp)),
+            "Move the rule up or down (Alt+↑ ↓)",
+        ),
+        (Chord::plain(N(Named::Enter)), "Change the rule's colour"),
+        (Chord::plain(N(Named::Delete)), "Remove an added rule"),
+        (Chord::ctrl(Char("s")), "Save"),
+    ] {
+        all.push(b(Level::Settings, chord, Action::Settings, label));
     }
     // 002 FR-009, exactly.
     for (key, label) in [
@@ -291,6 +353,8 @@ pub fn bindings() -> Vec<Binding> {
         (Char("f"), "Fullscreen"),
         (Char("m"), "Mute"),
         (N(Named::Escape), "Leave fullscreen, or close the player"),
+        (N(Named::PageDown), "Next chapter"),
+        (N(Named::PageUp), "Previous chapter"),
     ] {
         all.push(b(Level::Player, Chord::plain(key), Action::Player, label));
     }

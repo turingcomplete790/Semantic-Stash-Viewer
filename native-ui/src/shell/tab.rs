@@ -82,13 +82,19 @@ impl Tab {
     /// Open a navigation bar section. Already there: nothing. The place just left is that
     /// section: go back to it, state and all (005 R13). Otherwise a fresh screen.
     pub fn open_section(&mut self, section: Section) -> Vec<Effect> {
+        self.open_section_with(section, Screen::for_section(section))
+    }
+
+    /// As [`Tab::open_section`], with `fresh` as the screen when a new one is needed (a new
+    /// Scenes screen starts from the server's default filter).
+    pub fn open_section_with(&mut self, section: Section, fresh: Screen) -> Vec<Effect> {
         if self.current().section() == Some(section) {
             return Vec::new();
         }
         if self.cursor > 0 && self.history[self.cursor - 1].section() == Some(section) {
             return self.back();
         }
-        self.open(Screen::for_section(section))
+        self.open(fresh)
     }
 
     pub fn back(&mut self) -> Vec<Effect> {

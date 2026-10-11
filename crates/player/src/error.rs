@@ -23,6 +23,9 @@ pub enum PlayerError {
     UnsupportedFormat,
     #[error("playback failed: {detail}")]
     PlaybackFailed { detail: String },
+    /// Not Stash's direct stream (or a transcode without its flag): never opened (008 R10).
+    #[error("only the server's direct stream can be played")]
+    RefusedSource,
 }
 
 // Error codes from mpv's client.h.
@@ -32,6 +35,12 @@ const MPV_ERROR_UNKNOWN_FORMAT: i32 = -17;
 const MPV_ERROR_UNSUPPORTED: i32 = -18;
 
 impl PlayerError {
+    /// mpv couldn't decode the file (a transcode may still play it); network and other failures
+    /// aren't.
+    pub fn is_decode_failure(&self) -> bool {
+        matches!(self, Self::UnsupportedFormat)
+    }
+
     /// Map an mpv error (usually from an `end-file` event) to a user-facing error.
     pub(crate) fn from_mpv(error: &libmpv2::Error) -> Self {
         match error {

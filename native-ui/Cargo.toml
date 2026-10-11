@@ -32,6 +32,9 @@ libloading = "0.8"
 
 [dev-dependencies]
 iced_test = "0.14"
+# Builds a view twice with the same widget tree (a picker regression test); already in the tree
+# through iced_test.
+iced_runtime = "0.14"
 tempfile = "3"
 chrono = { workspace = true }
 

@@ -43,6 +43,8 @@ fn request(source: &str) -> OpenRequest {
         api_key: None,
         strict_tls: false,
         cache: None,
+        start_seconds: None,
+        transcoded: false,
     }
 }
 
@@ -341,4 +343,59 @@ async fn drag_seeks_are_coalesced_and_the_release_seek_wins() {
     // Nothing queued afterwards moves it off the release position.
     tokio::time::sleep(Duration::from_millis(400)).await;
     assert!((player.snapshot().position_seconds - 3.0).abs() < 0.05);
+}
+
+#[test]
+fn start_position_drops_unusable_and_past_the_end_starts() {
+    use player::start_position;
+    assert_eq!(start_position(Some(90.0), 600.0), Some(90.0));
+    assert_eq!(
+        start_position(Some(90.0), 0.0),
+        Some(90.0),
+        "unknown duration"
+    );
+    assert_eq!(start_position(None, 600.0), None);
+    assert_eq!(start_position(Some(0.0), 600.0), None);
+    assert_eq!(start_position(Some(-3.0), 600.0), None);
+    assert_eq!(start_position(Some(f64::NAN), 600.0), None);
+    assert_eq!(start_position(Some(600.0), 600.0), None, "at the end");
+    assert_eq!(
+        start_position(Some(900.0), 600.0),
+        None,
+        "file was replaced"
+    );
+}
+
+#[tokio::test]
+async fn open_starts_at_the_requested_position_and_the_next_open_starts_at_zero() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let Some(file) = seekable_file(dir.path()) else {
+        return;
+    };
+    let player = headless();
+    let mut rx = player.subscribe();
+    player.open(OpenRequest {
+        start_seconds: Some(3.0),
+        ..request(&file)
+    });
+    let s = until(&mut rx, "playing from 3 s", |s| {
+        s.state == PlayerStateKind::Playing && s.position_seconds > 0.0
+    })
+    .await;
+    assert!(
+        s.position_seconds >= 2.9,
+        "started at {}",
+        s.position_seconds
+    );
+
+    player.open(request(&file));
+    let s = until(&mut rx, "playing from the start", |s| {
+        s.state == PlayerStateKind::Playing && s.duration_seconds.is_some()
+    })
+    .await;
+    assert!(
+        s.position_seconds < 2.0,
+        "`start` didn't carry over: {}",
+        s.position_seconds
+    );
 }

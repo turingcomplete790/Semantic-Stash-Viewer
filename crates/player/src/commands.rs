@@ -13,6 +13,33 @@ use std::time::Duration;
 
 use crate::session::{lock, Inner, MAX_SPEED, MIN_SPEED};
 
+/// The direct-stream guard (002 R6, 008 R10): whether the player may open `source`. A web address
+/// must be Stash's direct stream (`…/scene/<id>/stream`, no query), or, only with the explicit
+/// `transcoded` flag, its MP4 transcode (`…/scene/<id>/stream.mp4`). Local paths (tests) pass.
+pub fn source_allowed(source: &str, transcoded: bool) -> bool {
+    let Ok(url) = url::Url::parse(source) else {
+        // Not a URL: a local path.
+        return true;
+    };
+    match url.scheme() {
+        "http" | "https" => {}
+        "file" => return true,
+        _ => return false,
+    }
+    if url.query().is_some() || url.fragment().is_some() {
+        return false;
+    }
+    let segments: Vec<&str> = url
+        .path_segments()
+        .map(Iterator::collect)
+        .unwrap_or_default();
+    match segments.as_slice() {
+        [.., "scene", id, "stream"] if !id.is_empty() => !transcoded,
+        [.., "scene", id, "stream.mp4"] if !id.is_empty() => transcoded,
+        _ => false,
+    }
+}
+
 /// After this long, an unsettled seek no longer delays coalesced drag seeks.
 const STALE_SEEK: Duration = Duration::from_millis(500);
 
@@ -125,4 +152,46 @@ pub(crate) fn spawn_worker(
             }
         })?;
     Ok((tx, handle))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::source_allowed;
+    use crate::error::PlayerError;
+
+    #[test]
+    fn the_guard_takes_a_transcode_only_with_the_flag() {
+        let direct = "http://h:9999/scene/7/stream";
+        let transcode = "http://h:9999/scene/7/stream.mp4";
+        assert!(source_allowed(direct, false));
+        assert!(
+            !source_allowed(direct, true),
+            "the flag is only for a transcode"
+        );
+        assert!(
+            !source_allowed(transcode, false),
+            "no transcode without the flag"
+        );
+        assert!(source_allowed(transcode, true));
+        assert!(!source_allowed(
+            "http://h/scene/7/stream?resolution=LOW",
+            false
+        ));
+        assert!(!source_allowed("http://h/scene/7/stream.m3u8", true));
+        assert!(!source_allowed("http://h/other", false));
+        assert!(
+            source_allowed("/tmp/sample.mkv", false),
+            "local files (tests)"
+        );
+    }
+
+    #[test]
+    fn a_decode_failure_isnt_a_network_failure() {
+        let decode = PlayerError::from_mpv(&libmpv2::Error::Raw(-17));
+        let network = PlayerError::from_mpv(&libmpv2::Error::Raw(-13));
+        assert_eq!(decode, PlayerError::UnsupportedFormat);
+        assert_eq!(network, PlayerError::StreamUnreachable);
+        assert!(decode.is_decode_failure());
+        assert!(!network.is_decode_failure());
+    }
 }

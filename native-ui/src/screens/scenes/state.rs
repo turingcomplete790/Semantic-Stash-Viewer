@@ -10,9 +10,15 @@ use stash_core::scenes::query::{SceneQuery, SceneSort, SortDirection};
 use stash_core::scenes::{SceneCard, ScenePage};
 use stash_core::AppError;
 
+use stash_core::scenes::filter::kinds::CriterionKind;
+use stash_core::scenes::filter::saved::{DisplayMode, SavedFilter};
+use stash_core::scenes::filter::Criterion;
+
+use super::editor::{Editor, EditorMsg};
 use super::keyboard::{GridAction, PageDirection};
 use super::layout::Layout;
 use crate::effects::Effect;
+use crate::library::Need;
 use crate::machine::Step;
 use crate::screens::Mode;
 use crate::shell::TabId;
@@ -34,6 +40,36 @@ pub fn page_key(query: &SceneQuery, page: u32, size: u32) -> String {
 /// The scrollable's widget id in tab `tab`.
 pub fn scroll_id(tab: TabId) -> String {
     format!("scenes-{tab}")
+}
+
+/// How long after the last keystroke a search runs (008 data model "Search").
+pub const SEARCH_DELAY: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// The search box's widget id.
+pub const SEARCH_ID: &str = "scenes-search";
+
+/// The picker's search field's widget id.
+pub const PICKER_ID: &str = "scenes-picker";
+
+/// A saved filter applied to this tab (shown above the chips until the criteria change).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Applied {
+    pub id: String,
+    pub name: String,
+}
+
+/// What opens above the grid (transient).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum Panel {
+    #[default]
+    None,
+    /// The filter menu: the active filters, then every kind by group; `highlight` is the
+    /// keyboard's row.
+    Menu { highlight: usize },
+    /// One criterion being added or changed.
+    Editor(Box<Editor>),
+    /// The saved filters, by name.
+    Saved { highlight: usize },
 }
 
 /// What the screen has to show (transient).
@@ -61,8 +97,22 @@ pub struct ScenesState {
     pub scroll: f32,
     /// The keyboard's card on the page.
     pub focused: Option<usize>,
+    /// The saved filter applied to this tab, if the criteria haven't changed since.
+    #[serde(default)]
+    pub applied: Option<Applied>,
     #[serde(skip)]
     pub data: Data,
+    /// What's typed in the search box, before the debounce runs it (`None`: the query's search).
+    #[serde(skip)]
+    pub search_draft: Option<String>,
+    /// The debounce waiting to run the search.
+    #[serde(skip)]
+    search_pending: Option<u64>,
+    #[serde(skip)]
+    pub panel: Panel,
+    /// Parts of the last applied saved filter the viewer couldn't apply (FR-005).
+    #[serde(skip)]
+    pub left_out: Vec<String>,
     /// The request in flight.
     #[serde(skip)]
     pending: Option<u64>,
@@ -91,7 +141,12 @@ impl Default for ScenesState {
             mode: Mode::Grid,
             scroll: 0.0,
             focused: None,
+            applied: None,
             data: Data::Loading,
+            search_draft: None,
+            search_pending: None,
+            panel: Panel::None,
+            left_out: Vec::new(),
             pending: None,
             refreshing: false,
             go_to: String::new(),
@@ -124,7 +179,33 @@ pub enum ScenesMsg {
         index: usize,
         new_tab: bool,
     },
+    /// The pointer moved onto card `index` (its preview may start, 008 FR-019).
+    Hover(usize),
+    /// The pointer left card `index`.
+    HoverEnd(usize),
     Retry,
+    /// The search box changed.
+    SearchInput(String),
+    /// The search box's Enter: run it now.
+    SearchSubmit,
+    /// Open the filter menu (`true`) or close whatever is open.
+    FilterMenu(bool),
+    /// Move the filter menu's highlight.
+    MenuMove(i32),
+    /// Start a new criterion of this kind.
+    Add(CriterionKind),
+    /// Change an active criterion (by sort key).
+    Edit(String),
+    /// Remove an active criterion (by sort key).
+    Remove(String),
+    ClearFilters,
+    Editor(EditorMsg),
+    /// Open the saved filters (`true`) or close them.
+    SavedMenu(bool),
+    ApplySaved(Box<SavedFilter>),
+    DismissLeftOut,
+    /// Show scenes matching exactly this criterion (from a performer, tag, or studio chip).
+    FilterTo(Criterion),
     /// The UI bench: scroll automatically, then report the frame timings.
     AutoScroll(Option<AutoScroll>),
     AutoScrolled(AutoScrolled),
@@ -138,6 +219,8 @@ pub enum ScenesUp {
         title: String,
         new_tab: bool,
     },
+    /// Something from the library (a picker's list, the vocabulary, the saved filters).
+    Need(Need),
 }
 
 fn new_seed() -> u32 {
@@ -201,7 +284,129 @@ impl ScenesState {
             mode: self.mode,
             scroll: self.scroll,
             focused: self.focused,
+            applied: self.applied.clone(),
             ..Self::default()
+        }
+    }
+
+    /// A fresh screen showing a saved filter (the server's default for new tabs).
+    pub fn from_saved(filter: &SavedFilter) -> Self {
+        let mut s = Self::default();
+        s.adopt(filter);
+        s
+    }
+
+    /// Take a saved filter's search, criteria, sort, page size, and mode.
+    fn adopt(&mut self, filter: &SavedFilter) {
+        self.query = filter.query.clone();
+        if self.query.sort == SceneSort::Random && self.query.seed.is_none() {
+            self.query.seed = Some(new_seed());
+        }
+        if let Some(size) = filter.page_size {
+            // The nearest size the viewer offers.
+            self.page_size = PAGE_SIZES
+                .iter()
+                .copied()
+                .min_by_key(|s| s.abs_diff(size))
+                .unwrap_or(self.page_size);
+        }
+        match filter.mode {
+            Some(DisplayMode::Grid) => self.mode = Mode::Grid,
+            Some(DisplayMode::List) => self.mode = Mode::List,
+            Some(DisplayMode::Wall) => self.mode = Mode::Wall,
+            // The tagger is Phase 3.
+            Some(DisplayMode::Tagger) | None => {}
+        }
+        self.applied = (filter.id != "default").then(|| Applied {
+            id: filter.id.clone(),
+            name: filter.name.clone(),
+        });
+        self.left_out = filter.left_out.clone();
+        self.search_draft = None;
+        self.search_pending = None;
+    }
+
+    /// What the search box shows.
+    pub fn search_text(&self) -> &str {
+        self.search_draft.as_deref().unwrap_or(&self.query.search)
+    }
+
+    /// The criteria changed by the user: the applied saved filter no longer describes the tab.
+    fn criteria_changed(&mut self) -> Vec<Effect> {
+        self.applied = None;
+        self.left_out.clear();
+        self.requery()
+    }
+
+    /// A debounced search came due.
+    pub fn search_due(&mut self, generation: u64) -> Vec<Effect> {
+        if self.search_pending != Some(generation) {
+            return Vec::new();
+        }
+        self.run_search()
+    }
+
+    /// Whether this screen waits for search debounce `generation`.
+    pub fn awaits_search(&self, generation: u64) -> bool {
+        self.search_pending == Some(generation)
+    }
+
+    fn run_search(&mut self) -> Vec<Effect> {
+        self.search_pending = None;
+        let Some(draft) = self.search_draft.take() else {
+            return Vec::new();
+        };
+        if draft.trim() == self.query.search.trim() {
+            return Vec::new();
+        }
+        self.query.search = draft.trim().to_owned();
+        self.requery()
+    }
+
+    /// Open the editor for a new criterion of `kind`, or the existing one of that kind.
+    fn open_editor(&mut self, editor: Editor) -> Step<ScenesUp> {
+        let need = editor.picker().map(Need::Choices);
+        let picker = editor.picker().is_some();
+        self.panel = Panel::Editor(Box::new(editor));
+        let mut step = match need {
+            Some(n) => Step::up(ScenesUp::Need(n)),
+            None => Step::none(),
+        };
+        if picker {
+            step.effects.push(Effect::Focus(PICKER_ID));
+        }
+        step
+    }
+
+    fn editor_msg(&mut self, msg: EditorMsg) -> Step<ScenesUp> {
+        let Panel::Editor(editor) = &mut self.panel else {
+            return Step::none();
+        };
+        match msg {
+            EditorMsg::Cancel => {
+                self.panel = Panel::None;
+                Step::none()
+            }
+            EditorMsg::Apply => match editor.build() {
+                Ok(criterion) => {
+                    if let Some(old) = editor.replacing.clone() {
+                        if old != criterion.sort_key() {
+                            self.query.remove_criterion(&old);
+                        }
+                    }
+                    self.query.set_criterion(criterion);
+                    self.panel = Panel::None;
+                    Step::effects(self.criteria_changed())
+                }
+                Err(e) => {
+                    editor.error = Some(e);
+                    Step::none()
+                }
+            },
+            other => {
+                editor.update(other);
+                Step::none()
+            }
         }
     }
 
@@ -351,6 +556,8 @@ impl ScenesState {
                 self.focused = Some(index);
                 Step::up(up)
             }
+            // The session handles these for the preview (it needs no screen state).
+            ScenesMsg::Hover(_) | ScenesMsg::HoverEnd(_) => Step::none(),
             ScenesMsg::AutoScroll(auto) => {
                 self.auto_scroll = auto;
                 Step::none()
@@ -362,6 +569,109 @@ impl ScenesState {
             ScenesMsg::Retry => {
                 self.refreshing = false;
                 Step::effects(self.load())
+            }
+            ScenesMsg::SearchInput(text) => {
+                self.search_draft = Some(text);
+                let generation = next_generation();
+                self.search_pending = Some(generation);
+                Step::effect(Effect::SearchDue {
+                    tab: self.tab,
+                    generation,
+                    after: SEARCH_DELAY,
+                })
+            }
+            ScenesMsg::SearchSubmit => Step::effects(self.run_search()),
+            ScenesMsg::FilterMenu(open) => {
+                self.panel = if open {
+                    Panel::Menu { highlight: 0 }
+                } else {
+                    Panel::None
+                };
+                Step::none()
+            }
+            ScenesMsg::MenuMove(delta) => {
+                match &mut self.panel {
+                    Panel::Menu { highlight } | Panel::Saved { highlight } => {
+                        *highlight = highlight.saturating_add_signed(delta as isize);
+                    }
+                    Panel::Editor(editor) => editor.update(EditorMsg::PickerMove(delta)),
+                    Panel::None => {}
+                }
+                Step::none()
+            }
+            ScenesMsg::Add(kind) => {
+                if kind.info().is_placeholder() {
+                    return Step::none();
+                }
+                let existing = self
+                    .query
+                    .criteria
+                    .iter()
+                    .find(|c| c.kind == kind && !kind.info().repeatable())
+                    .map(Editor::from_criterion);
+                self.open_editor(existing.unwrap_or_else(|| Editor::new(kind)))
+            }
+            ScenesMsg::Edit(key) => {
+                let Some(c) = self.query.criteria.iter().find(|c| c.sort_key() == key) else {
+                    return Step::none();
+                };
+                if c.info().is_placeholder() {
+                    return Step::none();
+                }
+                let editor = Editor::from_criterion(c);
+                self.open_editor(editor)
+            }
+            ScenesMsg::Remove(key) => {
+                let before = self.query.criteria.len();
+                self.query.remove_criterion(&key);
+                if self.query.criteria.len() == before {
+                    return Step::none();
+                }
+                if matches!(&self.panel, Panel::Editor(e) if e.replacing.as_deref() == Some(key.as_str()))
+                {
+                    self.panel = Panel::None;
+                }
+                Step::effects(self.criteria_changed())
+            }
+            ScenesMsg::ClearFilters => {
+                if self.query.criteria.is_empty() && self.query.search.is_empty() {
+                    return Step::none();
+                }
+                self.query.criteria.clear();
+                self.query.search.clear();
+                self.search_draft = None;
+                self.search_pending = None;
+                self.panel = Panel::None;
+                Step::effects(self.criteria_changed())
+            }
+            ScenesMsg::Editor(m) => self.editor_msg(m),
+            ScenesMsg::SavedMenu(open) => {
+                if open {
+                    self.panel = Panel::Saved { highlight: 0 };
+                    Step::up(ScenesUp::Need(Need::SavedFilters))
+                } else {
+                    self.panel = Panel::None;
+                    Step::none()
+                }
+            }
+            ScenesMsg::ApplySaved(filter) => {
+                self.adopt(&filter);
+                self.panel = Panel::None;
+                self.page = 1;
+                self.scroll = 0.0;
+                self.focused = None;
+                self.refreshing = false;
+                Step::effects(self.load())
+            }
+            ScenesMsg::DismissLeftOut => {
+                self.left_out.clear();
+                Step::none()
+            }
+            ScenesMsg::FilterTo(criterion) => {
+                self.query.criteria = vec![criterion];
+                self.query.search.clear();
+                self.search_draft = None;
+                Step::effects(self.criteria_changed())
             }
         }
     }

@@ -29,7 +29,8 @@ pub const SCROLL_SPEED: f32 = 64.0 * 60.0;
 /// A message for the session.
 #[derive(Debug, Clone)]
 enum Act {
-    Shell(ShellMsg),
+    /// Boxed: shell messages are large next to the other actions.
+    Shell(Box<ShellMsg>),
     CloseOverlay,
     /// Forget the thumbnails in memory (they come back from the disk cache): a cold scroll.
     ClearThumbs,
@@ -47,6 +48,27 @@ enum Act {
     BackToScene,
     /// Select the playing tab (as a tab switch).
     SelectOwner,
+    /// Ask the library for the semantic vocabulary (the scene page does this from US2).
+    WantVocabulary,
+    /// Forget the library's in-memory lists (the disk cache keeps them): the next picker reads
+    /// them again.
+    ForgetLists,
+    /// Rest the pointer on the open scene page's first performer chip.
+    RestFirstChip,
+    /// Sweep across the open scene page's tag chips without resting.
+    SweepChips,
+    /// Drop the open performer card's portrait from memory (it comes back from the disk cache).
+    ForgetPortrait,
+    /// Show Scenes filtered to the open scene page's first performer (as the chip does).
+    FilterToBenchPerformer,
+    /// Rest the pointer on the bench scene's card (008 T080).
+    HoverPreviewCard,
+    /// Move the pointer off the cards.
+    LeaveCards,
+    /// Save the colour rules Stash already has (Testing only: nothing changes there).
+    SaveSameColours,
+    /// Send a simulated 10-minute viewing of this scene's play history (Testing only).
+    SimulateViewing(String),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -57,6 +79,22 @@ enum Cond {
     PageShown,
     /// A different page's cards are showing.
     CardsShown,
+    /// The open picker's list (and, for tags, the vocabulary) is here.
+    PickerReady,
+    /// The active scene page's details are here.
+    SceneReady,
+    /// Its "All files" section is here.
+    FilesReady,
+    /// Its galleries are here.
+    GalleriesReady,
+    /// The resting chip's card is here (with its portrait, for a performer with an image).
+    CardReady,
+    /// The open performer card's portrait is here (never, when no portrait is wanted).
+    PortraitReady,
+    /// A card preview is playing.
+    PreviewPlaying,
+    /// The semantic vocabulary is here.
+    VocabularyReady,
     /// At least this many cards are showing.
     Cards(usize),
     /// Every card on the page has its thumbnail.
@@ -76,6 +114,8 @@ enum Op {
     Start,
     /// Add `now - start` to a sample set, if the last wait succeeded.
     Sample(&'static str),
+    /// As `Sample`, less a fixed delay in ms (the preview's 200 ms rest).
+    SampleAfter(&'static str, u64),
     /// Print a sample set's summary.
     Report(&'static str),
     /// Scroll the active Scenes page at [`SCROLL_SPEED`] for this long (inside the scrollable:
@@ -90,6 +130,10 @@ enum Op {
     /// Ask the harness to sample the process tree's memory and CPU for this long (the app holds
     /// still meanwhile).
     ProcSample(&'static str, u64),
+    /// Forget the requests recorded so far (before a `gql` scenario).
+    GqlReset,
+    /// Print the requests since `GqlReset` as this live audit row (contracts/query-budget.md).
+    Gql(&'static str),
     /// Note the frames shown so far (before switching tabs).
     VideoMark,
     /// If the playing tab is showing, wait (a few frames) for a new video frame on screen.
@@ -139,7 +183,7 @@ pub struct Bench {
 
 fn script() -> Vec<Op> {
     use Op::*;
-    let shell = |m: ShellMsg| Op::Act(A::Shell(m));
+    let shell = |m: ShellMsg| Op::Act(A::Shell(Box::new(m)));
     let ms = Duration::from_millis;
     // `SSV_BENCH_ONLY=scroll`: only the 1000-card scroll (for profiling it).
     let only_scroll = super::var("SSV_BENCH_ONLY").as_deref() == Some("scroll");
@@ -244,11 +288,18 @@ fn script() -> Vec<Op> {
         ops.push(Frames(10));
     }
 
-    // Scenes: a fresh tab at 50 per page.
+    // Scenes: a fresh tab at 50 per page (gql-page-50: the page and its neighbour's prefetch).
     ops.extend([
         shell(ShellMsg::NewTab),
         shell(ShellMsg::Section(Section::Scenes)),
         Until(Cond::Ready, ms(15_000)),
+        // The whole library, as 007 measured it: a server's default filter may narrow a fresh
+        // tab (Testing's does).
+        GqlReset,
+        shell(ShellMsg::Scenes(ScenesMsg::ClearFilters)),
+        Until(Cond::Ready, ms(15_000)),
+        Sleep(ms(500)),
+        Gql("gql-page-50"),
         Frames(2),
     ]);
     for i in 0..20 {
@@ -280,6 +331,163 @@ fn script() -> Vec<Op> {
         ]);
     }
     ops.push(Report("page-jump"));
+
+    // Finding (008): a filter applied, the vocabulary, and the pickers cold and cached.
+    let organized = stash_core::scenes::filter::Criterion::new(
+        stash_core::scenes::filter::kinds::CriterionKind::Organized,
+        stash_core::scenes::filter::Modifier::Equals,
+        stash_core::scenes::filter::CriterionValue::Bool(false),
+    );
+    let picker = |kind| shell(ShellMsg::Scenes(ScenesMsg::Add(kind)));
+    let close = shell(ShellMsg::Scenes(ScenesMsg::Editor(
+        crate::screens::scenes::editor::EditorMsg::Cancel,
+    )));
+    use stash_core::scenes::filter::kinds::CriterionKind as K;
+    ops.extend([
+        // Let the page jumps' prefetches land first.
+        Sleep(ms(1500)),
+        GqlReset,
+        Remember,
+        shell(ShellMsg::Scenes(ScenesMsg::FilterTo(organized))),
+        Until(Cond::Ready, ms(15_000)),
+        Sleep(ms(500)),
+        Gql("gql-filter-apply"),
+        shell(ShellMsg::Scenes(ScenesMsg::ClearFilters)),
+        Until(Cond::Ready, ms(15_000)),
+        // Let the neighbour prefetch land before the next row starts counting.
+        Sleep(ms(1000)),
+        GqlReset,
+        Op::Act(A::WantVocabulary),
+        Until(Cond::VocabularyReady, ms(15_000)),
+        // A cached vocabulary refreshes quietly in the background: count it here.
+        Sleep(ms(1000)),
+        Gql("gql-vocabulary-cold"),
+        Op::Act(A::ForgetLists),
+        GqlReset,
+        Start,
+        picker(K::Performers),
+        Until(Cond::PickerReady, ms(30_000)),
+        Frames(2),
+        Sample("picker-open-cold"),
+        Gql("gql-picker-cold"),
+        close.clone(),
+        Frames(2),
+    ]);
+    ops.push(GqlReset);
+    for _ in 0..5 {
+        ops.extend([
+            Start,
+            picker(K::Performers),
+            Until(Cond::PickerReady, ms(5_000)),
+            Frames(2),
+            Sample("picker-open"),
+            Start,
+            shell(ShellMsg::Scenes(ScenesMsg::Editor(
+                crate::screens::scenes::editor::EditorMsg::PickerQuery("a".into()),
+            ))),
+            Frames(2),
+            Sample("picker-narrow"),
+            close.clone(),
+            Frames(2),
+        ]);
+    }
+    ops.extend([
+        Gql("gql-picker-cached"),
+        Report("picker-open-cold"),
+        Report("picker-open"),
+        Report("picker-narrow"),
+        Op::Act(A::ForgetLists),
+        GqlReset,
+        picker(K::Tags),
+        Until(Cond::PickerReady, ms(30_000)),
+        Gql("gql-tags-picker-cold"),
+        close,
+        Frames(2),
+    ]);
+
+    // The scene page (008 US2): a seeded Testing scene with performers, tags, and markers.
+    let scene_id = super::var("SSV_BENCH_SCENE").unwrap_or_else(|| "185".into());
+    ops.extend([
+        Sleep(ms(1000)),
+        GqlReset,
+        shell(ShellMsg::Open(Screen::scene(&scene_id, ""))),
+        Until(Cond::SceneReady, ms(15_000)),
+        Sleep(ms(1000)),
+        Gql("gql-scene-page"),
+        GqlReset,
+        shell(ShellMsg::Scene(
+            crate::screens::scene::SceneMsg::ToggleFiles,
+        )),
+        Until(Cond::FilesReady, ms(15_000)),
+        Gql("gql-scene-files"),
+        GqlReset,
+        shell(ShellMsg::Scene(
+            crate::screens::scene::SceneMsg::ToggleGalleries,
+        )),
+        Until(Cond::GalleriesReady, ms(15_000)),
+        Gql("gql-scene-galleries"),
+        GqlReset,
+        Op::Act(A::SweepChips),
+        Sleep(ms(800)),
+        Gql("gql-chip-sweep"),
+        GqlReset,
+        Op::Act(A::RestFirstChip),
+        Until(Cond::CardReady, ms(15_000)),
+        Gql("gql-chip-rest"),
+        GqlReset,
+    ]);
+    // The portrait again from the disk cache, as when a card reopens later (008 T056a): no
+    // request, no download, about a millisecond to decode.
+    for _ in 0..5 {
+        ops.extend([
+            Start,
+            Op::Act(A::ForgetPortrait),
+            Until(Cond::PortraitReady, ms(5_000)),
+            Frames(2),
+            Sample("chip-portrait"),
+        ]);
+    }
+    ops.extend([Report("chip-portrait"), Gql("gql-chip-portrait"), GqlReset]);
+    // Rows that write to the server, only with `perf-harness --allow-writes` (Testing).
+    if super::bench_writes_allowed() {
+        ops.extend([
+            Op::Act(A::SaveSameColours),
+            Sleep(ms(1500)),
+            Gql("gql-tag-colours-save"),
+            GqlReset,
+            // 008 T070: a 10-minute viewing of the bench scene, as the player reports it, sent
+            // through the real write path (≤ 11 SaveActivity + 1 AddPlay).
+            Op::Act(A::SimulateViewing(scene_id.clone())),
+            Sleep(ms(4000)),
+            Gql("gql-viewing-10min-writes"),
+            GqlReset,
+        ]);
+    }
+    // 008 T080: a card preview, from the end of the 200 ms rest to its first frame on screen (the
+    // first from the server, the rest from the disk cache). The bench scene's card shows in
+    // Scenes filtered to its first performer, as that chip opens it.
+    ops.extend([
+        Op::Act(A::FilterToBenchPerformer),
+        Until(Cond::Ready, ms(15_000)),
+    ]);
+    for _ in 0..3 {
+        ops.extend([
+            Start,
+            Op::Act(A::HoverPreviewCard),
+            Until(Cond::PreviewPlaying, ms(10_000)),
+            Frames(2),
+            SampleAfter("preview-start", 200),
+            Op::Act(A::LeaveCards),
+            Frames(2),
+        ]);
+    }
+    ops.extend([
+        Report("preview-start"),
+        shell(ShellMsg::Back),
+        Frames(2),
+        shell(ShellMsg::Back),
+        Frames(2),
+    ]);
     if only_scroll {
         ops.truncate(1);
         ops.extend([
@@ -293,8 +501,10 @@ fn script() -> Vec<Op> {
     ops.extend([
         shell(ShellMsg::Scenes(ScenesMsg::Page(1))),
         Until(Cond::Ready, ms(15_000)),
+        GqlReset,
         shell(ShellMsg::Scenes(ScenesMsg::PageSize(1000))),
         Until(Cond::Cards(1000), ms(15_000)),
+        Gql("gql-page-1000"),
         ReportCards,
     ]);
     for (mode, cold, warm) in [
@@ -307,6 +517,12 @@ fn script() -> Vec<Op> {
             Mode::List,
             "scenes-scroll-1000-list-cold",
             "scenes-scroll-1000-list",
+        ),
+        // 008 T080: the wall, within the grid's smoothness budget (SC-007).
+        (
+            Mode::Wall,
+            "scenes-scroll-1000-wall-cold",
+            "scenes-scroll-1000-wall",
         ),
     ] {
         ops.extend([
@@ -327,6 +543,8 @@ fn script() -> Vec<Op> {
         shell(ShellMsg::Scenes(ScenesMsg::Mode(Mode::Grid))),
         shell(ShellMsg::Scenes(ScenesMsg::PageSize(50))),
         Until(Cond::Ready, ms(15_000)),
+    ]);
+    ops.extend([
         // At rest on a 50-card page: memory and CPU (007 T057).
         Sleep(ms(5000)),
         ProcSample("idle-scenes-50", 5),
@@ -386,16 +604,84 @@ impl Bench {
         if let Cond::Playing = cond {
             return session.playback.snapshot().state == player::PlayerStateKind::Playing;
         }
+        if let Cond::PreviewPlaying = cond {
+            return session.previews.playing();
+        }
+        if let Cond::VocabularyReady = cond {
+            return session.library.vocabulary.ready().is_some();
+        }
+        if let Cond::SceneReady
+        | Cond::FilesReady
+        | Cond::GalleriesReady
+        | Cond::CardReady
+        | Cond::PortraitReady = cond
+        {
+            use crate::screens::scene::{Details, Section};
+            let Screen::Scene(scene) = session.shell.active().current() else {
+                return false;
+            };
+            return match cond {
+                Cond::SceneReady => matches!(scene.details, Details::Ready(_)),
+                Cond::FilesReady => {
+                    matches!(scene.files, Section::Ready { .. } | Section::Failed(_))
+                }
+                Cond::GalleriesReady => {
+                    matches!(scene.galleries, Section::Ready { .. } | Section::Failed(_))
+                }
+                _ => {
+                    let portrait = scene
+                        .portrait_wanted()
+                        .is_none_or(|key| session.thumbs.get(&key).is_some());
+                    let card = scene.chip_hover.as_ref().is_some_and(|(chip, _, rested)| {
+                        *rested
+                            && session
+                                .library
+                                .chips
+                                .get(&(chip.kind, chip.id.clone()))
+                                .is_some_and(|c| c.ready().is_some())
+                    });
+                    if matches!(cond, Cond::PortraitReady) {
+                        // Only a portrait actually shown counts: none wanted is "not measured".
+                        return scene.portrait_wanted().is_some() && portrait;
+                    }
+                    portrait && card
+                }
+            };
+        }
         let Some(s) = Self::scenes(session) else {
             return false;
         };
+        if let Cond::PickerReady = cond {
+            let crate::screens::scenes::Panel::Editor(editor) = &s.panel else {
+                return false;
+            };
+            let Some(kind) = editor.picker() else {
+                return false;
+            };
+            let list = session
+                .library
+                .choices
+                .get(&kind)
+                .is_some_and(|c| c.ready().is_some());
+            let vocabulary = kind != stash_core::adapter::choices::ChoiceKind::Tags
+                || session.library.vocabulary.ready().is_some();
+            return list && vocabulary;
+        }
         if !s.ready() {
             return false;
         }
         let changed = || Self::first_card(session) != self.remembered;
         match cond {
             Cond::Ready => true,
-            Cond::Playing => unreachable!("checked before the Scenes screen"),
+            Cond::Playing
+            | Cond::PickerReady
+            | Cond::VocabularyReady
+            | Cond::SceneReady
+            | Cond::FilesReady
+            | Cond::GalleriesReady
+            | Cond::CardReady
+            | Cond::PortraitReady
+            | Cond::PreviewPlaying => unreachable!("checked above"),
             Cond::Cards(n) => s.cards().len() >= n.min(s.count().unwrap_or(0) as usize),
             Cond::CardsShown => changed(),
             Cond::AllThumbs => s
@@ -419,12 +705,124 @@ impl Bench {
 
     fn act(&mut self, act: Act, session: &mut Session) -> Vec<Effect> {
         let step = match act {
-            Act::Shell(m) => session.update(session::Msg::Shell(m)),
+            Act::Shell(m) => session.update(session::Msg::Shell(*m)),
             Act::CloseOverlay => session.update(session::Msg::Overlay(overlays::Msg::Close)),
             Act::ClearThumbs => {
                 session.thumbs = Thumbs::default();
                 Step::none()
             }
+            Act::WantVocabulary => {
+                Step::effects(session.library.want(crate::library::Need::Vocabulary))
+            }
+            Act::ForgetLists => {
+                session.library.choices.clear();
+                Step::none()
+            }
+            Act::RestFirstChip => {
+                use crate::screens::scene::{ChipRef, Details, SceneMsg};
+                let chip = match session.shell.active().current() {
+                    Screen::Scene(s) => match &s.details {
+                        Details::Ready(d) => d.performers.first().map(|p| ChipRef {
+                            kind: stash_core::adapter::chips::ChipKind::Performer,
+                            id: p.id.clone(),
+                        }),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                // A fresh card: forget what this session already has.
+                session.library.chips.clear();
+                match chip {
+                    Some(c) => {
+                        session.update(session::Msg::Shell(ShellMsg::Scene(SceneMsg::ChipEnter(c))))
+                    }
+                    None => Step::none(),
+                }
+            }
+            Act::FilterToBenchPerformer => {
+                use crate::screens::scene::Details;
+                let performer = match session.shell.active().current() {
+                    Screen::Scene(s) => match &s.details {
+                        Details::Ready(d) => {
+                            d.performers.first().map(|p| stash_core::scenes::Named {
+                                id: p.id.clone(),
+                                name: p.name.clone(),
+                            })
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                match performer {
+                    Some(p) => session.update(session::Msg::Shell(ShellMsg::FilterTo {
+                        criterion: crate::screens::scene::only(
+                            stash_core::scenes::filter::kinds::CriterionKind::Performers,
+                            &p,
+                        ),
+                        new_tab: false,
+                    })),
+                    None => Step::none(),
+                }
+            }
+            Act::HoverPreviewCard => {
+                // The bench scene (Testing's 185 has a generated preview) if it's on the page.
+                let scene = super::var("SSV_BENCH_SCENE").unwrap_or_else(|| "185".into());
+                let index = Self::scenes(session)
+                    .and_then(|s| s.cards().iter().position(|c| c.id == scene));
+                match index {
+                    Some(i) => {
+                        session.update(session::Msg::Shell(ShellMsg::Scenes(ScenesMsg::Hover(i))))
+                    }
+                    None => Step::none(),
+                }
+            }
+            Act::LeaveCards => Step::effects(session.previews.clear()),
+            Act::ForgetPortrait => {
+                let key = match session.shell.active().current() {
+                    Screen::Scene(s) => s.portrait_wanted(),
+                    _ => None,
+                };
+                match key {
+                    Some(key) => {
+                        session.thumbs.forget(&key);
+                        Step::effects(session.thumbnails())
+                    }
+                    None => Step::none(),
+                }
+            }
+            Act::SweepChips => {
+                use crate::screens::scene::{ChipRef, Details, SceneMsg};
+                let chips: Vec<ChipRef> = match session.shell.active().current() {
+                    Screen::Scene(s) => match &s.details {
+                        Details::Ready(d) => d
+                            .tags
+                            .iter()
+                            .map(|t| ChipRef {
+                                kind: stash_core::adapter::chips::ChipKind::Tag,
+                                id: t.id.clone(),
+                            })
+                            .collect(),
+                        _ => Vec::new(),
+                    },
+                    _ => Vec::new(),
+                };
+                session.library.chips.clear();
+                let mut effects = Vec::new();
+                for c in chips {
+                    for m in [SceneMsg::ChipEnter(c.clone()), SceneMsg::ChipLeave(c)] {
+                        effects.extend(
+                            session
+                                .update(session::Msg::Shell(ShellMsg::Scene(m)))
+                                .effects,
+                        );
+                    }
+                }
+                Step::effects(effects)
+            }
+            Act::SaveSameColours => {
+                Step::effect(Effect::SaveTagColours(session.library.colour_rules()))
+            }
+            Act::SimulateViewing(scene_id) => Step::effect(Effect::SimulateViewing { scene_id }),
             Act::Jump => {
                 let last = Self::scenes(session)
                     .and_then(|s| s.last_page())
@@ -588,6 +986,12 @@ impl Bench {
                         self.samples.entry(name).or_default().push(ms);
                     }
                 }
+                Op::SampleAfter(name, delay) => {
+                    if self.last_ok {
+                        let ms = self.started.elapsed().as_secs_f64() * 1000.0 - delay as f64;
+                        self.samples.entry(name).or_default().push(ms.max(0.0));
+                    }
+                }
                 Op::Report(name) => {
                     let line = match name {
                         "nav" => "nav-first-paint",
@@ -639,6 +1043,7 @@ impl Bench {
                     let mode = Self::scenes(session).map_or("grid", |s| match s.mode {
                         Mode::Grid => "grid",
                         Mode::List => "list",
+                        Mode::Wall => "wall",
                     });
                     report(
                         &format!("scenes-thumbs-1000-{mode}"),
@@ -648,6 +1053,12 @@ impl Bench {
                         }),
                     );
                 }
+                Op::GqlReset => {
+                    if let Some(log) = super::request_log() {
+                        log.take();
+                    }
+                }
+                Op::Gql(row) => super::emit_gql_row(row),
                 Op::VideoMark => {
                     self.video_mark = crate::player::video::frame_counts().1;
                 }
@@ -722,6 +1133,12 @@ impl Bench {
         let elapsed: f64 = frames.iter().sum();
         let mut line = super::summary(&frames, 1);
         line["baselineMs"] = round(baseline, 1).into();
+        // The display's refresh rate (the grid's budget is set at 144 Hz, constitution 5.1.0).
+        line["refreshHz"] = if baseline > 0.0 {
+            round(1000.0 / baseline, 1).into()
+        } else {
+            serde_json::Value::Null
+        };
         line["pxPerSecond"] = f64::from(SCROLL_SPEED).into();
         line["fps"] = if elapsed > 0.0 {
             round(frames.len() as f64 / elapsed * 1000.0, 1).into()

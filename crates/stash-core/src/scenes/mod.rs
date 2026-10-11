@@ -6,6 +6,7 @@
 //! profile's base URL, never taken from Stash's `paths.stream` (which embeds the API key when
 //! authentication is on).
 
+pub mod filter;
 pub mod paging;
 pub mod query;
 
@@ -79,6 +80,21 @@ pub fn screenshot_version(path: &str) -> String {
         .unwrap_or_else(|| "0".to_owned())
 }
 
+/// A performer picture's version, from their `image_path` (008 FR-011c, research R13): the `t`
+/// value Stash sets to the performer's last update, as for scene screenshots. `None` when there's
+/// no path or Stash serves its default picture (`default=true`), so nothing is downloaded.
+pub fn picture_version(path: Option<&str>) -> Option<String> {
+    let path = path?;
+    let url = Url::parse(path).ok()?;
+    if url
+        .query_pairs()
+        .any(|(k, v)| k == "default" && v == "true")
+    {
+        return None;
+    }
+    Some(screenshot_version(path))
+}
+
 /// A labelled group of scenes (the spike's test set: 4K, WMV, …).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -101,6 +117,70 @@ pub struct SceneFile {
     pub size: Option<u64>,
 }
 
+/// A performer on the scene page: id, name, and their picture's version (the picture itself comes
+/// through the thumbnail service, keyed by it; 008 FR-011c).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PerformerChip {
+    pub id: String,
+    pub name: String,
+    /// [`picture_version`]: `None` when Stash has no picture of them. Required when reading, so
+    /// details cached before versions existed don't parse and are fetched again.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub image: Option<String>,
+}
+
+/// A group the scene is in, with the scene's number there.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GroupRef {
+    pub id: String,
+    pub name: String,
+    pub scene_index: Option<i32>,
+}
+
+/// A marker: a titled point (and optional end) with its primary tag's name.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Marker {
+    pub id: String,
+    pub title: String,
+    pub seconds: f64,
+    pub end_seconds: Option<f64>,
+    pub tag: String,
+}
+
+/// One file's facts for the "All files" section.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FileFacts {
+    pub id: String,
+    pub basename: String,
+    pub path: String,
+    pub size: u64,
+    pub duration: f64,
+    pub width: u32,
+    pub height: u32,
+    pub video_codec: String,
+    pub audio_codec: String,
+    pub format: String,
+    pub frame_rate: f64,
+    pub bit_rate: u64,
+    /// `(type, value)`: oshash, md5, phash.
+    pub fingerprints: Vec<(String, String)>,
+}
+
+/// A gallery chip.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GalleryChip {
+    pub id: String,
+    pub title: String,
+    pub image_count: u32,
+}
+
+/// A related item: its id (to filter by) and name (to show).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Named {
+    pub id: String,
+    pub name: String,
+}
+
 /// What the scene view shows (007 T048). Cached per scene (`scene:details:<id>`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -114,9 +194,33 @@ pub struct SceneDetails {
     /// The description.
     pub details: Option<String>,
     pub director: Option<String>,
-    pub studio: Option<String>,
-    pub performers: Vec<String>,
-    pub tags: Vec<String>,
+    pub studio: Option<Named>,
+    pub performers: Vec<PerformerChip>,
+    pub tags: Vec<Named>,
+    /// Groups with the scene's number in each.
+    #[serde(default)]
+    pub groups: Vec<GroupRef>,
+    /// Markers in time order.
+    #[serde(default)]
+    pub markers: Vec<Marker>,
+    #[serde(default)]
+    pub urls: Vec<String>,
+    #[serde(default)]
+    pub organized: bool,
+    /// Where playback left off, in seconds.
+    #[serde(default)]
+    pub resume_time: Option<f64>,
+    /// Total time watched, in seconds.
+    #[serde(default)]
+    pub play_duration: Option<f64>,
+    /// How many files the scene has (the "All files" section lists them).
+    #[serde(default)]
+    pub file_count: usize,
+    /// The generated sprite and VTT file names (no address or key), for seek-bar thumbnails.
+    #[serde(default)]
+    pub sprite: Option<String>,
+    #[serde(default)]
+    pub vtt: Option<String>,
     /// 1–100.
     pub rating100: Option<u8>,
     pub play_count: u32,
@@ -234,5 +338,29 @@ pub(crate) fn resolution(width: Option<i64>, height: Option<i64>) -> Option<Stri
     match (width, height) {
         (Some(w), Some(h)) if w > 0 && h > 0 => Some(format!("{w}×{h}")),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::picture_version;
+
+    #[test]
+    fn a_picture_version_is_the_paths_update_stamp() {
+        assert_eq!(
+            picture_version(Some("http://h:9998/performer/2/image?t=1791406802")),
+            Some("1791406802".into())
+        );
+        assert_eq!(
+            picture_version(Some("http://h/performer/2/image?t=1791406802&default=true")),
+            None,
+            "Stash's default picture: nothing to download"
+        );
+        assert_eq!(picture_version(None), None);
+        assert_eq!(
+            picture_version(Some("http://h/performer/2/image")),
+            Some("0".into()),
+            "a picture with no stamp still has one version"
+        );
     }
 }

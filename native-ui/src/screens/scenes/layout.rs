@@ -7,6 +7,9 @@ use crate::screens::Mode;
 /// Cards are at least this wide; columns are as many as fit.
 pub const MIN_CARD: f32 = 240.0;
 pub const GAP: f32 = 12.0;
+/// The wall's tiles (008 FR-020): dense stills at least this wide, this far apart.
+pub const MIN_WALL: f32 = 160.0;
+pub const WALL_GAP: f32 = 4.0;
 /// Space around the grid.
 pub const PAD: f32 = 16.0;
 /// Room the vertical scrollbar takes.
@@ -23,6 +26,9 @@ pub struct Layout {
     /// The window's logical size.
     pub width: f32,
     pub height: f32,
+    /// Physical pixels per logical pixel (2 on a high-density display): images are decoded at
+    /// their drawn size times this, so they stay sharp.
+    pub scale: f32,
 }
 
 impl Default for Layout {
@@ -33,7 +39,28 @@ impl Default for Layout {
 
 impl Layout {
     pub fn new(width: f32, height: f32) -> Self {
-        Self { width, height }
+        Self {
+            width,
+            height,
+            scale: 1.0,
+        }
+    }
+
+    /// The same window at this display scale.
+    pub fn scaled(self, scale: f32) -> Self {
+        Self {
+            scale: if scale.is_finite() && scale > 0.0 {
+                scale
+            } else {
+                1.0
+            },
+            ..self
+        }
+    }
+
+    /// Physical pixels for an image drawn `logical` pixels wide.
+    pub fn physical(&self, logical: f32) -> u32 {
+        (logical * self.scale).ceil().max(1.0) as u32
     }
 
     fn content_width(&self) -> f32 {
@@ -46,7 +73,29 @@ impl Layout {
             Mode::Grid => {
                 (((self.content_width() + GAP) / (MIN_CARD + GAP)).floor() as usize).max(1)
             }
+            Mode::Wall => (((self.content_width() + WALL_GAP) / (MIN_WALL + WALL_GAP)).floor()
+                as usize)
+                .max(1),
         }
+    }
+
+    /// Space between cards in a row.
+    pub fn gap(&self, mode: Mode) -> f32 {
+        match mode {
+            Mode::Wall => WALL_GAP,
+            Mode::Grid | Mode::List => GAP,
+        }
+    }
+
+    /// A wall tile's width.
+    pub fn wall_width(&self) -> f32 {
+        let cols = self.cols(Mode::Wall) as f32;
+        (self.content_width() - WALL_GAP * (cols - 1.0)) / cols
+    }
+
+    /// A wall tile's 16:9 height.
+    pub fn wall_height(&self) -> f32 {
+        (self.wall_width() * 9.0 / 16.0).floor()
     }
 
     /// A card's width in the grid.
@@ -65,6 +114,7 @@ impl Layout {
         match mode {
             Mode::Grid => self.thumb_height() + CARD_TEXT + GAP,
             Mode::List => LIST_ROW + GAP / 2.0,
+            Mode::Wall => self.wall_height() + WALL_GAP,
         }
     }
 
