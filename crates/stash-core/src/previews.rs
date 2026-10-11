@@ -65,11 +65,9 @@ pub fn decode_preview_each(
     for frame in decoder.into_frames() {
         let frame = frame.map_err(|e| e.to_string())?;
         let (numer, denom) = frame.delay().numer_denom_ms();
-        let delay = if denom == 0 {
-            DEFAULT_DELAY_MS
-        } else {
-            (numer / denom).max(MIN_DELAY_MS)
-        };
+        let delay = numer
+            .checked_div(denom)
+            .map_or(DEFAULT_DELAY_MS, |ms| ms.max(MIN_DELAY_MS));
         let buffer = frame.into_buffer();
         let (w, h) = buffer.dimensions();
         let (rgba, w, h) = scale(buffer.into_raw(), w, h, width)?;

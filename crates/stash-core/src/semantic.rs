@@ -259,7 +259,7 @@ impl SemanticVocabulary {
             .filter(|(_, k)| *k == kind)
             .map(|(t, _)| t)
             .collect();
-        tags.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        tags.sort_by_key(|t| t.name.to_lowercase());
         tags
     }
 }
