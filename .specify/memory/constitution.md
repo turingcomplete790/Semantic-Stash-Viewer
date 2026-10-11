@@ -157,10 +157,11 @@ the UI out of playback avoids a second, weaker pipeline with different formats a
   or on worker threads, with loading states rendered immediately.
 - Performance budgets (on a mid-range desktop against a LAN Stash with a warm cache):
   - Input acknowledgement (hover, press, focus) < 50 ms; view navigation first paint < 150 ms.
-  - Scrolling within a page sustains 60 fps, and moving to another page meets the navigation
-    budget. Paging (Principle IV) bounds what is rendered; virtualization is needed only where a
-    view renders more items at once than it can keep within budget (for example, a large page
-    size the user chose).
+  - Scrolling within a page keeps up with the display. Measured on a 144 Hz display, scrolling
+    the scene grid misses at most 3% of frames, and other scrolled views (lists, the wall) at
+    most 1%; moving to another page meets the navigation budget. Paging (Principle IV) bounds
+    what is rendered; virtualization is needed only where a view renders more items at once
+    than it can keep within budget (for example, a large page size the user chose).
   - Local semantic queries over an already-indexed library return in < 200 ms.
   - Cold start to an interactive home view < 2 s (excluding first-run index build, which MUST
     show progress and remain cancellable).
@@ -478,4 +479,4 @@ first and lets every semantic feature, including the plugin's, sit on top of it.
   structure (or change an existing one), Principle II's expectations MUST be re-evaluated and the
   work added to the backlog.
 
-**Version**: 5.0.0 | **Ratified**: 2026-09-23 | **Last Amended**: 2026-10-06
+**Version**: 5.1.0 | **Ratified**: 2026-09-23 | **Last Amended**: 2026-10-10
