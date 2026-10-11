@@ -129,6 +129,14 @@ Focus: performer images on the scene page (20 px icons were too small to see).
   or requests); the old picture never shows again after that. Performers without a picture
   cost no picture download.
 
+### Session 2026-10-10
+
+- Q: Which grid scrolling budget does SC-009 hold 008 to, 007's 1% or the constitution's? → A:
+  The constitution's (5.1.0): grid scrolling misses at most 3% of frames at 144 Hz; lists and the
+  wall at most 1%.
+- Q: Is the wall still held to the grid's smoothness budget (SC-007)? → A: No: the wall has its
+  own constitution budget, at most 1% missed frames at 144 Hz (the grid's is 3%).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Find scenes: search, filters, saved filters (Priority: P1)
@@ -564,10 +572,12 @@ error offers the fallback, that choosing it plays the transcoded stream with a v
   at most 11 play-history writes.
 - **SC-007**: A card's animated preview starts within 300 ms of the 200 ms hover delay ending (on a LAN
   server; instantly when cached), at most one preview plays at a time, and wall mode scrolls a
-  250-scene page within the same smoothness budget as the grid.
+  250-scene page missing at most 1% of frames at 144 Hz (the constitution's budget for views
+  other than the grid, 5.1.0).
 - **SC-008**: Leaving a filtered Scenes tab (opening a scene, switching tabs, or restarting) and
   coming back returns to the same search, filters, page, and scroll position in 10 of 10 tries.
-- **SC-009**: Every interaction and playback budget measured in 007 still passes, and the
+- **SC-009**: Every interaction and playback budget measured in 007 still passes, at the budgets
+  the constitution sets (5.1.0: grid scrolling ≤ 3% missed frames at 144 Hz), and the
   performance harness covers the new rows (search, filter, scene page, preview start).
 
 ## Assumptions

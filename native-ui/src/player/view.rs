@@ -49,11 +49,11 @@ pub enum Msg {
     SpeedStep(Direction),
     Frame(Direction),
     Replay,
-    /// "Start from the beginning" after a resume (008 FR-013).
+    /// "Start from the beginning" after a resume (008 FR-012).
     StartOver,
-    /// The next or previous chapter (008 FR-011).
+    /// The next or previous chapter (008 FR-013).
     Chapter(Direction),
-    /// "Play transcoded" after the file couldn't be decoded (008 FR-022).
+    /// "Play transcoded" after the file couldn't be decoded (008 FR-023).
     PlayTranscoded,
     /// Mouse movement or a key: show the controls.
     Activity,
@@ -67,9 +67,9 @@ pub struct PlayerScreen {
     seek: SeekBar,
     dragging: Option<f64>,
     hover: Option<(f32, f64)>,
-    /// The scene's markers as `(start seconds, title)`, in time order (008 FR-011).
+    /// The scene's markers as `(start seconds, title)`, in time order (008 FR-013).
     pub chapters: Vec<(f64, String)>,
-    /// "Start from the beginning" shows until then (008 FR-013).
+    /// "Start from the beginning" shows until then (008 FR-012).
     pub restart_offer: Option<Instant>,
     /// Seek-bar thumbnails, once loaded (asked for on the first hover over the bar).
     pub sprites: Option<Sprites>,
@@ -100,7 +100,7 @@ impl PlayerScreen {
         self.snapshot.state == PlayerStateKind::Playing
     }
 
-    /// The file couldn't be decoded and no transcode was tried yet: offer one (008 FR-022). A
+    /// The file couldn't be decoded and no transcode was tried yet: offer one (008 FR-023). A
     /// network failure, or a transcode that failed, offers nothing.
     pub fn offers_transcode(&self) -> bool {
         self.snapshot.state == PlayerStateKind::Error
@@ -262,7 +262,7 @@ impl PlayerScreen {
         if visible {
             layers = layers.push(self.overlay(on, close, fullscreen));
         }
-        // After a resume, whether or not the controls show (008 FR-013).
+        // After a resume, whether or not the controls show (008 FR-012).
         if self.restart_offered() {
             layers = layers.push(
                 container(
@@ -323,7 +323,7 @@ impl PlayerScreen {
         let mut top_row = row![text(title).size(18).width(Length::Fill)]
             .spacing(10)
             .align_y(Alignment::Center);
-        // Playing the server's transcode, not the file (008 FR-022): always marked.
+        // Playing the server's transcode, not the file (008 FR-024): always marked.
         if s.transcoded {
             top_row = top_row.push(
                 container(text("Transcoded").size(12))
@@ -390,7 +390,7 @@ impl PlayerScreen {
             )
             .on_move(move |p| on(Msg::Hover { x: p.x, width }))
             .on_exit(on(Msg::HoverEnd));
-            // Chapter starts as ticks across the bar (008 FR-011); they don't take the pointer.
+            // Chapter starts as ticks across the bar (008 FR-013); they don't take the pointer.
             let mut layers = stack![bar];
             if duration > 0.0 {
                 for (t, _) in chapters {

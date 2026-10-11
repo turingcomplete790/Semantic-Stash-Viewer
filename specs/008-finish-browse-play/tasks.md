@@ -553,14 +553,38 @@ thumbnails on the seek bar.
 
 ## Phase 8: Polish & cross-cutting concerns
 
-- [ ] T088 [P] Update `README.md` and `ROADMAP.md` (browse and play done for scenes; semantic
+- [X] T088 [P] Update `README.md` and `ROADMAP.md` (browse and play done for scenes; semantic
   recommendations and tag colour editing still ahead)
-- [ ] T089 [P] Add a requirement-to-test table (FR-001–FR-026, SC-001–SC-009 → test names and
+- [X] T089 [P] Add a requirement-to-test table (FR-001–FR-026, SC-001–SC-009 → test names and
   harness rows) to [quickstart.md](quickstart.md)
-- [ ] T090 Full perf-harness run on Testing: every 007 row still passes (SC-009) and every `gql-*`
+- [X] T090 Full perf-harness run on Testing: every 007 row still passes (SC-009) and every `gql-*`
   row is within budget; record the summary in [quickstart.md](quickstart.md)
-- [ ] T091 Final gate: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D
+- [X] T091 Final gate: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D
   warnings`, `cargo test --workspace`
+
+**Constitution 5.1.0: the grid scroll budget** (analysis 2026-10-10, findings I1, I2, A1, I5, C1,
+I4, I6, G1; SC-009 clarified the same day)
+
+- [X] T092 Scroll budgets by view in `crates/perf-harness/src/main.rs`: in `scenes_measurements`
+  the per-mode loop uses 3.0 for `grid` and 1.0 for `list` and `wall` (was 1.0 for all); the
+  `scroll-missed-frames` row (007's grid scroll) uses 3.0; rewrite the comments "60 fps: under 1%
+  …", "< 1% missed frames in each mode", and "The wall (008 SC-007) is held to the grid's
+  smoothness budget" to state the 5.1.0 budgets, citing 007 research R8 for what counts as a
+  missed frame (over 1.5× the display's frame time)
+- [X] T093 The display's refresh rate with each scroll row: `native-ui/src/measure/bench.rs` adds
+  `refreshHz` (1000 ÷ `baselineMs`, one decimal) to every scroll report line; `crates/perf-harness`
+  marks a grid scroll row invalid ("measured at N Hz, not 144") when `refreshHz` is outside
+  139–149, leaving list and wall rows judged as they are; a unit test in
+  `crates/perf-harness/src/report.rs` (or `main.rs`'s tests) covers 144 Hz passing at 2.5%,
+  failing at 3.5%, and 60 Hz invalid
+- [X] T094 Documents: `specs/008-finish-browse-play/quickstart.md` harness summary rewritten for
+  5.1.0 (grid 2.4–2.7% within the 3% budget; "007's rows pass except one" and the pre-008
+  comparison bullet reworded); a one-line note under SC-005 in `specs/007-port-to-iced/spec.md`
+  pointing to constitution 5.1.0 for the grid budget; the Sync Impact Report comment removed from
+  `.specify/memory/constitution.md` before the commit
+- [X] T095 Rerun the scroll rows on Testing with the window visible on the 144 Hz display (`cargo
+  run -p perf-harness -- --profile "localhost:9998" --quick --scenes 1010,1011,1012 --long
+  1010`), record the result in the quickstart summary (with `refreshHz`), then the gate
 
 ---
 

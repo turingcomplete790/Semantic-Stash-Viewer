@@ -177,7 +177,7 @@ fn list_row(
     clickable(body.into(), index, focused, Length::Fill, LIST_ROW)
 }
 
-/// A wall tile (008 FR-020): the still alone; the title shows on hover as the tooltip would.
+/// A wall tile (008 FR-020): the still alone, no text.
 fn wall_tile(
     c: &SceneCard,
     index: usize,

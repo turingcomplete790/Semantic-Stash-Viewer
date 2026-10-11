@@ -387,7 +387,7 @@ impl Services {
     }
 
     /// Look up a scene and play its direct stream (never a transcode, Principle V). Without a
-    /// `start`, and with `resume`, it starts at the scene's cached resume point (008 FR-013);
+    /// `start`, and with `resume`, it starts at the scene's cached resume point (008 FR-012);
     /// returns the scene and that resume point when one was used.
     pub async fn open_scene(
         &self,

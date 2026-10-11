@@ -104,7 +104,7 @@ impl Playback {
         effects
     }
 
-    /// Play the server's transcode of the scene that couldn't be decoded (008 FR-022): only when
+    /// Play the server's transcode of the scene that couldn't be decoded (008 FR-023): only when
     /// offered, never retried after a transcode fails.
     fn open_transcoded(&mut self) -> Vec<Effect> {
         if !self.screen.offers_transcode() {

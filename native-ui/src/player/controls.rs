@@ -18,7 +18,7 @@ const IDLE: Duration = Duration::from_millis(3000);
 const ARRIVED_WITHIN: f64 = 1.0;
 /// …or until this long has passed.
 const TARGET_TIMEOUT: Duration = Duration::from_secs(5);
-/// How long "Start from the beginning" shows after a resume (008 FR-013).
+/// How long "Start from the beginning" shows after a resume (008 FR-012).
 pub const RESTART_OFFER: Duration = Duration::from_secs(8);
 /// Within this of a chapter's start, "previous chapter" goes to the one before (as mpv does).
 const CHAPTER_GRACE: f64 = 2.0;
@@ -42,7 +42,7 @@ pub enum Action {
     ToggleMute,
     /// Leave fullscreen if fullscreen, otherwise close the player.
     Escape,
-    /// The next or previous chapter (a scene marker, 008 FR-011).
+    /// The next or previous chapter (a scene marker, 008 FR-013).
     Chapter(Direction),
 }
 

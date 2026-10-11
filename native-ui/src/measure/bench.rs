@@ -1133,6 +1133,12 @@ impl Bench {
         let elapsed: f64 = frames.iter().sum();
         let mut line = super::summary(&frames, 1);
         line["baselineMs"] = round(baseline, 1).into();
+        // The display's refresh rate (the grid's budget is set at 144 Hz, constitution 5.1.0).
+        line["refreshHz"] = if baseline > 0.0 {
+            round(1000.0 / baseline, 1).into()
+        } else {
+            serde_json::Value::Null
+        };
         line["pxPerSecond"] = f64::from(SCROLL_SPEED).into();
         line["fps"] = if elapsed > 0.0 {
             round(frames.len() as f64 / elapsed * 1000.0, 1).into()

@@ -339,6 +339,8 @@ the harness rules of feature 003.
   under 1 s.
 - **SC-005**: Scrolling a 1000-card page at fling speed misses under 1% of frames in grid and list
   mode, both with thumbnails cached and while uncached thumbnails are still arriving.
+  *(Since constitution 5.1.0, 2026-10-10: the grid's budget is at most 3% of frames at 144 Hz;
+  the list keeps 1%.)*
 - **SC-006**: Playback opens in under 1.5 s, seeks in under 1 s (median, 4K included), and drops
   no frames at 1080p (counting frames not shown).
 - **SC-007**: 20 consecutive launch, browse, play, and quit cycles finish with no crash, hang, or

@@ -206,6 +206,49 @@ pub const GQL_BUDGETS: &[(&str, f64)] = &[
     ("gql-viewing-10min-writes", 12.0),
 ];
 
+/// Scrolling budgets by view (constitution 5.1.0, Principle VI): measured on a 144 Hz display, the
+/// scene grid misses at most 3% of frames and other scrolled views (lists, the wall) at most 1%. A
+/// missed frame takes over 1.5× the display's frame time (007 research R8).
+pub const GRID_SCROLL_BUDGET: f64 = 3.0;
+pub const VIEW_SCROLL_BUDGET: f64 = 1.0;
+/// The refresh rates counted as the 144 Hz display the grid budget is set for.
+pub const GRID_SCROLL_HZ: std::ops::RangeInclusive<f64> = 139.0..=149.0;
+
+/// A scroll row's missed frames against its view's budget. A grid row measured at another refresh
+/// rate (or without one) is invalid: its budget only holds at 144 Hz.
+pub fn scroll_measurement(
+    name: &str,
+    grid: bool,
+    missed: Option<f64>,
+    refresh_hz: Option<f64>,
+    invalid: Option<String>,
+) -> Measurement {
+    let budget = if grid {
+        GRID_SCROLL_BUDGET
+    } else {
+        VIEW_SCROLL_BUDGET
+    };
+    let invalid = invalid
+        .or_else(|| missed.is_none().then(|| "not measured".to_owned()))
+        .or_else(|| {
+            if !grid {
+                return None;
+            }
+            match refresh_hz {
+                Some(hz) if GRID_SCROLL_HZ.contains(&hz) => None,
+                Some(hz) => Some(format!("measured at {hz:.0} Hz, not 144")),
+                None => Some("refresh rate not reported".to_owned()),
+            }
+        });
+    Measurement::from_samples(
+        name,
+        Unit::Percent,
+        Some(budget),
+        &missed.into_iter().collect::<Vec<_>>(),
+        invalid,
+    )
+}
+
 /// One scenario's recorded requests, as the UI bench prints them
 /// (`{"bench": "gql", "row", "requests": {operation: count}, "bytes", "ms": [...]}`).
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -601,6 +644,23 @@ mod tests {
             None,
         );
         assert!(!rows.iter().any(|m| m.name.ends_with("-downloads")));
+    }
+
+    #[test]
+    fn grid_scrolling_is_judged_at_144_hz_against_3_percent() {
+        let pass = scroll_measurement("grid", true, Some(2.5), Some(144.0), None);
+        assert_eq!(pass.result, Outcome::Pass);
+        let fail = scroll_measurement("grid", true, Some(3.5), Some(143.8), None);
+        assert_eq!(fail.result, Outcome::Fail);
+        let other_rate = scroll_measurement("grid", true, Some(0.5), Some(60.0), None);
+        assert_eq!(other_rate.result, Outcome::Invalid);
+        let unknown = scroll_measurement("grid", true, Some(0.5), None, None);
+        assert_eq!(unknown.result, Outcome::Invalid);
+        // Other views keep 1% and aren't tied to a refresh rate.
+        let list = scroll_measurement("list", false, Some(1.5), Some(60.0), None);
+        assert_eq!(list.result, Outcome::Fail);
+        let wall = scroll_measurement("wall", false, Some(0.7), Some(144.0), None);
+        assert_eq!(wall.result, Outcome::Pass);
     }
 
     #[test]

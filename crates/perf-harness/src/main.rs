@@ -18,7 +18,9 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-use report::{gql_measurements, summarise, Check, GqlRow, Measurement, Report, Unit};
+use report::{
+    gql_measurements, scroll_measurement, summarise, Check, GqlRow, Measurement, Report, Unit,
+};
 
 const LAUNCH_TIMEOUT: Duration = Duration::from_secs(300);
 const LONG_PLAYBACK_SECS: u32 = 60;
@@ -573,12 +575,13 @@ fn bench_measurements(launch: &Launch) -> Vec<Measurement> {
             Some(50.0),
             Check::Median,
         ),
-        // 60 fps: under 1% of frames take over 1.5 display frames (research R8).
-        Measurement::from_samples(
+        // 007's grid scroll: at 144 Hz, at most 3% of frames take over 1.5 display frames
+        // (constitution 5.1.0; 007 research R8).
+        scroll_measurement(
             "scroll-missed-frames",
-            Unit::Percent,
-            Some(1.0),
-            &missed.into_iter().collect::<Vec<_>>(),
+            true,
+            missed,
+            scroll.and_then(|l| number(l, "refreshHz")),
             scroll_invalid.clone(),
         ),
         from_bench(
@@ -666,7 +669,8 @@ fn picker_measurements(launch: &Launch) -> Vec<Measurement> {
 }
 
 /// The paged Scenes view (005 R10): page change (< 150 ms at p95, 50 per page), page jump
-/// (< 1 s at p95), and scrolling a 1000-card page (< 1% missed frames in each mode).
+/// (< 1 s at p95), and scrolling a 1000-card page (constitution 5.1.0: the grid misses at most 3%
+/// of frames at 144 Hz, the list and the wall at most 1%).
 fn scenes_measurements(launch: &Launch) -> Vec<Measurement> {
     let mut out = vec![
         from_bench(
@@ -684,19 +688,18 @@ fn scenes_measurements(launch: &Launch) -> Vec<Measurement> {
             Check::P95,
         ),
     ];
-    // The wall (008 SC-007) is held to the grid's smoothness budget.
+    // Each view at its own budget (the wall, 008 SC-007, at the 1% of views other than the grid).
     for mode in ["grid", "list", "wall"] {
         let line = bench_line(launch, &format!("scenes-scroll-1000-{mode}"));
         let invalid = line
             .and_then(|l| l.get("invalid").and_then(Value::as_str).map(str::to_owned))
             .or_else(|| launch.invalid())
             .or_else(|| line.is_none().then(|| "not measured".to_owned()));
-        let missed = line.and_then(|l| number(l, "missedPercent"));
-        out.push(Measurement::from_samples(
+        out.push(scroll_measurement(
             &format!("scenes-scroll-1000-{mode}-missed-frames"),
-            Unit::Percent,
-            Some(1.0),
-            &missed.into_iter().collect::<Vec<_>>(),
+            mode == "grid",
+            line.and_then(|l| number(l, "missedPercent")),
+            line.and_then(|l| number(l, "refreshHz")),
             invalid,
         ));
     }
