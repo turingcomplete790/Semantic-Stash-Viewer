@@ -28,6 +28,10 @@ pub enum AppError {
     #[error("no scene with id {id}")]
     SceneNotFound { id: String },
 
+    /// Stash has no image with this id (012).
+    #[error("no image with id {id}")]
+    ImageNotFound { id: String },
+
     /// The scene exists but has no file to play.
     #[error("scene {id} has no playable file")]
     NoPlayableFile { id: String },

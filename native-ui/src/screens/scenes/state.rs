@@ -1,107 +1,148 @@
 //! The Scenes screen's state and transitions (007 T036; data model "Screen"; 005's paging rules,
-//! behaviour that stays B3). One request per page through the core's cache; when a page arrives,
-//! its neighbours are prefetched and the next page's thumbnails warmed, so moving there is instant.
+//! behaviour that stays B3). Since 012 the list itself (query, page, filters, search, saved
+//! filters) is the browse layer's [`List`]; this adds what is only Scenes': the queue view (010)
+//! and its playlist machine (011).
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::ops::{Deref, DerefMut};
 
 use serde::{Deserialize, Serialize};
+use stash_core::browse::entity::Entity;
 use stash_core::playback::playlist::{self, Command, Event, Playlist, Repeat, Settings};
-use stash_core::scenes::paging::{last_page, page_of, PAGE_SIZES};
-use stash_core::scenes::query::{SceneQuery, SceneSort, SortDirection};
+use stash_core::scenes::filter::kinds::CriterionKind;
+use stash_core::scenes::filter::saved::SavedFilter;
+use stash_core::scenes::filter::Criterion;
+use stash_core::scenes::query::{SceneQuery, SceneSort};
 use stash_core::scenes::{SceneCard, ScenePage};
 use stash_core::AppError;
 
-use stash_core::scenes::filter::kinds::CriterionKind;
-use stash_core::scenes::filter::saved::{DisplayMode, SavedFilter};
-use stash_core::scenes::filter::Criterion;
-
-use super::editor::{Editor, EditorMsg};
+use super::editor::EditorMsg;
 use super::keyboard::{GridAction, PageDirection};
 use super::layout::{Layout, QueueFit};
 use super::queue::{PendingPlay, QueueFocus, QueueState, Via};
 use crate::effects::Effect;
 use crate::library::Need;
 use crate::machine::Step;
+use crate::screens::browse::state::{
+    self as browse, cards_of, Arrival, BrowseMsg, BrowseUp, Kind, List,
+};
 use crate::screens::Mode;
 use crate::shell::TabId;
 use crate::widgets::scroll_watch::{AutoScroll, AutoScrolled};
 
-/// Request generations, unique across every screen so a result can only land where it was asked
-/// for.
-static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
+pub use crate::screens::browse::state::{Applied, Panel, PICKER_ID, SEARCH_DELAY, SEARCH_ID};
 
-fn next_generation() -> u64 {
-    NEXT_GENERATION.fetch_add(1, Ordering::Relaxed)
+/// What the Scenes screen has to show (transient).
+pub type Data = browse::Data<SceneCard>;
+
+/// Scenes as a browse list.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SceneKind;
+
+impl Kind for SceneKind {
+    type Sort = SceneSort;
+    type Card = SceneCard;
+    type Page = ScenePage;
+    const ENTITY: Entity = Entity::Scenes;
+
+    fn card_id(card: &SceneCard) -> &str {
+        &card.id
+    }
+
+    fn card_title(card: &SceneCard) -> &str {
+        &card.title
+    }
+
+    fn card_thumb(card: &SceneCard) -> Option<&str> {
+        card.thumb.as_deref()
+    }
+
+    fn card_view(
+        card: &SceneCard,
+        index: usize,
+        focused: bool,
+        marked: bool,
+        mode: Mode,
+        layout: &Layout,
+        pictures: crate::screens::browse::grid::Pictures<'_>,
+        msg: crate::screens::browse::controls::Map<Self>,
+    ) -> iced::Element<'static, crate::shell::ShellMsg> {
+        super::grid::card_view(card, index, focused, marked, mode, layout, pictures, msg)
+    }
+
+    fn page_parts(page: ScenePage) -> (u32, u32, Vec<SceneCard>) {
+        (page.count, page.page, page.items)
+    }
+
+    fn load(tab: TabId, generation: u64, query: SceneQuery, page: u32, size: u32) -> Effect {
+        Effect::LoadScenesPage {
+            tab,
+            generation,
+            query,
+            page,
+            size,
+        }
+    }
+
+    fn prefetch(query: SceneQuery, pages: Vec<u32>, size: u32, warm: Option<u32>) -> Effect {
+        Effect::PrefetchScenes {
+            query,
+            pages,
+            size,
+            warm,
+        }
+    }
+
+    fn saved_filters() -> Need {
+        Need::SavedFilters
+    }
+
+    fn sorts() -> &'static [SceneSort] {
+        SceneSort::all()
+    }
+
+    fn sort_label(sort: SceneSort) -> &'static str {
+        sort.label()
+    }
+
+    fn modes() -> &'static [(Mode, &'static str)] {
+        &[
+            (Mode::Grid, "Grid"),
+            (Mode::List, "List"),
+            (Mode::Wall, "Wall"),
+            (Mode::Queue, "Queue"),
+        ]
+    }
+
+    fn saved(library: &crate::library::Library) -> &crate::library::Loadable<Vec<SavedFilter>> {
+        &library.saved
+    }
+
+    const NOUN: &'static str = "scenes";
+    const ITEM: &'static str = "scene";
+    const SEARCH_PLACEHOLDER: &'static str = "Search scenes";
+}
+
+/// The shared views' list messages, as the shell's Scenes messages.
+pub fn shell_msg(m: BrowseMsg<SceneSort>) -> crate::shell::ShellMsg {
+    crate::shell::ShellMsg::Scenes(m.into())
 }
 
 /// The cache key for a page (the demo's, so caches compare): `scenes:q:<hash>:s:<size>:p:<page>`.
 pub fn page_key(query: &SceneQuery, page: u32, size: u32) -> String {
-    format!("scenes:q:{}:s:{size}:p:{page}", query.cache_hash())
+    browse::page_key(Entity::Scenes, query, page, size)
 }
 
 /// The scrollable's widget id in tab `tab`.
 pub fn scroll_id(tab: TabId) -> String {
-    format!("scenes-{tab}")
-}
-
-/// How long after the last keystroke a search runs (008 data model "Search").
-pub const SEARCH_DELAY: std::time::Duration = std::time::Duration::from_millis(300);
-
-/// The search box's widget id.
-pub const SEARCH_ID: &str = "scenes-search";
-
-/// The picker's search field's widget id.
-pub const PICKER_ID: &str = "scenes-picker";
-
-/// A saved filter applied to this tab (shown above the chips until the criteria change).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Applied {
-    pub id: String,
-    pub name: String,
-}
-
-/// What opens above the grid (transient).
-#[derive(Debug, Clone, PartialEq, Default)]
-pub enum Panel {
-    #[default]
-    None,
-    /// The filter menu: the active filters, then every kind by group; `highlight` is the
-    /// keyboard's row.
-    Menu { highlight: usize },
-    /// One criterion being added or changed.
-    Editor(Box<Editor>),
-    /// The saved filters, by name.
-    Saved { highlight: usize },
-}
-
-/// What the screen has to show (transient).
-#[derive(Debug, Clone, PartialEq, Default)]
-pub enum Data {
-    #[default]
-    Loading,
-    Ready {
-        /// Every matching scene.
-        count: u32,
-        cards: Vec<SceneCard>,
-    },
-    /// Nothing cached and the server can't be reached.
-    Unreachable,
+    browse::scroll_id_for(Entity::Scenes, tab)
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScenesState {
-    pub query: SceneQuery,
-    /// From 1: the page showing.
-    pub page: u32,
-    pub page_size: u32,
-    pub mode: Mode,
-    /// Logical pixels from the top.
-    pub scroll: f32,
-    /// The keyboard's card on the page.
-    pub focused: Option<usize>,
-    /// The saved filter applied to this tab, if the criteria haven't changed since.
-    #[serde(default)]
-    pub applied: Option<Applied>,
+    /// The list: query, page, size, mode, scroll, focus, applied filter (saved), and its
+    /// transient state. Flattened, so the saved form is 011's.
+    #[serde(flatten)]
+    pub list: List<SceneKind>,
     /// The queue view's selected scene (010 FR-007): after a restore, that card if it's on the
     /// page, otherwise the first.
     #[serde(default)]
@@ -120,84 +161,40 @@ pub struct ScenesState {
     /// restored tab starts a new round.
     #[serde(skip)]
     pub playlist: Playlist,
-    /// The query changed: the arriving page is a new result (a new shuffled round).
-    #[serde(skip)]
-    new_results: bool,
     /// The queue view's selection and panel (010).
     #[serde(skip)]
     pub queue: QueueState,
-    #[serde(skip)]
-    pub data: Data,
-    /// What's typed in the search box, before the debounce runs it (`None`: the query's search).
-    #[serde(skip)]
-    pub search_draft: Option<String>,
-    /// The debounce waiting to run the search.
-    #[serde(skip)]
-    search_pending: Option<u64>,
-    #[serde(skip)]
-    pub panel: Panel,
-    /// Parts of the last applied saved filter the viewer couldn't apply (FR-005).
-    #[serde(skip)]
-    pub left_out: Vec<String>,
-    /// The request in flight.
-    #[serde(skip)]
-    pending: Option<u64>,
-    /// The request in flight refreshes the page in place (cards stay, scroll stays).
-    #[serde(skip)]
-    refreshing: bool,
-    /// What's typed in "go to page".
-    #[serde(skip)]
-    pub go_to: String,
-    #[serde(skip)]
-    tab: TabId,
-    /// The request whose page is showing (the grid rebuilds only when it changes).
-    #[serde(skip)]
-    pub loaded: u64,
-    /// A bench scroll to run (the UI bench only).
-    #[serde(skip)]
-    pub auto_scroll: Option<AutoScroll>,
     /// A card to play now that its page arrived (Play next across pages), for the session.
     #[serde(skip)]
     play_due: Option<String>,
 }
 
+impl Deref for ScenesState {
+    type Target = List<SceneKind>;
+
+    fn deref(&self) -> &List<SceneKind> {
+        &self.list
+    }
+}
+
+impl DerefMut for ScenesState {
+    fn deref_mut(&mut self) -> &mut List<SceneKind> {
+        &mut self.list
+    }
+}
+
 impl Default for ScenesState {
     fn default() -> Self {
         Self {
-            query: SceneQuery::default(),
-            page: 1,
-            page_size: stash_core::scenes::paging::DEFAULT_PAGE_SIZE,
-            mode: Mode::Grid,
-            scroll: 0.0,
-            focused: None,
-            applied: None,
+            list: List::default(),
             queue_selected: None,
             autoplay: true,
             repeat: Repeat::Off,
             shuffle: false,
             playlist: Playlist::default(),
-            new_results: false,
             queue: QueueState::default(),
-            data: Data::Loading,
-            search_draft: None,
-            search_pending: None,
-            panel: Panel::None,
-            left_out: Vec::new(),
-            pending: None,
-            refreshing: false,
-            go_to: String::new(),
-            tab: 0,
-            loaded: 0,
-            auto_scroll: None,
             play_due: None,
         }
-    }
-}
-
-fn cards_of(data: &Data) -> &[SceneCard] {
-    match data {
-        Data::Ready { cards, .. } => cards,
-        _ => &[],
     }
 }
 
@@ -271,6 +268,82 @@ pub enum ScenesMsg {
     AutoScrolled(AutoScrolled),
 }
 
+impl From<BrowseMsg<SceneSort>> for ScenesMsg {
+    /// The list's message as Scenes' (the shared views send list messages).
+    fn from(m: BrowseMsg<SceneSort>) -> Self {
+        use BrowseMsg as B;
+        match m {
+            B::Page(p) => ScenesMsg::Page(p),
+            B::GoToInput(t) => ScenesMsg::GoToInput(t),
+            B::GoToSubmit => ScenesMsg::GoToSubmit,
+            B::PageSize(s) => ScenesMsg::PageSize(s),
+            B::Sort(s) => ScenesMsg::Sort(s),
+            B::ToggleDirection => ScenesMsg::ToggleDirection,
+            B::Reshuffle => ScenesMsg::Reshuffle,
+            B::Mode(m) => ScenesMsg::Mode(m),
+            B::Scrolled { y } => ScenesMsg::Scrolled { y },
+            B::Focus(i) => ScenesMsg::Focus(i),
+            B::Grid(a) => ScenesMsg::Grid(a),
+            B::Open { index, new_tab } => ScenesMsg::Open { index, new_tab },
+            B::Hover(i) => ScenesMsg::Hover(i),
+            B::HoverEnd(i) => ScenesMsg::HoverEnd(i),
+            B::Retry => ScenesMsg::Retry,
+            B::SearchInput(t) => ScenesMsg::SearchInput(t),
+            B::SearchSubmit => ScenesMsg::SearchSubmit,
+            B::FilterMenu(o) => ScenesMsg::FilterMenu(o),
+            B::MenuMove(d) => ScenesMsg::MenuMove(d),
+            B::Add(k) => ScenesMsg::Add(k),
+            B::Edit(k) => ScenesMsg::Edit(k),
+            B::Remove(k) => ScenesMsg::Remove(k),
+            B::ClearFilters => ScenesMsg::ClearFilters,
+            B::Editor(e) => ScenesMsg::Editor(e),
+            B::SavedMenu(o) => ScenesMsg::SavedMenu(o),
+            B::ApplySaved(f) => ScenesMsg::ApplySaved(f),
+            B::DismissLeftOut => ScenesMsg::DismissLeftOut,
+            B::FilterTo(c) => ScenesMsg::FilterTo(c),
+            B::AutoScroll(a) => ScenesMsg::AutoScroll(a),
+            B::AutoScrolled(a) => ScenesMsg::AutoScrolled(a),
+        }
+    }
+}
+
+impl ScenesMsg {
+    /// The list's part of this message, or the message back when it's Scenes' own.
+    fn into_browse(self) -> Result<BrowseMsg<SceneSort>, ScenesMsg> {
+        use BrowseMsg as B;
+        Ok(match self {
+            ScenesMsg::Page(p) => B::Page(p),
+            ScenesMsg::GoToInput(t) => B::GoToInput(t),
+            ScenesMsg::GoToSubmit => B::GoToSubmit,
+            ScenesMsg::PageSize(s) => B::PageSize(s),
+            ScenesMsg::Sort(s) => B::Sort(s),
+            ScenesMsg::ToggleDirection => B::ToggleDirection,
+            ScenesMsg::Reshuffle => B::Reshuffle,
+            ScenesMsg::Scrolled { y } => B::Scrolled { y },
+            ScenesMsg::Open { index, new_tab } => B::Open { index, new_tab },
+            ScenesMsg::Hover(i) => B::Hover(i),
+            ScenesMsg::HoverEnd(i) => B::HoverEnd(i),
+            ScenesMsg::Retry => B::Retry,
+            ScenesMsg::SearchInput(t) => B::SearchInput(t),
+            ScenesMsg::SearchSubmit => B::SearchSubmit,
+            ScenesMsg::FilterMenu(o) => B::FilterMenu(o),
+            ScenesMsg::MenuMove(d) => B::MenuMove(d),
+            ScenesMsg::Add(k) => B::Add(k),
+            ScenesMsg::Edit(k) => B::Edit(k),
+            ScenesMsg::Remove(k) => B::Remove(k),
+            ScenesMsg::ClearFilters => B::ClearFilters,
+            ScenesMsg::Editor(e) => B::Editor(e),
+            ScenesMsg::SavedMenu(o) => B::SavedMenu(o),
+            ScenesMsg::ApplySaved(f) => B::ApplySaved(f),
+            ScenesMsg::DismissLeftOut => B::DismissLeftOut,
+            ScenesMsg::FilterTo(c) => B::FilterTo(c),
+            ScenesMsg::AutoScroll(a) => B::AutoScroll(a),
+            ScenesMsg::AutoScrolled(a) => B::AutoScrolled(a),
+            other => return Err(other),
+        })
+    }
+}
+
 /// Events for the tab.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScenesUp {
@@ -283,6 +356,15 @@ pub enum ScenesUp {
     Need(Need),
     /// Play this scene, owned by this tab (the queue view, 010).
     Play(String),
+}
+
+impl From<BrowseUp> for ScenesUp {
+    fn from(up: BrowseUp) -> Self {
+        match up {
+            BrowseUp::Open { id, title, new_tab } => ScenesUp::Open { id, title, new_tab },
+            BrowseUp::Need(n) => ScenesUp::Need(n),
+        }
+    }
 }
 
 /// What the session does with the playlist machine's command (011 R2).
@@ -298,11 +380,6 @@ pub enum Advance {
     Stop,
 }
 
-fn new_seed() -> u32 {
-    let bytes = uuid::Uuid::new_v4().into_bytes();
-    u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
-}
-
 /// A shuffle round's seed (the machine takes randomness only as input).
 fn new_seed64() -> u64 {
     let bytes = uuid::Uuid::new_v4().into_bytes();
@@ -311,60 +388,26 @@ fn new_seed64() -> u64 {
     ])
 }
 
+fn up(step: Step<BrowseUp>) -> Step<ScenesUp> {
+    Step {
+        effects: step.effects,
+        up: step.up.map(ScenesUp::from),
+    }
+}
+
 impl ScenesState {
     /// A fresh screen at `page` with `page_size` per page.
     pub fn at(page: u32, page_size: u32) -> Self {
-        Self {
-            page,
-            page_size,
-            ..Self::default()
-        }
-    }
-
-    pub fn cards(&self) -> &[SceneCard] {
-        cards_of(&self.data)
-    }
-
-    pub fn count(&self) -> Option<u32> {
-        match &self.data {
-            Data::Ready { count, .. } => Some(*count),
-            _ => None,
-        }
-    }
-
-    /// The last page, once the count is known.
-    pub fn last_page(&self) -> Option<u32> {
-        self.count().map(|c| last_page(c, self.page_size))
-    }
-
-    pub fn ready(&self) -> bool {
-        matches!(self.data, Data::Ready { .. })
-    }
-
-    /// Nothing showing and nothing on its way.
-    pub fn needs_load(&self) -> bool {
-        !self.ready() && self.pending.is_none()
-    }
-
-    /// Whether request `generation` is this screen's.
-    pub fn awaits(&self, generation: u64) -> bool {
-        self.pending == Some(generation)
-    }
-
-    pub fn cache_key(&self) -> String {
-        page_key(&self.query, self.page, self.page_size)
+        let mut s = Self::default();
+        s.list.page = page;
+        s.list.page_size = page_size;
+        s
     }
 
     /// Only the saved fields.
     pub fn persistent(&self) -> Self {
         Self {
-            query: self.query.clone(),
-            page: self.page,
-            page_size: self.page_size,
-            mode: self.mode,
-            scroll: self.scroll,
-            focused: self.focused,
-            applied: self.applied.clone(),
+            list: self.list.persistent(),
             queue_selected: self.queue_selected.clone(),
             autoplay: self.autoplay,
             repeat: self.repeat,
@@ -376,185 +419,28 @@ impl ScenesState {
     /// A fresh screen showing a saved filter (the server's default for new tabs).
     pub fn from_saved(filter: &SavedFilter) -> Self {
         let mut s = Self::default();
-        s.adopt(filter);
+        s.list.adopt(filter);
         s
     }
 
-    /// Take a saved filter's search, criteria, sort, page size, and mode.
-    fn adopt(&mut self, filter: &SavedFilter) {
-        self.query = filter.query.clone();
-        if self.query.sort == SceneSort::Random && self.query.seed.is_none() {
-            self.query.seed = Some(new_seed());
+    /// After the list changed its results, the queue resets (010 FR-006).
+    fn after_list(&mut self) {
+        if self.list.take_changed() {
+            self.results_changed();
         }
-        if let Some(size) = filter.page_size {
-            // The nearest size the viewer offers.
-            self.page_size = PAGE_SIZES
-                .iter()
-                .copied()
-                .min_by_key(|s| s.abs_diff(size))
-                .unwrap_or(self.page_size);
-        }
-        match filter.mode {
-            // A Stash saved filter has no Queue mode: a tab in Queue stays there (010 R6).
-            _ if self.mode == Mode::Queue => {}
-            Some(DisplayMode::Grid) => self.mode = Mode::Grid,
-            Some(DisplayMode::List) => self.mode = Mode::List,
-            Some(DisplayMode::Wall) => self.mode = Mode::Wall,
-            // The tagger is Phase 3.
-            Some(DisplayMode::Tagger) | None => {}
-        }
-        self.applied = (filter.id != "default").then(|| Applied {
-            id: filter.id.clone(),
-            name: filter.name.clone(),
-        });
-        self.left_out = filter.left_out.clone();
-        self.search_draft = None;
-        self.search_pending = None;
     }
 
-    /// What the search box shows.
-    pub fn search_text(&self) -> &str {
-        self.search_draft.as_deref().unwrap_or(&self.query.search)
-    }
-
-    /// The criteria changed by the user: the applied saved filter no longer describes the tab.
-    fn criteria_changed(&mut self) -> Vec<Effect> {
-        self.applied = None;
-        self.left_out.clear();
-        self.requery()
+    fn go_to_page(&mut self, page: u32) -> Vec<Effect> {
+        let effects = self.list.go_to_page(page);
+        self.after_list();
+        effects
     }
 
     /// A debounced search came due.
     pub fn search_due(&mut self, generation: u64) -> Vec<Effect> {
-        if self.search_pending != Some(generation) {
-            return Vec::new();
-        }
-        self.run_search()
-    }
-
-    /// Whether this screen waits for search debounce `generation`.
-    pub fn awaits_search(&self, generation: u64) -> bool {
-        self.search_pending == Some(generation)
-    }
-
-    fn run_search(&mut self) -> Vec<Effect> {
-        self.search_pending = None;
-        let Some(draft) = self.search_draft.take() else {
-            return Vec::new();
-        };
-        if draft.trim() == self.query.search.trim() {
-            return Vec::new();
-        }
-        self.query.search = draft.trim().to_owned();
-        self.requery()
-    }
-
-    /// Open the editor for a new criterion of `kind`, or the existing one of that kind.
-    fn open_editor(&mut self, editor: Editor) -> Step<ScenesUp> {
-        let need = editor.picker().map(Need::Choices);
-        let picker = editor.picker().is_some();
-        self.panel = Panel::Editor(Box::new(editor));
-        let mut step = match need {
-            Some(n) => Step::up(ScenesUp::Need(n)),
-            None => Step::none(),
-        };
-        if picker {
-            step.effects.push(Effect::Focus(PICKER_ID));
-        }
-        step
-    }
-
-    fn editor_msg(&mut self, msg: EditorMsg) -> Step<ScenesUp> {
-        let Panel::Editor(editor) = &mut self.panel else {
-            return Step::none();
-        };
-        match msg {
-            EditorMsg::Cancel => {
-                self.panel = Panel::None;
-                Step::none()
-            }
-            EditorMsg::Apply => match editor.build() {
-                Ok(criterion) => {
-                    if let Some(old) = editor.replacing.clone() {
-                        if old != criterion.sort_key() {
-                            self.query.remove_criterion(&old);
-                        }
-                    }
-                    self.query.set_criterion(criterion);
-                    self.panel = Panel::None;
-                    Step::effects(self.criteria_changed())
-                }
-                Err(e) => {
-                    editor.error = Some(e);
-                    Step::none()
-                }
-            },
-            other => {
-                editor.update(other);
-                Step::none()
-            }
-        }
-    }
-
-    fn scroll_to(&self, y: f32) -> Effect {
-        Effect::ScrollTo {
-            id: scroll_id(self.tab),
-            y,
-        }
-    }
-
-    /// Entry: a page that's here comes back where it was left; otherwise load it.
-    pub fn enter(&mut self, tab: TabId) -> Vec<Effect> {
-        self.tab = tab;
-        if self.ready() {
-            vec![self.scroll_to(self.scroll)]
-        } else if self.pending.is_some() {
-            Vec::new()
-        } else {
-            self.load()
-        }
-    }
-
-    fn load(&mut self) -> Vec<Effect> {
-        let generation = next_generation();
-        self.pending = Some(generation);
-        if !self.refreshing {
-            self.data = Data::Loading;
-        }
-        vec![Effect::LoadScenesPage {
-            tab: self.tab,
-            generation,
-            query: self.query.normalized(),
-            page: self.page,
-            size: self.page_size,
-        }]
-    }
-
-    fn go_to_page(&mut self, page: u32) -> Vec<Effect> {
-        let page = match self.last_page() {
-            Some(last) => page.clamp(1, last),
-            None => page.max(1),
-        };
-        if page == self.page && !self.needs_load() {
-            return Vec::new();
-        }
-        self.page = page;
-        self.scroll = 0.0;
-        self.focused = None;
-        self.refreshing = false;
-        self.results_changed();
-        self.load()
-    }
-
-    /// The query changed: back to page 1.
-    fn requery(&mut self) -> Vec<Effect> {
-        self.new_results = true;
-        self.page = 1;
-        self.scroll = 0.0;
-        self.focused = None;
-        self.refreshing = false;
-        self.results_changed();
-        self.load()
+        let effects = self.list.search_due(generation);
+        self.after_list();
+        effects
     }
 
     /// The search, a filter, the sort, the page size, or the page changed: the queue's first
@@ -562,7 +448,7 @@ impl ScenesState {
     /// Autoplay on (011 FR-004).
     fn results_changed(&mut self) {
         self.queue.clear();
-        self.queue.pending_play = if self.mode == Mode::Queue {
+        self.queue.pending_play = if self.list.mode == Mode::Queue {
             PendingPlay::Start
         } else {
             PendingPlay::None
@@ -598,13 +484,13 @@ impl ScenesState {
 
     /// Card `local` of this page as an index into the whole result.
     fn global(&self, local: usize) -> u32 {
-        (self.page - 1) * self.page_size + local as u32
+        (self.list.page - 1) * self.list.page_size + local as u32
     }
 
     /// The card on this page for result index `i`.
     fn local(&self, i: u32) -> Option<usize> {
-        let on_page = i.checked_sub((self.page - 1) * self.page_size)? as usize;
-        (on_page < self.cards().len()).then_some(on_page)
+        let on_page = i.checked_sub((self.list.page - 1) * self.list.page_size)? as usize;
+        (on_page < self.list.cards().len()).then_some(on_page)
     }
 
     /// Tell the machine what the player holds: this tab's playing scene (the session keeps
@@ -616,7 +502,7 @@ impl ScenesState {
                 self.machine(Event::Idle(at));
             }
             Some(id) => {
-                let at = self.cards().iter().position(|c| c.id == id);
+                let at = self.list.cards().iter().position(|c| c.id == id);
                 if let Some(i) = at.map(|l| self.global(l)) {
                     if self.playlist.playing != Some(i) || !self.playlist.live {
                         self.machine(Event::Started(i));
@@ -632,7 +518,7 @@ impl ScenesState {
         let i = self.queue.selected?;
         self.sync_playing();
         match self.machine(event(self.global(i))) {
-            Command::Play(_) => self.cards().get(i).map(|c| c.id.clone()),
+            Command::Play(_) => self.list.cards().get(i).map(|c| c.id.clone()),
             _ => None,
         }
     }
@@ -646,7 +532,7 @@ impl ScenesState {
     /// The queue may start on its own at the selection (choosing Queue, new results, a switch to
     /// the tab): the scene to play, with Autoplay on (011 R5).
     pub fn autostart(&mut self) -> Option<String> {
-        if self.mode != Mode::Queue {
+        if self.list.mode != Mode::Queue {
             return None;
         }
         self.selection_plays(Event::Autostart)
@@ -654,8 +540,8 @@ impl ScenesState {
 
     /// A playlist event from the session (Ended, Skipped, Next, Previous): what to do.
     pub fn queue_event(&mut self, event: Event, tab: TabId, layout: &Layout) -> Advance {
-        self.tab = tab;
-        if self.mode != Mode::Queue || !self.ready() {
+        self.list.tab = tab;
+        if self.list.mode != Mode::Queue || !self.list.ready() {
             return Advance::Stop;
         }
         self.sync_playing();
@@ -670,7 +556,7 @@ impl ScenesState {
             Command::Play(i) => match self.local(i) {
                 Some(card) => self.queue_play(card, layout),
                 None => {
-                    let effects = self.go_to_page(i / self.page_size + 1);
+                    let effects = self.go_to_page(i / self.list.page_size + 1);
                     self.queue.pending_play = PendingPlay::Index(i);
                     Advance::Loading(effects)
                 }
@@ -680,7 +566,7 @@ impl ScenesState {
                     .playlist
                     .playing
                     .and_then(|i| self.local(i))
-                    .and_then(|l| self.cards().get(l))
+                    .and_then(|l| self.list.cards().get(l))
                     .map(|c| c.id.clone())
                     .or_else(|| self.queue.playing.clone());
                 match id {
@@ -694,7 +580,7 @@ impl ScenesState {
 
     /// A scene began playing in this tab: the machine's position follows it.
     pub fn queue_started(&mut self, id: &str) {
-        if let Some(i) = self.cards().iter().position(|c| c.id == id) {
+        if let Some(i) = self.list.cards().iter().position(|c| c.id == id) {
             let i = self.global(i);
             self.machine(Event::Started(i));
         }
@@ -714,7 +600,7 @@ impl ScenesState {
                     index,
                     new_tab: false,
                 },
-                self.tab,
+                self.list.tab,
                 layout,
             );
         }
@@ -725,12 +611,12 @@ impl ScenesState {
     fn queue_select_here(&mut self, index: usize, via: Via, layout: &Layout) -> Vec<Effect> {
         let mut effects = self
             .queue
-            .select(index, via, cards_of(&self.data), self.tab);
+            .select(index, via, cards_of(&self.list.data), self.list.tab);
         self.sync_queue_selection();
         if let Some(i) = self.queue.selected {
-            if let Some(y) = layout.reveal(i, self.scroll, self.mode) {
-                self.scroll = y;
-                effects.push(self.scroll_to(y));
+            if let Some(y) = layout.reveal(i, self.list.scroll, self.list.mode) {
+                self.list.scroll = y;
+                effects.push(self.list.scroll_to(y));
             }
         }
         effects
@@ -739,7 +625,7 @@ impl ScenesState {
     /// Play card `index` from the queue: it's selected (its details load) and plays.
     fn queue_play(&mut self, index: usize, layout: &Layout) -> Advance {
         let effects = self.queue_select_here(index, Via::Pointer, layout);
-        match self.queue.selected.and_then(|i| self.cards().get(i)) {
+        match self.queue.selected.and_then(|i| self.list.cards().get(i)) {
             Some(card) => Advance::Play {
                 id: card.id.clone(),
                 effects,
@@ -751,7 +637,7 @@ impl ScenesState {
     /// The queue's keyboard crossed a page edge: the arriving page's card is a keyboard selection
     /// (it plays once it rests), not the new results' first scene.
     fn keyboard_edge(&mut self) {
-        if self.mode == Mode::Queue {
+        if self.list.mode == Mode::Queue {
             self.queue.pending_play = PendingPlay::Keyboard;
         }
     }
@@ -763,11 +649,11 @@ impl ScenesState {
 
     /// The keyboard's card and the saved id follow the queue's selection.
     fn sync_queue_selection(&mut self) {
-        self.focused = self.queue.selected;
+        self.list.focused = self.queue.selected;
         self.queue_selected = self
             .queue
             .selected
-            .and_then(|i| self.cards().get(i))
+            .and_then(|i| self.list.cards().get(i))
             .map(|c| c.id.clone());
     }
 
@@ -776,15 +662,15 @@ impl ScenesState {
     fn queue_start(&self) -> usize {
         self.queue_selected
             .as_deref()
-            .and_then(|id| self.cards().iter().position(|c| c.id == id))
-            .or(self.focused)
+            .and_then(|id| self.list.cards().iter().position(|c| c.id == id))
+            .or(self.list.focused)
             .unwrap_or(0)
     }
 
     /// A rest for the queue's selection came due.
     /// Its effects, and the scene to play when a keyboard move started it (011 R2).
     pub fn queue_rest_due(&mut self, generation: u64, tab: TabId) -> (Vec<Effect>, Option<String>) {
-        self.tab = tab;
+        self.list.tab = tab;
         let (effects, plays) = self.queue.rest_due(generation, tab);
         let play = if plays { self.chosen() } else { None };
         (effects, play)
@@ -792,89 +678,27 @@ impl ScenesState {
 
     /// Whether this screen's queue waits for rest `generation`.
     pub fn awaits_queue_rest(&self, generation: u64) -> bool {
-        self.mode == Mode::Queue && self.queue.awaits_rest(generation)
-    }
-
-    /// The first card at least partly visible, as an index into the whole result.
-    fn first_visible(&self, layout: &Layout) -> u32 {
-        let on_page = layout.first_visible(self.scroll, self.mode);
-        let on_page = on_page.min(self.cards().len().saturating_sub(1));
-        (self.page - 1) * self.page_size + on_page as u32
+        self.list.mode == Mode::Queue && self.queue.awaits_rest(generation)
     }
 
     pub fn update(&mut self, msg: ScenesMsg, tab: TabId, layout: &Layout) -> Step<ScenesUp> {
-        self.tab = tab;
+        self.list.tab = tab;
         match msg {
-            ScenesMsg::Page(page) => Step::effects(self.go_to_page(page)),
-            ScenesMsg::GoToInput(text) => {
-                self.go_to = text.chars().filter(char::is_ascii_digit).take(7).collect();
-                Step::none()
-            }
-            ScenesMsg::GoToSubmit => {
-                let target = self.go_to.parse::<u32>().ok();
-                self.go_to.clear();
-                match target {
-                    Some(page) => Step::effects(self.go_to_page(page)),
-                    None => Step::none(),
-                }
-            }
-            ScenesMsg::PageSize(size) => {
-                if !PAGE_SIZES.contains(&size) || size == self.page_size {
-                    return Step::none();
-                }
-                // Keep the first visible scene on screen (005).
-                let first = self.first_visible(layout);
-                self.page_size = size;
-                self.page = page_of(first, size);
-                let on_page = (first - (self.page - 1) * size) as usize;
-                self.scroll = layout.row_top(on_page, self.mode);
-                self.focused = None;
-                self.refreshing = false;
-                self.results_changed();
-                Step::effects(self.load())
-            }
-            ScenesMsg::Sort(sort) => {
-                if sort == self.query.sort {
-                    return Step::none();
-                }
-                self.query.sort = sort;
-                if sort == SceneSort::Random && self.query.seed.is_none() {
-                    self.query.seed = Some(new_seed());
-                }
-                Step::effects(self.requery())
-            }
-            ScenesMsg::ToggleDirection => {
-                self.query.direction = match self.query.direction {
-                    SortDirection::Asc => SortDirection::Desc,
-                    SortDirection::Desc => SortDirection::Asc,
-                };
-                Step::effects(self.requery())
-            }
-            ScenesMsg::Reshuffle => {
-                let old = self.query.seed;
-                while self.query.seed == old {
-                    self.query.seed = Some(new_seed());
-                }
-                Step::effects(self.requery())
-            }
             ScenesMsg::Mode(mode) => {
-                if mode == self.mode {
+                if mode == self.list.mode {
                     return Step::none();
                 }
-                let first = layout.first_visible(self.scroll, self.mode);
-                let leaving = self.mode == Mode::Queue;
-                self.mode = mode;
-                self.scroll = layout.row_top(first, mode);
-                let mut step = Step::effect(self.scroll_to(self.scroll));
+                let leaving = self.list.mode == Mode::Queue;
+                let mut step = Step::effect(self.list.set_mode(mode, layout));
                 if mode == Mode::Queue {
                     // Choosing Queue loads the selection at once and, with Autoplay on, plays it
                     // (011 FR-004).
-                    if !self.cards().is_empty() {
+                    if !self.list.cards().is_empty() {
                         let start = self.queue_start();
                         let more = self.queue_select(start, Via::Pointer, layout);
                         step.effects.extend(more.effects);
                         step.up = more.up.or_else(|| self.autostart().map(ScenesUp::Play));
-                    } else if !self.ready() {
+                    } else if !self.list.ready() {
                         self.queue.pending_play = PendingPlay::Start;
                     }
                 } else if leaving {
@@ -883,7 +707,7 @@ impl ScenesState {
                 step
             }
             // 011 R6: a click plays the row (the playing row: selects only).
-            ScenesMsg::QueueSelect(index) if self.mode == Mode::Queue => {
+            ScenesMsg::QueueSelect(index) if self.list.mode == Mode::Queue => {
                 let step = self.queue_select(index, Via::Pointer, layout);
                 match step.up {
                     Some(up) => Step::up(up).with_all(step.effects),
@@ -894,7 +718,7 @@ impl ScenesState {
                 }
             }
             ScenesMsg::QueueSelect(_) => Step::none(),
-            ScenesMsg::QueuePlay(index) if self.mode == Mode::Queue => {
+            ScenesMsg::QueuePlay(index) if self.list.mode == Mode::Queue => {
                 let effects = self.queue_select_here(index, Via::Pointer, layout);
                 Step {
                     effects,
@@ -924,196 +748,57 @@ impl ScenesState {
                 self.machine(Event::CycleRepeat);
                 Step::none()
             }
-            ScenesMsg::Scrolled { y } => {
-                self.scroll = y;
-                Step::none()
-            }
             ScenesMsg::Focus(index) => Step::effects(self.focus(index, layout)),
             ScenesMsg::Grid(action) => self.grid(action, layout),
-            ScenesMsg::Open { index, new_tab } => {
-                let Some(card) = self.cards().get(index) else {
-                    return Step::none();
-                };
-                let up = ScenesUp::Open {
-                    id: card.id.clone(),
-                    title: card.title.clone(),
-                    new_tab,
-                };
-                self.focused = Some(index);
-                Step::up(up)
-            }
-            // The session handles these for the preview (it needs no screen state).
-            ScenesMsg::Hover(_) | ScenesMsg::HoverEnd(_) => Step::none(),
-            ScenesMsg::AutoScroll(auto) => {
-                self.auto_scroll = auto;
-                Step::none()
-            }
-            ScenesMsg::AutoScrolled(_) => {
-                self.auto_scroll = None;
-                Step::none()
-            }
-            ScenesMsg::Retry => {
-                self.refreshing = false;
-                Step::effects(self.load())
-            }
-            ScenesMsg::SearchInput(text) => {
-                self.search_draft = Some(text);
-                let generation = next_generation();
-                self.search_pending = Some(generation);
-                Step::effect(Effect::SearchDue {
-                    tab: self.tab,
-                    generation,
-                    after: SEARCH_DELAY,
-                })
-            }
-            ScenesMsg::SearchSubmit => Step::effects(self.run_search()),
-            ScenesMsg::FilterMenu(open) => {
-                self.panel = if open {
-                    Panel::Menu { highlight: 0 }
-                } else {
-                    Panel::None
-                };
-                Step::none()
-            }
-            ScenesMsg::MenuMove(delta) => {
-                match &mut self.panel {
-                    Panel::Menu { highlight } | Panel::Saved { highlight } => {
-                        *highlight = highlight.saturating_add_signed(delta as isize);
-                    }
-                    Panel::Editor(editor) => editor.update(EditorMsg::PickerMove(delta)),
-                    Panel::None => {}
+            other => match other.into_browse() {
+                Ok(m) => {
+                    let step = up(self.list.update(m, tab, layout));
+                    self.after_list();
+                    step
                 }
-                Step::none()
-            }
-            ScenesMsg::Add(kind) => {
-                if kind.info().is_placeholder() {
-                    return Step::none();
-                }
-                let existing = self
-                    .query
-                    .criteria
-                    .iter()
-                    .find(|c| c.kind == kind && !kind.info().repeatable())
-                    .map(Editor::from_criterion);
-                self.open_editor(existing.unwrap_or_else(|| Editor::new(kind)))
-            }
-            ScenesMsg::Edit(key) => {
-                let Some(c) = self.query.criteria.iter().find(|c| c.sort_key() == key) else {
-                    return Step::none();
-                };
-                if c.info().is_placeholder() {
-                    return Step::none();
-                }
-                let editor = Editor::from_criterion(c);
-                self.open_editor(editor)
-            }
-            ScenesMsg::Remove(key) => {
-                let before = self.query.criteria.len();
-                self.query.remove_criterion(&key);
-                if self.query.criteria.len() == before {
-                    return Step::none();
-                }
-                if matches!(&self.panel, Panel::Editor(e) if e.replacing.as_deref() == Some(key.as_str()))
-                {
-                    self.panel = Panel::None;
-                }
-                Step::effects(self.criteria_changed())
-            }
-            ScenesMsg::ClearFilters => {
-                if self.query.criteria.is_empty() && self.query.search.is_empty() {
-                    return Step::none();
-                }
-                self.query.criteria.clear();
-                self.query.search.clear();
-                self.search_draft = None;
-                self.search_pending = None;
-                self.panel = Panel::None;
-                Step::effects(self.criteria_changed())
-            }
-            ScenesMsg::Editor(m) => self.editor_msg(m),
-            ScenesMsg::SavedMenu(open) => {
-                if open {
-                    self.panel = Panel::Saved { highlight: 0 };
-                    Step::up(ScenesUp::Need(Need::SavedFilters))
-                } else {
-                    self.panel = Panel::None;
-                    Step::none()
-                }
-            }
-            ScenesMsg::ApplySaved(filter) => {
-                self.adopt(&filter);
-                self.new_results = true;
-                self.panel = Panel::None;
-                self.page = 1;
-                self.scroll = 0.0;
-                self.focused = None;
-                self.refreshing = false;
-                self.results_changed();
-                Step::effects(self.load())
-            }
-            ScenesMsg::DismissLeftOut => {
-                self.left_out.clear();
-                Step::none()
-            }
-            ScenesMsg::FilterTo(criterion) => {
-                self.query.criteria = vec![criterion];
-                self.query.search.clear();
-                self.search_draft = None;
-                Step::effects(self.criteria_changed())
-            }
+                Err(_) => Step::none(),
+            },
         }
     }
 
     fn focus(&mut self, index: usize, layout: &Layout) -> Vec<Effect> {
-        let count = self.cards().len();
-        if count == 0 {
+        if self.list.cards().is_empty() {
             return Vec::new();
         }
-        if self.mode == Mode::Queue {
+        if self.list.mode == Mode::Queue {
             // The list's arrows move the queue's selection (010 R3).
             return self.queue_select(index, Via::Keyboard, layout).effects;
         }
-        let index = index.min(count - 1);
-        self.focused = Some(index);
-        match layout.reveal(index, self.scroll, self.mode) {
-            Some(y) => {
-                self.scroll = y;
-                vec![self.scroll_to(y)]
-            }
-            None => Vec::new(),
-        }
+        self.list.focus(index, layout)
     }
 
     fn grid(&mut self, action: GridAction, layout: &Layout) -> Step<ScenesUp> {
-        let last = self.last_page().unwrap_or(self.page);
+        let last = self.list.last_page().unwrap_or(self.list.page);
         match action {
             GridAction::Move(index) => Step::effects(self.focus(index, layout)),
-            GridAction::Edge(PageDirection::Next) if self.page < last => {
-                let effects = self.go_to_page(self.page + 1);
-                self.focused = Some(0);
+            GridAction::Edge(PageDirection::Next) if self.list.page < last => {
+                let effects = self.go_to_page(self.list.page + 1);
+                self.list.focused = Some(0);
                 self.keyboard_edge();
                 Step::effects(effects)
             }
-            GridAction::Edge(PageDirection::Previous) if self.page > 1 => {
-                let effects = self.go_to_page(self.page - 1);
-                self.focused = Some(self.page_size as usize - 1);
+            GridAction::Edge(PageDirection::Previous) if self.list.page > 1 => {
+                let effects = self.go_to_page(self.list.page - 1);
+                self.list.focused = Some(self.list.page_size as usize - 1);
                 self.keyboard_edge();
                 Step::effects(effects)
-            }
-            GridAction::Edge(_) => Step::none(),
-            GridAction::Page(PageDirection::Next) => Step::effects(self.go_to_page(self.page + 1)),
-            GridAction::Page(PageDirection::Previous) => {
-                Step::effects(self.go_to_page(self.page.saturating_sub(1)))
             }
             // Enter plays the queue's selection (010 R5); Ctrl+Enter still opens a new tab.
             GridAction::Open {
                 index,
                 new_tab: false,
-            } if self.mode == Mode::Queue => {
-                self.update(ScenesMsg::QueuePlay(index), self.tab, layout)
+            } if self.list.mode == Mode::Queue => {
+                self.update(ScenesMsg::QueuePlay(index), self.list.tab, layout)
             }
-            GridAction::Open { index, new_tab } => {
-                self.update(ScenesMsg::Open { index, new_tab }, self.tab, layout)
+            other => {
+                let step = up(self.list.grid(other, layout));
+                self.after_list();
+                step
             }
         }
     }
@@ -1125,108 +810,59 @@ impl ScenesState {
         result: Result<ScenePage, AppError>,
         waiting: bool,
     ) -> Vec<Effect> {
-        if self.pending != Some(generation) {
-            return Vec::new();
+        let count = result.as_ref().ok().map(|p| p.count);
+        let refreshing = match self.list.arrive(generation, result, waiting) {
+            Arrival::Arrived { refreshing } => refreshing,
+            Arrival::NotOurs | Arrival::Failed => return Vec::new(),
+        };
+        // The machine follows the result: a new query or a new size starts it over (a new
+        // shuffled round, 011 FR-007).
+        let count = count.unwrap_or(0);
+        if self.list.take_new_query() || self.playlist.count != count {
+            self.machine(Event::ResultsChanged {
+                count,
+                seed: new_seed64(),
+            });
         }
-        self.pending = None;
-        let refreshing = std::mem::take(&mut self.refreshing);
-        match result {
-            Ok(page) => {
-                self.page = page.page;
-                let last = last_page(page.count, self.page_size);
-                // The machine follows the result: a new query or a new size starts it over (a new
-                // shuffled round, 011 FR-007).
-                if std::mem::take(&mut self.new_results) || self.playlist.count != page.count {
-                    self.machine(Event::ResultsChanged {
-                        count: page.count,
-                        seed: new_seed64(),
-                    });
-                }
-                if let Some(f) = self.focused {
-                    self.focused = (!page.items.is_empty()).then(|| f.min(page.items.len() - 1));
-                }
-                self.data = Data::Ready {
-                    count: page.count,
-                    cards: page.items,
+        let mut effects = Vec::new();
+        if self.list.mode == Mode::Queue {
+            if self.list.cards().is_empty() {
+                self.queue.clear();
+            } else {
+                // The machine's scene is on this page (Next, Previous, a shuffled pick, Repeat
+                // all), or the queue may start here.
+                let pending = std::mem::take(&mut self.queue.pending_play);
+                let wanted = match pending {
+                    PendingPlay::Index(i) => self.local(i),
+                    _ => None,
                 };
-                self.loaded = generation;
-                let mut effects = Vec::new();
-                if self.mode == Mode::Queue {
-                    if self.cards().is_empty() {
-                        self.queue.clear();
-                    } else {
-                        // The machine's scene is on this page (Next, Previous, a shuffled pick,
-                        // Repeat all), or the queue may start here.
-                        let pending = std::mem::take(&mut self.queue.pending_play);
-                        let wanted = match pending {
-                            PendingPlay::Index(i) => self.local(i),
-                            _ => None,
-                        };
-                        let (start, via) = match pending {
-                            PendingPlay::Index(_) | PendingPlay::Start => {
-                                (wanted.unwrap_or_else(|| self.queue_start()), Via::Pointer)
-                            }
-                            PendingPlay::Keyboard => (self.queue_start(), Via::Keyboard),
-                            // A restore or a refresh: load only, never play (011 R6).
-                            PendingPlay::None => (self.queue_start(), Via::Arrival),
-                        };
-                        effects.extend(self.queue.select(
-                            start,
-                            via,
-                            cards_of(&self.data),
-                            self.tab,
-                        ));
-                        self.sync_queue_selection();
-                        self.play_due = match pending {
-                            // The machine already chose it.
-                            PendingPlay::Index(_) if wanted.is_some() => self
-                                .queue_selected
-                                .clone()
-                                .filter(|id| self.queue.playing.as_deref() != Some(id)),
-                            PendingPlay::Start => self.autostart(),
-                            _ => None,
-                        };
+                let (start, via) = match pending {
+                    PendingPlay::Index(_) | PendingPlay::Start => {
+                        (wanted.unwrap_or_else(|| self.queue_start()), Via::Pointer)
                     }
-                }
-                if !refreshing {
-                    effects.push(self.scroll_to(self.scroll));
-                }
-                let next = (self.page < last).then_some(self.page + 1);
-                let pages: Vec<u32> = next
-                    .into_iter()
-                    .chain((self.page > 1).then(|| self.page - 1))
-                    .collect();
-                if !pages.is_empty() {
-                    effects.push(Effect::PrefetchScenes {
-                        query: self.query.normalized(),
-                        pages,
-                        size: self.page_size,
-                        warm: next,
-                    });
-                }
-                effects
-            }
-            Err(e) => {
-                tracing::debug!(error = %e, page = self.page, "scenes page unavailable");
-                if !refreshing {
-                    self.data = if waiting {
-                        Data::Loading
-                    } else {
-                        Data::Unreachable
-                    };
-                }
-                Vec::new()
+                    PendingPlay::Keyboard => (self.queue_start(), Via::Keyboard),
+                    // A restore or a refresh: load only, never play (011 R6).
+                    PendingPlay::None => (self.queue_start(), Via::Arrival),
+                };
+                effects.extend(self.queue.select(
+                    start,
+                    via,
+                    cards_of(&self.list.data),
+                    self.list.tab,
+                ));
+                self.sync_queue_selection();
+                self.play_due = match pending {
+                    // The machine already chose it.
+                    PendingPlay::Index(_) if wanted.is_some() => self
+                        .queue_selected
+                        .clone()
+                        .filter(|id| self.queue.playing.as_deref() != Some(id)),
+                    PendingPlay::Start => self.autostart(),
+                    _ => None,
+                };
             }
         }
-    }
-
-    /// Cached data changed: re-read the page in place if it's this one (`*`: everything).
-    pub fn cache_changed(&mut self, key: &str, tab: TabId) -> Vec<Effect> {
-        if !self.ready() || (key != "*" && key != self.cache_key()) {
-            return Vec::new();
-        }
-        self.tab = tab;
-        self.refreshing = true;
-        self.load()
+        effects.extend(self.list.after_arrival(refreshing));
+        effects
     }
 }

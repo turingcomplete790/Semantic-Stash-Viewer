@@ -16,6 +16,7 @@ use super::filters::{
     SaveTagColours, SaveTagColoursVariables, SavedFiltersVariables, SavedSceneFilters, UiConfig,
 };
 use super::gql::FindFilterType;
+use super::images::{ImageDetailsQuery, ImageIdVariables, ImagesPage, ImagesPageVariables};
 use super::scene_page::{SceneDetails, SceneFiles, SceneGalleries, SceneIdVariables};
 use super::scenes::{ScenesPage, ScenesPageVariables};
 
@@ -49,6 +50,23 @@ pub fn documents() -> Vec<OperationDocument> {
             query: ScenesPage::build(ScenesPageVariables {
                 filter: FindFilterType::default(),
                 scene_filter: None,
+            })
+            .query,
+        },
+        OperationDocument {
+            name: "ImagesPage",
+            tier: Tier::Card,
+            query: ImagesPage::build(ImagesPageVariables {
+                filter: FindFilterType::default(),
+                image_filter: None,
+            })
+            .query,
+        },
+        OperationDocument {
+            name: "ImageDetails",
+            tier: Tier::Detail,
+            query: ImageDetailsQuery::build(ImageIdVariables {
+                id: cynic::Id::new("0"),
             })
             .query,
         },

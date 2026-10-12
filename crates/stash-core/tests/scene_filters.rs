@@ -2,6 +2,7 @@
 //! filters (008 FR-002 to FR-005, research R3).
 
 use serde_json::{json, Value};
+use stash_core::browse::entity::Entity;
 use stash_core::scenes::filter::kinds::{CriterionKind, ValueType};
 use stash_core::scenes::filter::saved::{decode_default_filter, decode_saved_filter, DisplayMode};
 use stash_core::scenes::filter::to_stash::scene_filter_json;
@@ -86,7 +87,8 @@ fn modifiers_of(kind: CriterionKind) -> Vec<Modifier> {
 
 #[test]
 fn every_kind_and_modifier_converts_to_its_stash_field() {
-    for kind in CriterionKind::ALL {
+    // 012: the kinds Scenes offers (Images' own kinds are tested in image_filters.rs).
+    for kind in Entity::Scenes.criteria().collect::<Vec<_>>().iter() {
         for modifier in modifiers_of(*kind) {
             let c = Criterion::new(*kind, modifier, sample_value(*kind, modifier));
             assert_eq!(
@@ -452,4 +454,37 @@ fn a_random_sort_keeps_a_seed() {
     assert_eq!(saved.query.sort, SceneSort::Random);
     assert!(saved.query.seed.is_some());
     assert!(saved.query.stash_sort().is_ok());
+}
+
+/// 012 T011: an images saved filter decodes with images' criteria and sorts; a scene filter leaves
+/// image-only criteria out, and an image filter leaves scene-only ones out.
+#[test]
+fn saved_filters_decode_per_entity() {
+    use stash_core::images::ImageSort;
+    use stash_core::scenes::filter::saved::{decode_saved_filter_for, SavedFilterOf};
+    let find = json!({"per_page": 40, "sort": "o_counter", "direction": "ASC"});
+    let object = json!({
+        "performers": {"modifier": "INCLUDES_ALL", "value": {"items": [{"id": "2", "label": "A"}], "excluded": []}},
+        "photographer": {"modifier": "INCLUDES", "value": "Ann"},
+        "is_missing": {"modifier": "EQUALS", "value": "photographer"},
+        "director": {"modifier": "INCLUDES", "value": "Bo"}
+    });
+    let images: SavedFilterOf<ImageSort> =
+        decode_saved_filter_for(Entity::Images, "4", "SSV", Some(&find), Some(&object), None);
+    assert_eq!(images.query.sort, ImageSort::OCounter);
+    assert_eq!(images.page_size, Some(40));
+    let kinds: Vec<CriterionKind> = images.query.criteria.iter().map(|c| c.kind).collect();
+    assert!(kinds.contains(&CriterionKind::Photographer));
+    assert!(
+        kinds.contains(&CriterionKind::IsMissing),
+        "images' own is-missing value"
+    );
+    assert_eq!(images.left_out, vec!["director".to_owned()]);
+
+    let scenes = decode_saved_filter("1", "S", Some(&find), Some(&object), None);
+    assert!(scenes.left_out.contains(&"photographer".to_owned()));
+    assert!(
+        scenes.left_out.contains(&"sort: o_counter".to_owned())
+            || scenes.query.sort == SceneSort::default()
+    );
 }

@@ -438,6 +438,7 @@ impl Services {
             cache,
             start_seconds: player::start_position(start.or(resumed), scene.duration_seconds),
             transcoded: false,
+            kind: player::MediaKind::Video,
         });
         Ok((scene, resumed))
     }
@@ -464,6 +465,7 @@ impl Services {
             cache: None,
             start_seconds: None,
             transcoded: true,
+            kind: player::MediaKind::Video,
         });
         Ok(())
     }
@@ -613,6 +615,9 @@ impl Services {
                 match kind {
                     "performer" => {
                         stash_core::adapter::scenes::performer_image_bytes(&client, &id).await
+                    }
+                    "image" => {
+                        stash_core::adapter::scenes::image_thumbnail_bytes(&client, &id).await
                     }
                     _ => scene_screenshot_bytes(&client, &id).await,
                 }

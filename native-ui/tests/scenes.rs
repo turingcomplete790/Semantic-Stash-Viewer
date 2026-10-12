@@ -226,3 +226,24 @@ fn a_cache_refresh_reloads_in_place() {
     );
     assert!(s.cache_changed("scenes:q:other:s:50:p:2", TAB).is_empty());
 }
+
+/// 012 T020: each list's pages are cached under its own prefix; Scenes' keys are unchanged.
+#[test]
+fn image_and_scene_pages_have_their_own_cache_keys() {
+    use semantic_stash_viewer_native::screens::browse::state::page_key;
+    use stash_core::browse::entity::Entity;
+    use stash_core::images::ImageQuery;
+    use stash_core::scenes::query::SceneQuery;
+    let scenes = SceneQuery::default();
+    assert_eq!(
+        page_key(Entity::Scenes, &scenes, 2, 50),
+        semantic_stash_viewer_native::screens::scenes::page_key(&scenes, 2, 50)
+    );
+    assert!(page_key(Entity::Scenes, &scenes, 2, 50).starts_with("scenes:q:"));
+    let images = ImageQuery::images_default();
+    let key = page_key(Entity::Images, &images, 2, 50);
+    assert!(
+        key.starts_with("images:q:") && key.ends_with(":s:50:p:2"),
+        "{key}"
+    );
+}

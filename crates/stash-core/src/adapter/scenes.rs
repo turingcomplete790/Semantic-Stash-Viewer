@@ -428,6 +428,23 @@ pub async fn performer_image_bytes(
     image_bytes(client, "performer", id, "image", MAX_THUMB_SOURCE_BYTES).await
 }
 
+/// An image's thumbnail (`/image/<id>/thumbnail`, Stash's own downscaled copy) as bytes and
+/// content type, for Images' cards (012); the key goes in a header; `None` when it has none.
+pub async fn image_thumbnail_bytes(
+    client: &StashClient,
+    id: &str,
+) -> Result<Option<(Vec<u8>, String)>, AppError> {
+    resource_bytes(
+        client,
+        "image",
+        id,
+        "thumbnail",
+        "image-thumbnail",
+        MAX_THUMB_SOURCE_BYTES,
+    )
+    .await
+}
+
 async fn screenshot_bytes(
     client: &StashClient,
     id: &str,

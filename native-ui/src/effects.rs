@@ -19,7 +19,7 @@ use uuid::Uuid;
 use crate::app::Message;
 use crate::player::controls::Direction;
 use crate::screens::scenes::page_key;
-use crate::screens::scenes::thumbs::{thumb_key, ThumbKey, WARM_LIMIT};
+use crate::screens::scenes::thumbs::{key_of, thumb_key, ThumbKey, WARM_LIMIT};
 use crate::services::Services;
 use crate::session::snapshot::{self, SavedSession};
 use crate::shell::TabId;
@@ -86,6 +86,21 @@ pub enum Effect {
     /// Read neighbouring pages into the cache; warm the thumbnails of page `warm`.
     PrefetchScenes {
         query: SceneQuery,
+        pages: Vec<u32>,
+        size: u32,
+        warm: Option<u32>,
+    },
+    /// Read a page of images through the cache, for the screen in `tab` that asked (012).
+    LoadImagesPage {
+        tab: TabId,
+        generation: u64,
+        query: stash_core::images::ImageQuery,
+        page: u32,
+        size: u32,
+    },
+    /// Read neighbouring pages of images into the cache; warm the thumbnails of page `warm`.
+    PrefetchImages {
+        query: stash_core::images::ImageQuery,
         pages: Vec<u32>,
         size: u32,
         warm: Option<u32>,
@@ -304,6 +319,11 @@ pub enum Reply {
         generation: u64,
         result: Result<ScenePage, AppError>,
     },
+    ImagesPage {
+        tab: TabId,
+        generation: u64,
+        result: Result<stash_core::images::ImagePage, AppError>,
+    },
     /// Thumbnails that arrived, decoded (`None`: the core had nothing for that scene).
     Thumbnails(Vec<(ThumbKey, Option<iced::widget::image::Handle>)>),
     SceneDetails {
@@ -442,6 +462,47 @@ pub fn run(effect: Effect, services: &Arc<Services>, window: Option<window::Id>)
                             .iter()
                             .take(WARM_LIMIT)
                             .filter_map(thumb_key)
+                            .collect(),
+                    )),
+                    _ => Message::Idle,
+                },
+            )
+        })),
+        Effect::LoadImagesPage {
+            tab,
+            generation,
+            query,
+            page,
+            size,
+        } => {
+            let services = Arc::clone(services);
+            Task::perform(
+                async move { images_page(&services, query, page, size).await },
+                move |result| {
+                    Message::Reply(Reply::ImagesPage {
+                        tab,
+                        generation,
+                        result,
+                    })
+                },
+            )
+        }
+        Effect::PrefetchImages {
+            query,
+            pages,
+            size,
+            warm,
+        } => Task::batch(pages.into_iter().map(|page| {
+            let services = Arc::clone(services);
+            let query = query.clone();
+            Task::perform(
+                async move { images_page(&services, query, page, size).await },
+                move |result| match result {
+                    Ok(p) if Some(page) == warm => Message::Reply(Reply::Warm(
+                        p.items
+                            .iter()
+                            .take(WARM_LIMIT)
+                            .filter_map(|c| c.thumb.as_deref().and_then(key_of))
                             .collect(),
                     )),
                     _ => Message::Idle,
@@ -1044,8 +1105,12 @@ const THUMB_IN_FLIGHT: usize = 12;
 
 /// Which cached image a thumbnail key draws on, as the core's `ThumbService` names it. Performer
 /// images are keyed `performer:<id>`, and their portraits `portrait:<id>`: the same cached image,
-/// decoded larger, so a portrait never downloads again. Scene thumbnails are keyed by scene id.
+/// decoded larger, so a portrait never downloads again. Image thumbnails are keyed `image:<id>`
+/// (012). Scene thumbnails are keyed by scene id.
 pub fn thumb_source(key: &ThumbKey) -> (&'static str, &str) {
+    if let Some(id) = key.0.strip_prefix("image:") {
+        return ("image", id);
+    }
     match key
         .0
         .strip_prefix("performer:")
@@ -1150,6 +1215,30 @@ async fn scenes_page(
             let query = query.clone();
             async move {
                 stash_core::adapter::scenes::find_scenes_page(&client, &query, page, size).await
+            }
+        })
+        .await
+        .map(|cached| cached.data)
+}
+
+/// One page of images through the cache (`images:q:<hash>:s:<size>:p:<page>`, 012).
+async fn images_page(
+    services: &Services,
+    query: stash_core::images::ImageQuery,
+    page: u32,
+    size: u32,
+) -> Result<stash_core::images::ImagePage, AppError> {
+    let key = crate::screens::browse::state::page_key(
+        stash_core::browse::entity::Entity::Images,
+        &query,
+        page,
+        size,
+    );
+    services
+        .read_cached(&key, RefreshPolicy::Auto, false, move |client| {
+            let query = query.clone();
+            async move {
+                stash_core::adapter::images::find_images_page(&client, &query, page, size).await
             }
         })
         .await

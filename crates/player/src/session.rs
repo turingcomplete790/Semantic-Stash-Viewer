@@ -44,6 +44,16 @@ impl PlayerConfig {
     }
 }
 
+/// What an open shows (012 contracts/player-image-mode.md).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MediaKind {
+    /// A scene: played once, with sound.
+    #[default]
+    Video,
+    /// An image: held on screen until replaced, silent; `looped` for animated files and clips.
+    Image { looped: bool },
+}
+
 /// What to play and how to reach it.
 #[derive(Debug, Clone)]
 pub struct OpenRequest {
@@ -63,6 +73,8 @@ pub struct OpenRequest {
     /// The source is Stash's transcode, chosen by the user after a decode failure (008 R10). The
     /// guard refuses a transcode without it.
     pub transcoded: bool,
+    /// A scene or an image (012).
+    pub kind: MediaKind,
 }
 
 /// The start to open a file at: `requested`, unless it isn't a usable time or lies at or past the
@@ -125,6 +137,8 @@ const P_MUTE: u64 = 6;
 const P_EOF: u64 = 7;
 const P_HWDEC: u64 = 8;
 const P_TRACKS: u64 = 9;
+const P_WIDTH: u64 = 10;
+const P_HEIGHT: u64 = 11;
 
 pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
@@ -183,6 +197,8 @@ impl Player {
             ("eof-reached", Format::Flag, P_EOF),
             ("hwdec-current", Format::String, P_HWDEC),
             ("track-list/count", Format::Int64, P_TRACKS),
+            ("width", Format::Int64, P_WIDTH),
+            ("height", Format::Int64, P_HEIGHT),
         ] {
             mpv.observe_property(name, format, id)
                 .map_err(|e| mpv_error("observe property", &e))?;
@@ -250,7 +266,8 @@ impl Player {
             };
         });
 
-        if !crate::commands::source_allowed(&request.source, request.transcoded) {
+        let image = matches!(request.kind, MediaKind::Image { .. });
+        if !crate::commands::source_allowed_for(&request.source, request.transcoded, image) {
             inner.fail(PlayerError::RefusedSource);
             return;
         }
@@ -264,6 +281,12 @@ impl Player {
             (DEFAULT_CACHE.0.to_owned(), DEFAULT_CACHE.1.to_owned()),
             |c| (c.forward_bytes.to_string(), c.back_bytes.to_string()),
         );
+        // Images hold until replaced and make no sound; animated ones and clips loop. These persist
+        // across files in mpv, so every open sets them (012).
+        let (display, looping, audio) = match request.kind {
+            MediaKind::Video => ("1", "no", "auto"),
+            MediaKind::Image { looped } => ("inf", if looped { "inf" } else { "no" }, "no"),
+        };
         // `start` persists across files in mpv, so every open sets it (to `none` for the start).
         let start = request
             .start_seconds
@@ -285,6 +308,10 @@ impl Player {
             .and_then(|()| inner.mpv.set_property("tls-verify", request.strict_tls))
             .and_then(|()| inner.mpv.set_property("speed", 1.0))
             .and_then(|()| inner.mpv.set_property("pause", false))
+            .and_then(|()| inner.mpv.set_property("image-display-duration", display))
+            .and_then(|()| inner.mpv.set_property("loop-file", looping))
+            .and_then(|()| inner.mpv.set_property("aid", audio))
+            .and_then(|()| reset_view(&inner.mpv))
             .and_then(|()| inner.mpv.command("loadfile", &[&request.source, "replace"]));
         if let Err(e) = result {
             inner.fail(PlayerError::from_mpv(&e));
@@ -384,6 +411,11 @@ impl Player {
     /// From Ended (or anywhere): back to the start and play (FR-015).
     pub fn replay(&self) {
         self.inner.apply(PlayerCommand::Replay);
+    }
+
+    /// An mpv property as text, for tests and diagnostics (012's image-mode tests).
+    pub fn debug_property(&self, name: &str) -> Option<String> {
+        self.inner.mpv.get_property::<String>(name).ok()
     }
 
     /// Measurements for the decision record (debug builds expose this to the UI).
@@ -576,6 +608,14 @@ impl Inner {
                 let hwdec = hwdec.to_owned();
                 self.update(|s| s.hwdec = Some(hwdec));
             }
+            (P_WIDTH, PropertyData::Int64(w)) => self.update(|s| {
+                let h = s.picture.map_or(0, |p| p.1);
+                s.picture = u32::try_from(w).ok().map(|w| (w, h));
+            }),
+            (P_HEIGHT, PropertyData::Int64(h)) => self.update(|s| {
+                let w = s.picture.map_or(0, |p| p.0);
+                s.picture = u32::try_from(h).ok().map(|h| (w, h));
+            }),
             (P_TRACKS, PropertyData::Int64(_)) => {
                 let tracks = read_tracks(&self.mpv);
                 self.update(|s| s.tracks = tracks);
@@ -583,4 +623,13 @@ impl Inner {
             _ => {}
         }
     }
+}
+
+/// The picture back to fitted, centred, upright (every open, and `ResetView`).
+pub(crate) fn reset_view(mpv: &libmpv2::Mpv) -> Result<(), libmpv2::Error> {
+    mpv.set_property("video-zoom", 0.0)?;
+    mpv.set_property("video-pan-x", 0.0)?;
+    mpv.set_property("video-pan-y", 0.0)?;
+    mpv.set_property("video-rotate", 0i64)?;
+    mpv.set_property("video-unscaled", "no")
 }

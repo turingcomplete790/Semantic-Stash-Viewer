@@ -3,6 +3,7 @@
 //! fields are saved with the session; transient ones (`#[serde(skip)]`) are rebuilt by its entry
 //! effects. Home is complete here; Scenes, Scene, and Settings fill in with US3 and US4.
 
+pub mod browse;
 pub mod home;
 pub mod scene;
 pub mod scenes;

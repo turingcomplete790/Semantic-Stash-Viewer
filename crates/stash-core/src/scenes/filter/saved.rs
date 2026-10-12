@@ -1,4 +1,5 @@
-//! Saved scene filters in the web UI's format (spec FR-004, FR-005; research R3).
+//! Saved filters in the web UI's format (008 spec FR-004, FR-005; research R3), for scenes and,
+//! since 012, images (each entity's own criteria and sorts).
 //!
 //! Stash stores what the web UI writes: `find_filter` (search, sort, page size), `object_filter`
 //! in the *saved criterion* format (`applyToSavedCriterion`: multi-value criteria carry
@@ -11,7 +12,9 @@ use serde_json::Value;
 
 use super::kinds::{CriterionKind, ValueType};
 use super::{Criterion, CriterionValue, Duplication, Item, Modifier, Orientation, Resolution};
-use crate::scenes::query::{SceneQuery, SceneSort, SortDirection};
+use crate::browse::entity::Entity;
+use crate::browse::query::{ListQuery, Sort};
+use crate::scenes::query::{SceneSort, SortDirection};
 
 /// The web UI's display modes (`ui_options.display_mode`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -22,19 +25,23 @@ pub enum DisplayMode {
     Tagger,
 }
 
-/// A saved scene filter, decoded. Read-only here (saving is Phase 2).
+/// A saved filter, decoded. Read-only here (saving is Phase 2).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SavedFilter {
+#[serde(bound(deserialize = "S: Deserialize<'de> + Default"))]
+pub struct SavedFilterOf<S> {
     pub id: String,
     pub name: String,
-    pub query: SceneQuery,
+    pub query: ListQuery<S>,
     pub page_size: Option<u32>,
     pub mode: Option<DisplayMode>,
     /// What the viewer couldn't apply (criterion keys, an unknown sort), for the notice.
     pub left_out: Vec<String>,
 }
 
-/// Decode one saved filter from its three stored parts.
+/// A saved scene filter.
+pub type SavedFilter = SavedFilterOf<SceneSort>;
+
+/// Decode one saved scene filter from its three stored parts.
 pub fn decode_saved_filter(
     id: &str,
     name: &str,
@@ -42,8 +49,27 @@ pub fn decode_saved_filter(
     object_filter: Option<&Value>,
     ui_options: Option<&Value>,
 ) -> SavedFilter {
+    decode_saved_filter_for(
+        Entity::Scenes,
+        id,
+        name,
+        find_filter,
+        object_filter,
+        ui_options,
+    )
+}
+
+/// Decode one saved filter of `entity` (its sorts `S`) from its three stored parts.
+pub fn decode_saved_filter_for<S: Sort>(
+    entity: Entity,
+    id: &str,
+    name: &str,
+    find_filter: Option<&Value>,
+    object_filter: Option<&Value>,
+    ui_options: Option<&Value>,
+) -> SavedFilterOf<S> {
     let mut left_out = Vec::new();
-    let mut query = SceneQuery::default();
+    let mut query = ListQuery::<S>::default();
     let mut page_size = None;
     if let Some(find) = find_filter {
         if let Some(q) = find.get("q").and_then(Value::as_str) {
@@ -72,7 +98,7 @@ pub fn decode_saved_filter(
             .filter(|n| *n > 0);
     }
     if let Some(object) = object_filter {
-        let (criteria, skipped) = decode_criteria(object);
+        let (criteria, skipped) = decode_criteria_for(entity, object);
         query.criteria = criteria;
         left_out.extend(skipped);
     }
@@ -86,7 +112,7 @@ pub fn decode_saved_filter(
             3 => Some(DisplayMode::Tagger),
             _ => None,
         });
-    SavedFilter {
+    SavedFilterOf {
         id: id.to_owned(),
         name: name.to_owned(),
         query,
@@ -98,7 +124,13 @@ pub fn decode_saved_filter(
 
 /// The web UI's default scene filter (`defaultFilters.scenes`, the same shape plus `mode`).
 pub fn decode_default_filter(value: &Value) -> SavedFilter {
-    decode_saved_filter(
+    decode_default_filter_for(Entity::Scenes, value)
+}
+
+/// The web UI's default filter for `entity` (`defaultFilters.<key>`).
+pub fn decode_default_filter_for<S: Sort>(entity: Entity, value: &Value) -> SavedFilterOf<S> {
+    decode_saved_filter_for(
+        entity,
         "default",
         "Default",
         value.get("find_filter"),
@@ -107,30 +139,36 @@ pub fn decode_default_filter(value: &Value) -> SavedFilter {
     )
 }
 
-fn parse_sort(sort: &str) -> Option<(SceneSort, Option<u32>)> {
+fn parse_sort<S: Sort>(sort: &str) -> Option<(S, Option<u32>)> {
     if let Some(seed) = sort.strip_prefix("random_") {
         // Stash seeds are u64; the viewer keeps 32 bits (any seed works).
         let seed = seed.parse::<u64>().ok()?;
-        return Some((SceneSort::Random, Some((seed % u64::from(u32::MAX)) as u32)));
+        return Some((S::RANDOM, Some((seed % u64::from(u32::MAX)) as u32)));
     }
     if sort == "random" {
-        return Some((SceneSort::Random, Some(1)));
+        return Some((S::RANDOM, Some(1)));
     }
     serde_json::from_value(Value::String(sort.to_owned()))
         .ok()
         .map(|s| (s, None))
 }
 
-/// The criteria in an `object_filter`, and the keys left out (unknown, or a value the viewer
+/// The scene criteria in an `object_filter`, and the keys left out (unknown, or a value the viewer
 /// can't read).
 pub fn decode_criteria(object: &Value) -> (Vec<Criterion>, Vec<String>) {
+    decode_criteria_for(Entity::Scenes, object)
+}
+
+/// The criteria in `entity`'s `object_filter`, and the keys left out (unknown, not offered for
+/// `entity`, or a value the viewer can't read).
+pub fn decode_criteria_for(entity: Entity, object: &Value) -> (Vec<Criterion>, Vec<String>) {
     let mut criteria = Vec::new();
     let mut left_out = Vec::new();
     let Some(map) = object.as_object() else {
         return (criteria, left_out);
     };
     for (key, value) in map {
-        let Some(kind) = CriterionKind::from_key(key) else {
+        let Some(kind) = CriterionKind::from_key(key).filter(|k| k.applies_to(entity)) else {
             left_out.push(key.clone());
             continue;
         };
@@ -141,7 +179,7 @@ pub fn decode_criteria(object: &Value) -> (Vec<Criterion>, Vec<String>) {
             }
             continue;
         }
-        match decode_one(kind, value) {
+        match decode_one(entity, kind, value) {
             Some(c) => criteria.push(c),
             None => left_out.push(key.clone()),
         }
@@ -149,8 +187,8 @@ pub fn decode_criteria(object: &Value) -> (Vec<Criterion>, Vec<String>) {
     (criteria, left_out)
 }
 
-fn decode_one(kind: CriterionKind, saved: &Value) -> Option<Criterion> {
-    let info = kind.info();
+fn decode_one(entity: Entity, kind: CriterionKind, saved: &Value) -> Option<Criterion> {
+    let info = kind.info_for(entity);
     if info.is_placeholder() {
         // Kept as it came, for Phase 4.
         return Some(Criterion::new(kind, Modifier::Equals, CriterionValue::None));
@@ -163,7 +201,7 @@ fn decode_one(kind: CriterionKind, saved: &Value) -> Option<Criterion> {
     let raw = saved.get("value");
     if modifier.is_null_check() {
         let c = Criterion::new(kind, modifier, CriterionValue::None);
-        return c.validate().is_ok().then_some(c);
+        return c.validate_for(entity).is_ok().then_some(c);
     }
     let value = match info.value_type {
         ValueType::Text { .. } | ValueType::Captions => {
@@ -269,7 +307,7 @@ fn decode_one(kind: CriterionKind, saved: &Value) -> Option<Criterion> {
         ValueType::CustomField | ValueType::Semantic => return None,
     };
     let c = Criterion::new(kind, modifier, value);
-    c.validate().is_ok().then_some(c)
+    c.validate_for(entity).is_ok().then_some(c)
 }
 
 /// `{value, value2}`, or the old shapes: a bare value with `value2` beside it.

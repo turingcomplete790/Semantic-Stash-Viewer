@@ -2,16 +2,13 @@
 //! with thumbnails, sorting, page sizes, the keyboard, and return to place.
 
 pub mod controls;
-pub mod editor;
 pub mod filters;
 pub mod grid;
-pub mod keyboard;
-pub mod layout;
-pub mod picker;
-pub mod preview;
 pub mod queue;
 pub mod state;
-pub mod thumbs;
+
+/// Moved to the browse layer (012); kept here for existing paths.
+pub use crate::screens::browse::{editor, keyboard, layout, picker, preview, thumbs};
 
 pub use grid::view;
 pub use state::{

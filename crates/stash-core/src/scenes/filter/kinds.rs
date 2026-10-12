@@ -1,12 +1,15 @@
 //! Every scene criterion the web UI offers for the pinned Stash v0.31.1 schema, with its label,
 //! group, value type, and modifiers (research R3; the web UI's `models/list-filter`).
 //!
-//! The key is Stash's `SceneFilterType` field name, which the web UI's saved filters also use.
+//! The key is Stash's `SceneFilterType` / `ImageFilterType` field name, which the web UI's saved
+//! filters also use. Each kind names the entities it applies to (012: images use the web UI's
+//! v0.31.1 `images.ts` list).
 
 use serde::{Deserialize, Serialize};
 
 use super::semantic::SemanticFilter;
 use super::Modifier;
+use crate::browse::entity::Entity;
 use Modifier::*;
 
 /// One criterion kind.
@@ -16,7 +19,11 @@ pub enum CriterionKind {
     Code,
     Details,
     Director,
+    /// Images only.
+    Photographer,
     Path,
+    /// Images only: the file's folder, sent as `files_filter.parent_folder`.
+    Folder,
     Oshash,
     Checksum,
     PhashDistance,
@@ -123,6 +130,21 @@ pub const IS_MISSING_CHOICES: &[&str] = &[
     "stash_id",
 ];
 
+/// The is-missing choices for images (the web UI's `ImageIsMissingCriterionOption`).
+pub const IMAGE_IS_MISSING_CHOICES: &[&str] = &[
+    "title",
+    "details",
+    "photographer",
+    "url",
+    "date",
+    "code",
+    "rating",
+    "galleries",
+    "studio",
+    "performers",
+    "tags",
+];
+
 /// What a kind's value looks like, and so which modifiers it offers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValueType {
@@ -218,6 +240,7 @@ const PERFORMERS: &[Modifier] = &[IncludesAll, Includes, Equals, IsNull, NotNull
 const STUDIOS: &[Modifier] = &[Includes, IsNull, NotNull];
 const GROUPS: &[Modifier] = &[Includes, Excludes, IsNull, NotNull];
 const GALLERIES: &[Modifier] = &[IncludesAll, Includes, Excludes, IsNull, NotNull];
+const FOLDER: &[Modifier] = &[Includes];
 
 /// A kind's description.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -316,8 +339,10 @@ kinds! {
     Code, "code", "Studio code", Text, ValueType::Text { nullable: true };
     Details, "details", "Details", Text, ValueType::Text { nullable: true };
     Director, "director", "Director", Text, ValueType::Text { nullable: true };
+    Photographer, "photographer", "Photographer", Text, ValueType::Text { nullable: true };
     Url, "url", "URL", Text, ValueType::Text { nullable: true };
     Path, "path", "Path", File, ValueType::Text { nullable: false };
+    Folder, "folder", "Folder", File, ValueType::Items { hierarchical: true, modifiers: FOLDER };
     Performers, "performers", "Performers", People,
         ValueType::Items { hierarchical: false, modifiers: PERFORMERS };
     PerformerCount, "performer_count", "Performer count", People, ValueType::Number { nullable: false };
@@ -364,6 +389,44 @@ kinds! {
     CustomField, "custom_fields", "Custom field", Other, ValueType::CustomField;
 }
 
+impl CriterionKind {
+    /// The entities whose lists offer this kind.
+    pub fn entities(self) -> &'static [Entity] {
+        use CriterionKind::*;
+        const BOTH: &[Entity] = &[Entity::Scenes, Entity::Images];
+        match self {
+            Photographer | Folder => &[Entity::Images],
+            Title | Code | Details | Url | Path | Checksum | PhashDistance | Galleries
+            | Organized | OCounter | Resolution | Orientation | IsMissing | Tags | Rating
+            | TagCount | PerformerTags | Performers | PerformerCount | PerformerAge
+            | PerformerFavorite | Studios | Date | FileCount | CreatedAt | UpdatedAt
+            | CustomField | Semantic(_) => BOTH,
+            Director | Oshash | Duplicated | Duration | Framerate | Bitrate | VideoCodec
+            | AudioCodec | Captions | PlayCount | PlayDuration | ResumeTime | LastPlayedAt
+            | Interactive | InteractiveSpeed | HasMarkers | Groups | StashId | StashIdCount => {
+                &[Entity::Scenes]
+            }
+        }
+    }
+
+    pub fn applies_to(self, entity: Entity) -> bool {
+        self.entities().contains(&entity)
+    }
+
+    /// The kind's description as `entity`'s list shows it (images have their own is-missing
+    /// choices).
+    pub fn info_for(self, entity: Entity) -> KindInfo {
+        let info = self.info();
+        match info.value_type {
+            ValueType::Choice(_) if self == CriterionKind::IsMissing => KindInfo {
+                value_type: ValueType::Choice(entity.is_missing_choices()),
+                ..info
+            },
+            _ => info,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -376,7 +439,7 @@ mod tests {
             assert!(keys.insert(info.key), "duplicate key {}", info.key);
             assert_eq!(CriterionKind::from_key(info.key), Some(*kind));
         }
-        assert_eq!(CriterionKind::ALL.len(), 46);
+        assert_eq!(CriterionKind::ALL.len(), 48);
     }
 
     #[test]

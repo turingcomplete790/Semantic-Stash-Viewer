@@ -45,6 +45,7 @@ fn request(source: &str) -> OpenRequest {
         cache: None,
         start_seconds: None,
         transcoded: false,
+        kind: player::MediaKind::Video,
     }
 }
 
