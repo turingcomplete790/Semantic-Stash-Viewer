@@ -52,8 +52,9 @@ single Loop switch). Each builds on 010's queue view.
 ## R4. Repeat: one control, Off → All → One
 
 - **Decision**: `Repeat` is an enum cycled by the button and `R`. **One**: `Ended` → `Replay`,
-  which the UI performs as a fresh open of the same scene at 0 s (a new viewing for play history;
-  never the resume point), regardless of Autoplay; `Next`/`Previous` move as with Repeat off/all
+  which the UI performs with the player's own replay (a seek to 0 and unpause) as a new viewing
+  for play history (never the resume point), regardless of Autoplay; reopening the file it holds
+  at its end with `keep-open` left mpv unable to report the next end (found by the harness); `Next`/`Previous` move as with Repeat off/all
   and Repeat one stays on. **All**: past the end (list order: the last index; shuffle: the round's
   end) → `Play(0)` or a new round's first. **Off**: past the end → `Stop`.
 - **Rationale**: Clarification Q (Spotify/VLC/Apple Music behaviour); FR-006, FR-008.

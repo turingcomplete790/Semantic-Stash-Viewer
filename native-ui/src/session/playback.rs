@@ -109,6 +109,20 @@ impl Playback {
         effects
     }
 
+    /// Play the scene again from the beginning as a new viewing (Repeat one, 011 R4): the
+    /// player's own replay (a seek to 0 and unpause, which copes with mpv holding the file open at
+    /// its end), not a reopen of the same file.
+    pub fn replay(&mut self) -> Vec<Effect> {
+        let Some(id) = self.playing_scene().map(str::to_owned) else {
+            return Vec::new();
+        };
+        let mut effects = self.finish();
+        self.viewing = Viewing::start(&id, self.minimum_percent, self.save_history);
+        self.ended = None;
+        effects.push(Effect::Player(PlayerAction::Replay));
+        effects
+    }
+
     /// Play the server's transcode of the scene that couldn't be decoded (008 FR-023): only when
     /// offered, never retried after a transcode fails.
     fn open_transcoded(&mut self) -> Vec<Effect> {

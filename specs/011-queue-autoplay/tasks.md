@@ -236,7 +236,7 @@ R4, R8).
       `queue-shuffle` (Shuffle on, a scene seeked to its end → the pick playing, 3 samples); adjust
       010's `queue-select` for click-to-play (stop playback after it)
 - [X] T029 [P] Budgets in `crates/perf-harness/src/main.rs`: the four rows ≤ 1500 ms (median)
-- [ ] T030 Run `cargo run -p perf-harness -- --profile "localhost:9998" --quick` on a quiet machine
+- [X] T030 Run `cargo run -p perf-harness -- --profile "localhost:9998" --quick` on a quiet machine
       (load average under 4): every 011 row and every 007–010 row within budget (SC-005)
 - [X] T031 [P] Docs: README (click plays; Autoplay, Shuffle, Repeat and their keys in the queue
       view), `ROADMAP.md` (tick the Phase 1 queue autoplay item, link 011, rename it to playlist

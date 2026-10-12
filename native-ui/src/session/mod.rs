@@ -268,9 +268,17 @@ impl Session {
                 effects
             }
             Advance::Loading(effects) => effects,
-            // Repeat one: a new viewing from 0:00, never the resume point (011 R4).
+            // Repeat one: a new viewing from 0:00, never the resume point (011 R4); the player
+            // replays the scene it holds, or opens it at 0:00 if it holds another.
             Advance::Replay { id } => {
-                let effects = self.playback.open_at(id, tab, Some(0.0));
+                let holds = self.playback.active()
+                    && self.playback.owner == Some(tab)
+                    && self.playback.playing_scene() == Some(id.as_str());
+                let effects = if holds {
+                    self.playback.replay()
+                } else {
+                    self.playback.open_at(id, tab, Some(0.0))
+                };
                 self.sync_chapters();
                 self.sync_queue_playing();
                 effects

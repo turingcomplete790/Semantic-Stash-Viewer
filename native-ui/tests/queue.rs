@@ -961,7 +961,13 @@ fn a_one_scene_queue_with_repeat_all_replays_it() {
     repeat_all(&mut s);
     let _ = scenes_msg(&mut s, ScenesMsg::QueuePlay(0));
     let effects = plays_to_the_end(&mut s, "1");
-    assert_eq!(opened(&effects).as_deref(), Some("1"));
+    assert!(
+        effects.iter().any(|e| matches!(
+            e,
+            Effect::Player(semantic_stash_viewer_native::effects::PlayerAction::Replay)
+        )),
+        "it plays again from 0:00: {effects:?}"
+    );
 }
 
 #[test]
@@ -1031,13 +1037,15 @@ fn repeat_one_replays_from_the_start() {
         assert_eq!(scenes(&s).repeat, Repeat::One);
         let _ = scenes_msg(&mut s, ScenesMsg::QueuePlay(3));
         let effects = plays_to_the_end(&mut s, "4");
+        // The player's own replay from 0:00 (not a reopen of the file it holds at its end).
         assert!(
             effects.iter().any(|e| matches!(
                 e,
-                Effect::OpenScene { id, start: Some(t), resume: false } if id == "4" && *t == 0.0
+                Effect::Player(semantic_stash_viewer_native::effects::PlayerAction::Replay)
             )),
-            "autoplay {autoplay}: a new viewing from 0:00, {effects:?}"
+            "autoplay {autoplay}: replayed from 0:00, {effects:?}"
         );
+        assert!(opened(&effects).is_none(), "no reopen");
         assert_eq!(scenes(&s).queue.selected, Some(3), "it stays selected");
     }
 }

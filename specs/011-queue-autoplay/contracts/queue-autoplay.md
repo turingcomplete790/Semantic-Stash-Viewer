@@ -56,7 +56,8 @@ round; turning Shuffle off continues in list order.
 
 As 010: one page request per page shown (a shuffled pick or Repeat all's return to page 1 may show
 another page: 1 request, 0 when cached), one `SceneDetails` per scene played (0 from the cache),
-nothing per row passed over.
+nothing per row passed over. A keyboard rest now also plays its scene, so `gql-queue-rest` is 2:
+the details and the scene's `PlayableScene` read (0 when cached).
 
 ## Harness rows
 
