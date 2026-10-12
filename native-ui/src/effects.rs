@@ -132,6 +132,12 @@ pub enum Effect {
         generation: u64,
         after: std::time::Duration,
     },
+    /// The queue's selection rest: report back after `after` (010 research R3: 250 ms).
+    QueueRestDue {
+        tab: TabId,
+        generation: u64,
+        after: std::time::Duration,
+    },
     /// Save the tag colour rules to Stash (the one settings write, FR-003g).
     SaveTagColours(Vec<stash_core::semantic::ColourRule>),
     /// Read a scene's details through the cache, for the Scene screen in `tab`.
@@ -352,6 +358,10 @@ pub enum Reply {
         result: Result<stash_core::adapter::chips::ChipDetails, AppError>,
     },
     ChipRestDue {
+        tab: TabId,
+        generation: u64,
+    },
+    QueueRestDue {
         tab: TabId,
         generation: u64,
     },
@@ -592,6 +602,13 @@ pub fn run(effect: Effect, services: &Arc<Services>, window: Option<window::Id>)
             after,
         } => Task::perform(tokio::time::sleep(after), move |()| {
             Message::Reply(Reply::ChipRestDue { tab, generation })
+        }),
+        Effect::QueueRestDue {
+            tab,
+            generation,
+            after,
+        } => Task::perform(tokio::time::sleep(after), move |()| {
+            Message::Reply(Reply::QueueRestDue { tab, generation })
         }),
         Effect::SaveTagColours(rules) => {
             let services = Arc::clone(services);

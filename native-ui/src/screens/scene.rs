@@ -259,14 +259,27 @@ impl SceneState {
 
     /// The cover with a Play button over it.
     pub fn cover_view(&self) -> Element<'_, ShellMsg> {
-        let picture: Element<'_, ShellMsg> = match &self.cover {
-            Cover::Ready(handle) => image(handle.clone())
+        self.cover_view_or(None)
+    }
+
+    /// The cover with a Play button over it; `still` (the card's thumbnail, in the queue view)
+    /// stands in until the cover arrives.
+    pub fn cover_view_or(&self, still: Option<Handle>) -> Element<'_, ShellMsg> {
+        let shown = match &self.cover {
+            Cover::Ready(handle) => Some(handle.clone()),
+            Cover::Loading => still,
+            Cover::None => None,
+        };
+        let picture: Element<'_, ShellMsg> = match (&self.cover, shown) {
+            (_, Some(handle)) => image(handle)
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .content_fit(ContentFit::Contain)
                 .into(),
-            Cover::Loading => Space::new().width(Length::Fill).height(Length::Fill).into(),
-            Cover::None => center(text("No cover").color(theme::MUTED)).into(),
+            (Cover::Ready(_) | Cover::Loading, None) => {
+                Space::new().width(Length::Fill).height(Length::Fill).into()
+            }
+            (Cover::None, _) => center(text("No cover").color(theme::MUTED)).into(),
         };
         let play = button(
             row![icon(Icon::Play, 22.0), text("Play").size(18)]
@@ -405,6 +418,34 @@ pub fn layout<'a, M: 'a>(
             .height(Length::Fill)
             .style(theme::bar),
         container(media).width(Length::Fill).height(Length::Fill),
+    ]
+    .into()
+}
+
+/// The queue view's panel (010 research R1): the scene page on its side, the picture (cover or
+/// player) across the top at 16:9 of the panel's width, the details scrolling below. Without
+/// details (a narrow window), the picture takes the whole panel.
+pub fn panel_layout<'a, M: 'a>(
+    media: Element<'a, M>,
+    details: Option<Element<'a, M>>,
+    window: &Layout,
+) -> Element<'a, M> {
+    let Some(details) = details else {
+        return container(media)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into();
+    };
+    // At most 60% of the height, so some details always show.
+    let height = (window.queue_panel_width() * 9.0 / 16.0).min(window.viewport() * 0.6);
+    column![
+        container(media)
+            .width(Length::Fill)
+            .height(Length::Fixed(height.floor())),
+        container(details)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(theme::bar),
     ]
     .into()
 }

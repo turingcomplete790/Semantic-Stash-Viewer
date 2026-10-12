@@ -114,3 +114,44 @@ fn characters_ignore_shift_and_case() {
         Some(Action::Player)
     );
 }
+
+/// 010 T034: the queue view's keys are listed, and none clashes with the player's.
+#[test]
+fn the_queue_views_keys_are_listed() {
+    let queue: Vec<String> = bindings()
+        .iter()
+        .filter(|b| b.level == Level::Queue)
+        .map(|b| b.chord.describe())
+        .collect();
+    for key in [
+        "↑",
+        "↓",
+        "Home",
+        "End",
+        "[",
+        "]",
+        "Enter",
+        "Ctrl+Enter",
+        "F6",
+        "N",
+        "P",
+        "A",
+        "O",
+        "Ctrl+O",
+    ] {
+        assert!(queue.iter().any(|k| k == key), "{key} in {queue:?}");
+    }
+    // Next, Previous, Play next, focus, and open aren't the player's keys, so they reach the
+    // queue while something plays.
+    for c in ["n", "p", "a", "o"] {
+        assert_eq!(resolve(&ch(c), Modifiers::empty(), &[Level::Player]), None);
+    }
+    assert_eq!(
+        resolve(
+            &Key::Named(iced::keyboard::key::Named::F6),
+            Modifiers::empty(),
+            &[Level::Player]
+        ),
+        None
+    );
+}

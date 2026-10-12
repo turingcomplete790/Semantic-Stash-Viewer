@@ -10,7 +10,7 @@ use iced::{Alignment, ContentFit, Element, Length};
 use stash_core::scenes::SceneCard;
 
 use super::controls;
-use super::layout::{Layout, CARD_TEXT, LIST_ROW, PAD};
+use super::layout::{Layout, CARD_TEXT, LIST_ROW, PAD, QUEUE_ROW, SCROLLBAR};
 use super::preview::Previews;
 use super::state::{scroll_id, Data, ScenesMsg, ScenesState};
 use super::thumbs::{placeholder, thumb_key, Thumbs};
@@ -177,6 +177,50 @@ fn list_row(
     clickable(body.into(), index, focused, Length::Fill, LIST_ROW)
 }
 
+/// A queue row (010 FR-002): a small still, title, and details line. A click selects it (the
+/// panel follows), a middle-click opens its page in a new tab; no hover preview, so scrolling the
+/// list stays light.
+fn queue_row(
+    c: &SceneCard,
+    index: usize,
+    selected: bool,
+    playing: bool,
+    layout: &Layout,
+    pictures: Pictures<'_>,
+) -> Element<'static, ShellMsg> {
+    const STILL: (f32, f32) = (96.0, 54.0);
+    const MARK: f32 = 18.0;
+    let text_width = layout.queue_list_width() - 2.0 * PAD - SCROLLBAR - STILL.0 - MARK - 20.0;
+    // The playing scene's mark, distinct from the selection's ring (010 FR-011).
+    let mark: Element<'static, ShellMsg> = if playing {
+        crate::widgets::icon(crate::widgets::Icon::Play, 14.0).into()
+    } else {
+        Space::new().width(14.0).into()
+    };
+    let body = row![
+        container(mark).width(MARK).center_x(MARK),
+        thumb(pictures, c, STILL.0, STILL.1),
+        lines(c, text_width, 14.0, 12.0, 3.0),
+    ]
+    .spacing(10)
+    .padding(3)
+    .align_y(Alignment::Center);
+    mouse_area(
+        button(body)
+            .padding(0)
+            .width(Length::Fill)
+            .height(Length::Fixed(QUEUE_ROW))
+            .style(theme::card(selected))
+            .on_press(msg(ScenesMsg::QueueSelect(index))),
+    )
+    .on_middle_press(msg(ScenesMsg::Open {
+        index,
+        new_tab: true,
+    }))
+    .on_double_click(msg(ScenesMsg::QueuePlay(index)))
+    .into()
+}
+
 /// A wall tile (008 FR-020): the still alone, no text.
 fn wall_tile(
     c: &SceneCard,
@@ -222,6 +266,10 @@ fn cards(
                 Mode::Grid => card(c, i, focused, layout, pictures),
                 Mode::List => list_row(c, i, focused, layout, pictures),
                 Mode::Wall => wall_tile(c, i, focused, layout, pictures),
+                Mode::Queue => {
+                    let playing = state.queue.playing.as_deref() == Some(c.id.as_str());
+                    queue_row(c, i, focused, playing, layout, pictures)
+                }
             });
         }
         rows = rows.push(
@@ -255,10 +303,17 @@ fn cached_cards<'a>(state: &'a ScenesState, ctx: &Context<'a>) -> Element<'a, Sh
         scene.hash(&mut h);
         (h.finish(), frame)
     });
+    let playing = state.queue.playing.as_ref().map(|id| {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        id.hash(&mut h);
+        h.finish()
+    });
     let key = (
         state.loaded,
         state.mode,
         state.focused,
+        playing,
         layout.width.to_bits(),
         layout.height.to_bits(),
         ctx.thumbs.revision(),
@@ -269,6 +324,17 @@ fn cached_cards<'a>(state: &'a ScenesState, ctx: &Context<'a>) -> Element<'a, Sh
 }
 
 pub fn view<'a>(state: &'a ScenesState, ctx: &Context<'a>, tab: TabId) -> Element<'a, ShellMsg> {
+    view_with(state, ctx, tab, None)
+}
+
+/// The screen, with `player` in the queue panel's picture slot while this tab's scene plays there
+/// (010 R2).
+pub fn view_with<'a>(
+    state: &'a ScenesState,
+    ctx: &Context<'a>,
+    tab: TabId,
+    player: Option<Element<'a, ShellMsg>>,
+) -> Element<'a, ShellMsg> {
     let body: Element<'a, ShellMsg> = match &state.data {
         Data::Loading => center(text("Loading scenes…").color(theme::MUTED)).into(),
         Data::Unreachable => center(
@@ -300,29 +366,44 @@ pub fn view<'a>(state: &'a ScenesState, ctx: &Context<'a>, tab: TabId) -> Elemen
             }
             center(col).into()
         }
-        Data::Ready { .. } => scroll_watch(
-            scrollable(
-                column![
-                    cached_cards(state, ctx),
-                    Space::new().height(8),
-                    controls::pager(state),
-                ]
-                .width(Length::Fill)
-                .padding(iced::Padding {
-                    top: 4.0,
-                    right: PAD,
-                    bottom: PAD,
-                    left: PAD,
-                }),
+        Data::Ready { .. } => {
+            let list: Element<'a, ShellMsg> = scroll_watch(
+                scrollable(
+                    column![
+                        cached_cards(state, ctx),
+                        Space::new().height(8),
+                        controls::pager(state),
+                    ]
+                    .width(Length::Fill)
+                    .padding(iced::Padding {
+                        top: 4.0,
+                        right: PAD,
+                        bottom: PAD,
+                        left: PAD,
+                    }),
+                )
+                .id(scroll_id(tab))
+                .height(Length::Fill),
+                ctx.layout.row_height(state.mode),
+                state.scroll,
+                |y| msg(ScenesMsg::Scrolled { y }),
             )
-            .id(scroll_id(tab))
-            .height(Length::Fill),
-            ctx.layout.row_height(state.mode),
-            state.scroll,
-            |y| msg(ScenesMsg::Scrolled { y }),
-        )
-        .auto_scroll(state.auto_scroll, |r| msg(ScenesMsg::AutoScrolled(r)))
-        .into(),
+            .auto_scroll(state.auto_scroll, |r| msg(ScenesMsg::AutoScrolled(r)))
+            .into();
+            if state.mode == Mode::Queue {
+                super::queue::view(
+                    &state.queue,
+                    state.cards(),
+                    list,
+                    player,
+                    &ctx.layout,
+                    ctx.library,
+                    ctx.thumbs,
+                )
+            } else {
+                list
+            }
+        }
     };
     let mut page = column![controls::top(state)];
     if let Some(bar) = super::filters::bar(state, ctx.library) {

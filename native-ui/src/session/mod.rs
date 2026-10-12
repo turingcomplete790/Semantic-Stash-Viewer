@@ -21,9 +21,10 @@ use crate::onboarding;
 use crate::player::video::Shared;
 use crate::screens::scenes::layout::Layout;
 use crate::screens::scenes::{ScenesMsg, Thumbs};
-use crate::screens::Context;
+use crate::screens::{Context, Mode};
 use crate::shell::keymap::{self, Action, Level};
 use crate::shell::overlays::{self, KeyPrompt, Overlay, KEY_PROMPT_ID};
+use crate::shell::TabId;
 use crate::shell::{self as shell_mod, Shell, ShellMsg};
 use crate::widgets::theme;
 
@@ -192,12 +193,110 @@ impl Session {
             return true;
         }
         let tab = self.shell.active();
+        let playing = self.playback.playing_scene();
         self.playback.owner == Some(tab.id)
-            && matches!(
-                tab.current(),
-                crate::screens::Screen::Scene(s)
-                    if Some(s.scene_id.as_str()) == self.playback.playing_scene()
-            )
+            && match tab.current() {
+                crate::screens::Screen::Scene(s) => Some(s.scene_id.as_str()) == playing,
+                // The queue view shows it in its panel while it's the selection (010 R2).
+                crate::screens::Screen::Scenes(s) if s.mode == Mode::Queue => {
+                    s.queue.panel.as_deref().map(|p| p.scene_id.as_str()) == playing
+                }
+                _ => false,
+            }
+    }
+
+    /// Tab `tab`'s Scenes screen, if it shows the queue view.
+    fn queue_tab(&mut self, tab: TabId) -> Option<&mut crate::screens::ScenesState> {
+        self.shell
+            .tabs
+            .iter_mut()
+            .find(|t| t.id == tab)
+            .and_then(|t| match t.current_mut() {
+                crate::screens::Screen::Scenes(s) if s.mode == Mode::Queue => Some(&mut **s),
+                _ => None,
+            })
+    }
+
+    /// The queue's playing marks follow playback: only the owner tab's list marks its scene.
+    fn sync_queue_playing(&mut self) {
+        let playing = self
+            .playback
+            .active()
+            .then(|| self.playback.playing_scene().map(str::to_owned))
+            .flatten();
+        let owner = self.playback.owner;
+        for tab in &mut self.shell.tabs {
+            let want = if owner == Some(tab.id) {
+                playing.clone()
+            } else {
+                None
+            };
+            for screen in &mut tab.history {
+                if let crate::screens::Screen::Scenes(s) = screen {
+                    if s.queue.playing != want {
+                        s.queue.playing.clone_from(&want);
+                    }
+                }
+            }
+        }
+    }
+
+    /// A later save of the tabs (after a change outside the shell's own messages).
+    fn save_later(&mut self) -> Option<Effect> {
+        self.restored.then(|| {
+            self.save_generation += 1;
+            Effect::SaveSessionLater {
+                generation: self.save_generation,
+            }
+        })
+    }
+
+    /// Next or Previous in tab `tab`'s queue from scene `from` (010 R4): play the neighbour, or
+    /// load the page across the boundary (its first or last card plays when it arrives).
+    fn queue_advance(&mut self, tab: TabId, from: Option<String>, forward: bool) -> Step<Up> {
+        use crate::screens::scenes::Advance;
+        let layout = self.shell.layout;
+        let Some(state) = self.queue_tab(tab) else {
+            return Step::none();
+        };
+        let mut effects = match state.advance(from.as_deref(), forward, tab, &layout) {
+            Advance::Play { id, mut effects } => {
+                effects.extend(self.playback.open(id, tab));
+                self.sync_chapters();
+                self.sync_queue_playing();
+                effects
+            }
+            Advance::Loading(effects) => effects,
+            Advance::Stop => return Step::none(),
+        };
+        effects.extend(self.thumbnails());
+        effects.extend(self.save_later());
+        Step::effects(effects)
+    }
+
+    /// The queue's Next or Previous control (`n`, `p`, or the panel's button): from the scene
+    /// this tab plays, or the selection when it plays none.
+    fn queue_step(&mut self, forward: bool) -> Step<Up> {
+        let tab = self.shell.active().id;
+        let playing = (self.playback.active() && self.playback.owner == Some(tab))
+            .then(|| self.playback.playing_scene().map(str::to_owned))
+            .flatten();
+        let Some(state) = self.queue_tab(tab) else {
+            return Step::none();
+        };
+        let from = playing.or_else(|| state.queue_selected.clone());
+        self.queue_advance(tab, from, forward)
+    }
+
+    /// A scene reached its end: with Play next on in its queue, the next one plays (FR-009).
+    fn ended(&mut self, id: String) -> Step<Up> {
+        let Some(owner) = self.playback.owner else {
+            return Step::none();
+        };
+        match self.queue_tab(owner) {
+            Some(state) if state.play_next => self.queue_advance(owner, Some(id), true),
+            _ => Step::none(),
+        }
     }
 
     /// Whether the now-playing bar shows (something plays, out of sight).
@@ -213,6 +312,15 @@ impl Session {
             return Step::none();
         };
         let mut step = self.shell(ShellMsg::Select(owner));
+        // The queue view: select the playing scene, so the player shows in the panel (010).
+        let in_queue = self
+            .active_scenes()
+            .filter(|s| s.mode == Mode::Queue)
+            .and_then(|s| s.cards().iter().position(|c| c.id == id));
+        if let (false, Some(index)) = (self.player_visible(), in_queue) {
+            let more = self.shell(ShellMsg::Scenes(ScenesMsg::QueueSelect(index)));
+            step.effects.extend(more.effects);
+        }
         if !self.player_visible() {
             // The owner tab moved on from the scene: open it there again.
             let more = self.shell(ShellMsg::Open(crate::screens::Screen::scene(&id, "")));
@@ -243,7 +351,7 @@ impl Session {
         // Performer images on the scene page (008 FR-011a), only those Stash has, decoded at
         // their drawn size on this display; and the open performer card's portrait (FR-011b)
         // from the same cached image.
-        if let crate::screens::Screen::Scene(scene) = self.shell.active().current() {
+        if let Some(scene) = self.shell.active().current().scene_panel() {
             if let crate::screens::scene::Details::Ready(d) = &scene.details {
                 let keys: Vec<_> = d
                     .performers
@@ -281,6 +389,12 @@ impl Session {
     }
 
     fn shell(&mut self, msg: ShellMsg) -> Step<Up> {
+        // The player's controls in the queue panel, and the queue's Next and Previous.
+        match msg {
+            ShellMsg::Player(m) => return self.update(Msg::Playback(m)),
+            ShellMsg::QueueStep(forward) => return self.queue_step(forward),
+            _ => {}
+        }
         // The pointer crossing cards (also as they scroll under it): only the preview cares, so
         // none of the rest below runs for it (008 FR-019).
         if let ShellMsg::Scenes(ScenesMsg::Hover(index) | ScenesMsg::HoverEnd(index)) = msg {
@@ -346,6 +460,7 @@ impl Session {
                 let owner = self.shell.active().id;
                 let step = step.with_all(self.playback.open(id, owner));
                 self.sync_chapters();
+                self.sync_queue_playing();
                 step
             }
             Some(shell_mod::Up::PlaybackChange(change)) => {
@@ -377,6 +492,7 @@ impl Session {
                 let owner = self.shell.active().id;
                 let step = step.with_all(self.playback.open_at(id, owner, Some(seconds)));
                 self.sync_chapters();
+                self.sync_queue_playing();
                 step
             }
             Some(shell_mod::Up::Notifications) => {
@@ -395,6 +511,9 @@ impl Session {
                 self.overlay = Overlay::None;
             }
             return Step::none();
+        }
+        if let Some(step) = self.queue_key(key, mods) {
+            return step;
         }
         if self.player_visible() {
             // The player is the innermost level while it's on screen (002's keys); keys it
@@ -417,11 +536,19 @@ impl Session {
         }
         // Escape closes a chip's card on the scene page (the overlay rules).
         if *key == Key::Named(iced::keyboard::key::Named::Escape) {
-            if let crate::screens::Screen::Scene(scene) = self.shell.active().current() {
+            if let Some(scene) = self.shell.active().current().scene_panel() {
                 if scene.chip_hover.is_some() {
                     return self.shell(ShellMsg::Scene(crate::screens::scene::SceneMsg::CloseCard));
                 }
             }
+        }
+        // With the queue's panel focused, the list's keys don't move the selection (010 R5).
+        let panel_focused = self.active_scenes().is_some_and(|s| {
+            s.mode == Mode::Queue
+                && s.queue.focus == crate::screens::scenes::queue::QueueFocus::Panel
+        });
+        if panel_focused {
+            return self.scenes_key(key, mods).unwrap_or_else(Step::none);
         }
         if let Some(Step { mut effects, up }) = self.shell.screen_key(key, mods) {
             effects.extend(self.thumbnails());
@@ -446,14 +573,63 @@ impl Session {
             Some(Action::KeyboardHelp) => ShellMsg::KeyboardHelp,
             Some(Action::FocusNext) => return Step::effect(Effect::FocusNext),
             Some(Action::FocusPrevious) => return Step::effect(Effect::FocusPrevious),
-            Some(Action::Player | Action::Scenes) | None => {
-                return self.scenes_key(key, mods).unwrap_or_else(Step::none)
-            }
+            Some(
+                Action::Player
+                | Action::Scenes
+                | Action::QueueList
+                | Action::QueueFocus
+                | Action::QueueNext
+                | Action::QueuePrevious
+                | Action::QueuePlayNext
+                | Action::QueueOpen { .. },
+            )
+            | None => return self.scenes_key(key, mods).unwrap_or_else(Step::none),
             Some(
                 Action::FocusSearch | Action::FilterMenu | Action::SavedFilters | Action::Settings,
             ) => return Step::none(),
         };
         self.shell(msg)
+    }
+
+    /// The queue view's keys (010 contracts/queue-ui.md), before the player's: the list's keys
+    /// with the list focused (the arrows then move the selection, not the volume), and F6, `n`,
+    /// `p`, `a`, `o` in either area. In fullscreen only Next, Previous, and Play next apply.
+    fn queue_key(&mut self, key: &Key, mods: Modifiers) -> Option<Step<Up>> {
+        use crate::screens::scenes::queue::QueueFocus;
+        let state = self.active_scenes().filter(|s| s.mode == Mode::Queue)?;
+        if state.panel != crate::screens::scenes::Panel::None {
+            return None;
+        }
+        let focus = state.queue.focus;
+        let selected = state.queue.selected;
+        let fullscreen = self.playback.active() && self.playback.snapshot().fullscreen;
+        let action = keymap::resolve(key, mods, &[Level::Queue])?;
+        if fullscreen
+            && !matches!(
+                action,
+                Action::QueueNext | Action::QueuePrevious | Action::QueuePlayNext
+            )
+        {
+            return None;
+        }
+        Some(match action {
+            Action::QueueList if focus == QueueFocus::List => {
+                let Step { mut effects, up } = self.shell.screen_key(key, mods)?;
+                effects.extend(self.thumbnails());
+                effects.extend(self.save_later());
+                self.shell_up(Step::effects(effects), up)
+            }
+            Action::QueueList => return None,
+            Action::QueueFocus => self.shell(ShellMsg::Scenes(ScenesMsg::QueueFocus)),
+            Action::QueueNext => self.queue_step(true),
+            Action::QueuePrevious => self.queue_step(false),
+            Action::QueuePlayNext => self.shell(ShellMsg::Scenes(ScenesMsg::TogglePlayNext)),
+            Action::QueueOpen { new_tab } => {
+                let index = selected?;
+                self.shell(ShellMsg::Scenes(ScenesMsg::Open { index, new_tab }))
+            }
+            _ => return None,
+        })
     }
 
     /// Settings → Tag colours shows the server's rules (once they're here) and their counts.
@@ -666,6 +842,11 @@ impl Session {
                     None => Step::none(),
                 }
             }
+            Msg::Reply(Reply::QueueRestDue { tab, generation }) => {
+                let mut effects = self.shell.queue_rest_due(tab, generation);
+                effects.extend(self.thumbnails());
+                Step::effects(effects)
+            }
             Msg::Reply(Reply::ChipDetails { kind, id, result }) => {
                 self.library.chip_loaded(kind, id, result);
                 Step::none()
@@ -696,6 +877,22 @@ impl Session {
             }) => {
                 let waiting = self.waiting();
                 let mut effects = self.shell.scenes_page(tab, generation, result, waiting);
+                // Play next crossed into this page: its first (or last) card plays now (010 R4).
+                let layout = self.shell.layout;
+                let due = self.queue_tab(tab).and_then(|s| {
+                    let id = s.take_play_due()?;
+                    // Keep the playing card in view (the last card of a previous page).
+                    if let Some(i) = s.queue.selected {
+                        let step = s.update(ScenesMsg::Focus(i), tab, &layout);
+                        effects.extend(step.effects);
+                    }
+                    Some(id)
+                });
+                if let Some(id) = due {
+                    effects.extend(self.playback.open(id, tab));
+                    self.sync_chapters();
+                    self.sync_queue_playing();
+                }
                 effects.extend(self.thumbnails());
                 Step::effects(effects)
             }
@@ -755,7 +952,18 @@ impl Session {
                     None => Step::none(),
                 }
             }
-            Msg::Playback(m) => Step::effects(self.playback.update(m)),
+            Msg::Playback(m) => {
+                let effects = self.playback.update(m);
+                self.sync_queue_playing();
+                let step = Step::effects(effects);
+                match self.playback.take_ended() {
+                    Some(id) => {
+                        let next = self.ended(id);
+                        step.with_all(next.effects)
+                    }
+                    None => step,
+                }
+            }
             Msg::Overlay(m) => self.overlay(m),
             Msg::OpenServerMenu => {
                 self.overlay = Overlay::ServerMenu;
@@ -778,6 +986,17 @@ impl Session {
             }
             Msg::Reply(Reply::PlayHistoryFlushed { profile, outcome }) => {
                 self.history_flushed(profile, &outcome)
+            }
+            // A scene deleted on the server: with Play next on, its queue moves past it (010).
+            Msg::SceneOpened(Err(AppError::SceneNotFound { id }))
+                if self
+                    .playback
+                    .owner
+                    .and_then(|t| self.queue_tab(t).map(|s| s.play_next))
+                    .unwrap_or(false) =>
+            {
+                let owner = self.playback.owner.unwrap_or_default();
+                self.queue_advance(owner, Some(id), true)
             }
             Msg::SceneOpened(Err(e)) => {
                 tracing::warn!(error = %e, "couldn't open the scene");
@@ -911,12 +1130,16 @@ impl Session {
             }
             Msg::Key(key, mods) => {
                 let step = self.key(&key, mods);
-                // The keyboard's card previews as the pointer's does (008 FR-019).
-                let focused = self.active_scenes().and_then(|s| {
-                    s.focused
-                        .and_then(|i| s.cards().get(i))
-                        .map(|c| (c.id.clone(), true))
-                });
+                // The keyboard's card previews as the pointer's does (008 FR-019); the queue's
+                // compact rows don't preview (010).
+                let focused = self
+                    .active_scenes()
+                    .filter(|s| s.mode != Mode::Queue)
+                    .and_then(|s| {
+                        s.focused
+                            .and_then(|i| s.cards().get(i))
+                            .map(|c| (c.id.clone(), true))
+                    });
                 let more = self.previews.focus(focused);
                 step.with_all(more)
             }
@@ -960,18 +1183,22 @@ impl Session {
         let Some(playing) = self.playback.scene_id.clone() else {
             return;
         };
-        let chapters = self.shell.tabs.iter().find_map(|tab| match tab.current() {
-            crate::screens::Screen::Scene(s) if s.scene_id == playing => match &s.details {
-                crate::screens::scene::Details::Ready(d) => Some(
-                    d.markers
-                        .iter()
-                        .map(|m| (m.seconds, m.title.clone()))
-                        .collect::<Vec<_>>(),
-                ),
+        let chapters = self
+            .shell
+            .tabs
+            .iter()
+            .find_map(|tab| match tab.current().scene_panel() {
+                Some(s) if s.scene_id == playing => match &s.details {
+                    crate::screens::scene::Details::Ready(d) => Some(
+                        d.markers
+                            .iter()
+                            .map(|m| (m.seconds, m.title.clone()))
+                            .collect::<Vec<_>>(),
+                    ),
+                    _ => None,
+                },
                 _ => None,
-            },
-            _ => None,
-        });
+            });
         if let Some(chapters) = chapters {
             self.playback.set_chapters(chapters);
         }
@@ -1139,6 +1366,54 @@ impl Session {
                 let chrome: Element<'a, Msg> = self.shell.chrome(right).map(Msg::Shell);
                 let content: Element<'a, Msg> = match self.shell.active().current() {
                     _ if self.playback.active() && self.playback.owner.is_none() => player(),
+                    // The queue view: the player in its panel (010 R2).
+                    crate::screens::Screen::Scenes(scenes)
+                        if scenes.mode == Mode::Queue && self.player_visible() =>
+                    {
+                        let ctx = Context {
+                            profile: &self.profile,
+                            connection: &self.connection,
+                            thumbs: &self.thumbs,
+                            library: &self.library,
+                            layout: self.shell.layout,
+                            playback: self.prefs,
+                            previews: &self.previews,
+                        };
+                        let mut player: Element<'a, ShellMsg> = self.playback.screen.view(
+                            video,
+                            video_error.clone(),
+                            |m| ShellMsg::Player(playback::Msg::Controls(m)),
+                            ShellMsg::Player(playback::Msg::Close),
+                            ShellMsg::Player(playback::Msg::ToggleFullscreen),
+                        );
+                        // Play next off: at the end, Replay (the player's) and Play next.
+                        if !scenes.play_next
+                            && self.playback.snapshot().state == player::PlayerStateKind::Ended
+                        {
+                            player = stack![
+                                player,
+                                container(
+                                    button(text("Play next").size(14))
+                                        .style(theme::chip)
+                                        .padding([8, 18])
+                                        .on_press(ShellMsg::QueueStep(true)),
+                                )
+                                .padding(16)
+                                .width(iced::Length::Fill)
+                                .height(iced::Length::Fill)
+                                .align_x(iced::alignment::Horizontal::Right)
+                                .align_y(iced::alignment::Vertical::Top),
+                            ]
+                            .into();
+                        }
+                        crate::screens::scenes::grid::view_with(
+                            scenes,
+                            &ctx,
+                            self.shell.active().id,
+                            Some(player),
+                        )
+                        .map(Msg::Shell)
+                    }
                     crate::screens::Screen::Scene(scene) if self.player_visible() => {
                         crate::screens::scene::layout(
                             player(),

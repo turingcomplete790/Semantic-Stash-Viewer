@@ -97,9 +97,9 @@ mpv.
 - [x] Scene previews (animated, on hover), a wall view, and sprite/scrubber thumbnails (008 US4)
 - [x] Transcoding fallback: explicit, user-visible, and logged, only when mpv can't play a file
       (008 US5)
-- [ ] Queue view: the list on one side and the selected scene's player and details on the
-      other, so a run of scenes can be clicked through without leaving the list (suggested
-      2026-10-10 from the narrow list layout); might also serve as an alternative gallery view
+- [x] Queue view: the list on one side and the selected scene's player and details on the
+      other, so a run of scenes can be clicked through without leaving the list, with Play next
+      across pages and full keyboard operation (010)
 
 ### Images
 - [ ] Image grid (sized thumbnails), filters, and sorting

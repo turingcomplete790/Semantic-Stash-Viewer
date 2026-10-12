@@ -14,6 +14,8 @@ use crate::widgets::theme;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Level {
     Player,
+    /// Scenes in the queue view (010): inside Scenes, outside the player.
+    Queue,
     Scenes,
     Settings,
     Shell,
@@ -23,6 +25,7 @@ impl Level {
     fn label(self) -> &'static str {
         match self {
             Level::Player => "Player",
+            Level::Queue => "Scenes (queue view)",
             Level::Scenes => "Scenes",
             Level::Settings => "Settings → Tag colours",
             Level::Shell => "Everywhere",
@@ -153,6 +156,19 @@ pub enum Action {
     SavedFilters,
     /// Handled by Settings → Tag colours.
     Settings,
+    /// The queue's list keys (with the list focused), applied by the Scenes grid (010 R5).
+    QueueList,
+    /// Move the keyboard between the queue's list and panel.
+    QueueFocus,
+    /// Play the next or previous scene.
+    QueueNext,
+    QueuePrevious,
+    /// Turn Play next on or off.
+    QueuePlayNext,
+    /// Open the selected scene's page, here or in a new tab.
+    QueueOpen {
+        new_tab: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -324,6 +340,60 @@ pub fn bindings() -> Vec<Binding> {
         ),
     ] {
         all.push(b(Level::Scenes, chord, Action::Scenes, label));
+    }
+    // The queue view (010 contracts/queue-ui.md): the list's keys with the list focused, the rest
+    // in either area.
+    for (chord, label) in [
+        (Chord::plain(N(Named::ArrowUp)), "List: previous scene"),
+        (Chord::plain(N(Named::ArrowDown)), "List: next scene"),
+        (
+            Chord::plain(N(Named::Home)),
+            "List: first scene on the page",
+        ),
+        (Chord::plain(N(Named::End)), "List: last scene on the page"),
+        (Chord::plain(Char("]")), "List: next page"),
+        (Chord::plain(Char("[")), "List: previous page"),
+        (
+            Chord::plain(N(Named::Enter)),
+            "List: play the selected scene",
+        ),
+        (Chord::ctrl(N(Named::Enter)), "List: open in a new tab"),
+    ] {
+        all.push(b(Level::Queue, chord, Action::QueueList, label));
+    }
+    for (chord, action, label) in [
+        (
+            Chord::plain(N(Named::F6)),
+            Action::QueueFocus,
+            "Move between the list and the panel",
+        ),
+        (
+            Chord::plain(Char("n")),
+            Action::QueueNext,
+            "Play the next scene",
+        ),
+        (
+            Chord::plain(Char("p")),
+            Action::QueuePrevious,
+            "Play the previous scene",
+        ),
+        (
+            Chord::plain(Char("a")),
+            Action::QueuePlayNext,
+            "Turn Play next on or off",
+        ),
+        (
+            Chord::plain(Char("o")),
+            Action::QueueOpen { new_tab: false },
+            "Open the selected scene's page",
+        ),
+        (
+            Chord::ctrl(Char("o")),
+            Action::QueueOpen { new_tab: true },
+            "Open the selected scene's page in a new tab",
+        ),
+    ] {
+        all.push(b(Level::Queue, chord, action, label));
     }
     // Settings → Tag colours (008 FR-003g); the page applies them.
     for (chord, label) in [

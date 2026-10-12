@@ -84,6 +84,10 @@ pub enum ShellMsg {
     },
     // Handled above the shell.
     Play(String),
+    /// The player's controls drawn inside a screen (the queue view's panel, 010).
+    Player(crate::session::playback::Msg),
+    /// The queue view's Next (`true`) or Previous scene (010 FR-010).
+    QueueStep(bool),
     ServerMenu,
     Notifications,
     KeyboardHelp,
@@ -322,6 +326,12 @@ impl Shell {
                             self.active_mut().open(screen)
                         });
                     }
+                    Some(ScenesUp::Play(id)) => {
+                        return Step {
+                            effects,
+                            up: Some(Up::Play(id)),
+                        }
+                    }
                     Some(ScenesUp::Need(need)) => {
                         return Step {
                             effects,
@@ -336,7 +346,8 @@ impl Shell {
             ShellMsg::PlaybackChange(change) => return Step::up(Up::PlaybackChange(change)),
             ShellMsg::Scene(m) => {
                 let tab = self.active().id;
-                let Screen::Scene(state) = self.active_mut().current_mut() else {
+                // The Scene screen, or the queue view's panel (010).
+                let Some(state) = self.active_mut().current_mut().scene_panel_mut() else {
                     return Step::none();
                 };
                 let id = state.scene_id.clone();
@@ -345,6 +356,7 @@ impl Shell {
                 });
             }
             ShellMsg::Play(id) => return Step::up(Up::Play(id)),
+            ShellMsg::Player(_) | ShellMsg::QueueStep(_) => return Step::none(),
             ShellMsg::ServerMenu => return Step::up(Up::ServerMenu),
             ShellMsg::Notifications => return Step::up(Up::Notifications),
             ShellMsg::KeyboardHelp => return Step::up(Up::KeyboardHelp),
@@ -532,10 +544,26 @@ impl Shell {
         self.tabs[i]
             .history
             .iter_mut()
-            .find_map(|screen| match screen {
-                Screen::Scene(s) if s.awaits_rest(generation) => s.chip_rested(generation),
+            .find_map(|screen| match screen.scene_panel_mut() {
+                Some(s) if s.awaits_rest(generation) => s.chip_rested(generation),
                 _ => None,
             })
+    }
+
+    /// The queue's selection rest came due in tab `tab` (010 R3): its panel loads.
+    pub fn queue_rest_due(&mut self, tab: TabId, generation: u64) -> Vec<Effect> {
+        let Some(i) = self.index_of(tab) else {
+            return Vec::new();
+        };
+        self.tabs[i]
+            .history
+            .iter_mut()
+            .find_map(|screen| match screen {
+                Screen::Scenes(s) if s.awaits_queue_rest(generation) => Some(s),
+                _ => None,
+            })
+            .map(|s| s.queue_rest_due(generation, tab))
+            .unwrap_or_default()
     }
 
     /// A scene's cover arrived for tab `tab`.
@@ -557,6 +585,8 @@ impl Shell {
             .iter_mut()
             .find_map(|screen| match screen {
                 Screen::Scene(s) if s.scene_id == id => Some(s),
+                // The queue view's panel (010).
+                Screen::Scenes(s) => s.queue.panel_for(id),
                 _ => None,
             })
     }
