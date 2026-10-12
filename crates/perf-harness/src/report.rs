@@ -204,9 +204,10 @@ pub const GQL_BUDGETS: &[(&str, f64)] = &[
     ("gql-tags-picker-cold", 2.0),
     ("gql-tag-colours-save", 2.0),
     ("gql-viewing-10min-writes", 12.0),
-    // 010 contracts/queue-ui.md: nothing for rows only passed over, one details request on rest.
+    // 010 contracts/queue-ui.md: nothing for rows only passed over, one details request on rest;
+    // 011 FR-003: the rest also plays the scene, so its PlayableScene read (0 when cached).
     ("gql-queue-sweep", 0.0),
-    ("gql-queue-rest", 1.0),
+    ("gql-queue-rest", 2.0),
 ];
 
 /// Scrolling budgets by view (constitution 5.1.0, Principle VI): measured on a 144 Hz display, the

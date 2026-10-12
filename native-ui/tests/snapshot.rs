@@ -179,28 +179,43 @@ fn a_filtered_scenes_tab_round_trips_without_a_request() {
     assert_eq!(back.scroll, 640.0);
 }
 
-/// 010 T007: a session from 008 (no queue fields) loads with Play next on and no selection, and
-/// a Queue tab round-trips its mode, selection, and Play next.
+/// 010 T007, 011 T010: a session from 008 (no queue fields) loads with Autoplay on, Repeat Off,
+/// Shuffle off, and no selection; a 010 session's Play next becomes Autoplay; a Queue tab
+/// round-trips its mode, selection, and playlist controls.
 #[test]
 fn queue_fields_are_additive() {
     use semantic_stash_viewer_native::screens::ScenesState;
+    use stash_core::playback::playlist::Repeat;
     let mut value = serde_json::to_value(ScenesState::default()).expect("serialise");
     let map = value.as_object_mut().expect("an object");
-    map.remove("queue_selected");
-    map.remove("play_next");
-    let old: ScenesState = serde_json::from_value(value).expect("a 008 tab loads");
-    assert!(old.play_next, "Play next defaults to on");
+    for field in ["queue_selected", "autoplay", "repeat", "shuffle"] {
+        assert!(map.remove(field).is_some(), "{field} is saved");
+    }
+    let old: ScenesState = serde_json::from_value(value.clone()).expect("a 008 tab loads");
+    assert!(old.autoplay, "Autoplay defaults to on");
+    assert_eq!(old.repeat, Repeat::Off);
+    assert!(!old.shuffle);
     assert_eq!(old.queue_selected, None);
+
+    // A 010 tab with Play next off keeps it as Autoplay off.
+    let map = value.as_object_mut().expect("an object");
+    map.insert("play_next".into(), serde_json::Value::Bool(false));
+    let from_010: ScenesState = serde_json::from_value(value).expect("a 010 tab loads");
+    assert!(!from_010.autoplay, "Play next off becomes Autoplay off");
 
     let mut queue = ScenesState::default();
     queue.mode = Mode::Queue;
     queue.queue_selected = Some("42".into());
-    queue.play_next = false;
+    queue.autoplay = false;
+    queue.repeat = Repeat::One;
+    queue.shuffle = true;
     let json = serde_json::to_string(&queue.persistent()).expect("serialise");
+    assert!(!json.contains("play_next") && !json.contains("loop_queue"));
     let back: ScenesState = serde_json::from_str(&json).expect("parse");
     assert_eq!(
-        (back.mode, back.queue_selected.as_deref(), back.play_next),
+        (back.mode, back.queue_selected.as_deref(), back.autoplay),
         (Mode::Queue, Some("42"), false)
     );
+    assert_eq!((back.repeat, back.shuffle), (Repeat::One, true));
     assert_eq!(VERSION, 2, "no version bump");
 }

@@ -5,6 +5,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
+use stash_core::playback::playlist::{self, Command, Event, Playlist, Repeat, Settings};
 use stash_core::scenes::paging::{last_page, page_of, PAGE_SIZES};
 use stash_core::scenes::query::{SceneQuery, SceneSort, SortDirection};
 use stash_core::scenes::{SceneCard, ScenePage};
@@ -105,9 +106,23 @@ pub struct ScenesState {
     /// page, otherwise the first.
     #[serde(default)]
     pub queue_selected: Option<String>,
-    /// Whether the queue advances when a scene ends (010 FR-009); on by default.
-    #[serde(default = "yes")]
-    pub play_next: bool,
+    /// Autoplay (011 FR-004, YouTube's meaning): the queue starts on its own and moves on when a
+    /// scene ends; on by default. Reads 010's Play next.
+    #[serde(default = "yes", alias = "play_next")]
+    pub autoplay: bool,
+    /// Repeat: Off, All, One (011 FR-006).
+    #[serde(default)]
+    pub repeat: Repeat,
+    /// Shuffle (011 FR-007).
+    #[serde(default)]
+    pub shuffle: bool,
+    /// The playlist machine's state for this queue (011 R1): rebuilt when a page arrives, so a
+    /// restored tab starts a new round.
+    #[serde(skip)]
+    pub playlist: Playlist,
+    /// The query changed: the arriving page is a new result (a new shuffled round).
+    #[serde(skip)]
+    new_results: bool,
     /// The queue view's selection and panel (010).
     #[serde(skip)]
     pub queue: QueueState,
@@ -157,7 +172,11 @@ impl Default for ScenesState {
             focused: None,
             applied: None,
             queue_selected: None,
-            play_next: true,
+            autoplay: true,
+            repeat: Repeat::Off,
+            shuffle: false,
+            playlist: Playlist::default(),
+            new_results: false,
             queue: QueueState::default(),
             data: Data::Loading,
             search_draft: None,
@@ -214,8 +233,12 @@ pub enum ScenesMsg {
     QueuePlay(usize),
     /// F6: move the keyboard between the queue's list and panel (010 R5).
     QueueFocus,
-    /// Turn Play next on or off (010 FR-009).
-    TogglePlayNext,
+    /// Turn Autoplay on or off (011 FR-004).
+    ToggleAutoplay,
+    /// Turn Shuffle on or off (011 FR-007).
+    ToggleShuffle,
+    /// Repeat: Off → All → One → Off (011 FR-006).
+    CycleRepeat,
     /// The pointer moved onto card `index` (its preview may start, 008 FR-019).
     Hover(usize),
     /// The pointer left card `index`.
@@ -262,20 +285,30 @@ pub enum ScenesUp {
     Play(String),
 }
 
-/// Where the queue goes next (010 R4).
+/// What the session does with the playlist machine's command (011 R2).
 #[derive(Debug)]
 pub enum Advance {
     /// Play this card now (it's selected).
     Play { id: String, effects: Vec<Effect> },
-    /// The next or previous page is loading; its first or last card plays when it arrives.
+    /// The scene's page is loading; the scene plays when it arrives.
     Loading(Vec<Effect>),
-    /// Nothing more in that direction.
+    /// Play this scene again from the beginning, as a new viewing (Repeat one, 011 R4).
+    Replay { id: String },
+    /// Nothing to play.
     Stop,
 }
 
 fn new_seed() -> u32 {
     let bytes = uuid::Uuid::new_v4().into_bytes();
     u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
+}
+
+/// A shuffle round's seed (the machine takes randomness only as input).
+fn new_seed64() -> u64 {
+    let bytes = uuid::Uuid::new_v4().into_bytes();
+    u64::from_le_bytes([
+        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+    ])
 }
 
 impl ScenesState {
@@ -333,7 +366,9 @@ impl ScenesState {
             focused: self.focused,
             applied: self.applied.clone(),
             queue_selected: self.queue_selected.clone(),
-            play_next: self.play_next,
+            autoplay: self.autoplay,
+            repeat: self.repeat,
+            shuffle: self.shuffle,
             ..Self::default()
         }
     }
@@ -513,6 +548,7 @@ impl ScenesState {
 
     /// The query changed: back to page 1.
     fn requery(&mut self) -> Vec<Effect> {
+        self.new_results = true;
         self.page = 1;
         self.scroll = 0.0;
         self.focused = None;
@@ -522,12 +558,151 @@ impl ScenesState {
     }
 
     /// The search, a filter, the sort, the page size, or the page changed: the queue's first
-    /// scene will be selected when the new page arrives (010 FR-006).
+    /// scene will be selected when the new page arrives (010 FR-006), and starts there with
+    /// Autoplay on (011 FR-004).
     fn results_changed(&mut self) {
         self.queue.clear();
-        self.queue.pending_play = PendingPlay::None;
+        self.queue.pending_play = if self.mode == Mode::Queue {
+            PendingPlay::Start
+        } else {
+            PendingPlay::None
+        };
         self.play_due = None;
         self.queue_selected = None;
+    }
+
+    /// The tab's saved playlist controls.
+    fn settings(&self) -> Settings {
+        Settings {
+            autoplay: self.autoplay,
+            repeat: self.repeat,
+            shuffle: self.shuffle,
+        }
+    }
+
+    /// Step the playlist machine (011 R1); the saved controls follow its settings.
+    fn machine(&mut self, event: Event) -> Command {
+        let current = Playlist {
+            settings: self.settings(),
+            ..self.playlist
+        };
+        let (next, command) = playlist::step(&current, event);
+        self.playlist = next;
+        Settings {
+            autoplay: self.autoplay,
+            repeat: self.repeat,
+            shuffle: self.shuffle,
+        } = next.settings;
+        command
+    }
+
+    /// Card `local` of this page as an index into the whole result.
+    fn global(&self, local: usize) -> u32 {
+        (self.page - 1) * self.page_size + local as u32
+    }
+
+    /// The card on this page for result index `i`.
+    fn local(&self, i: u32) -> Option<usize> {
+        let on_page = i.checked_sub((self.page - 1) * self.page_size)? as usize;
+        (on_page < self.cards().len()).then_some(on_page)
+    }
+
+    /// Tell the machine what the player holds: this tab's playing scene (the session keeps
+    /// `queue.playing` current), or nothing, so the queue continues from the selection.
+    fn sync_playing(&mut self) {
+        match self.queue.playing.clone() {
+            None if self.playlist.live => {
+                let at = self.queue.selected.map(|i| self.global(i));
+                self.machine(Event::Idle(at));
+            }
+            Some(id) => {
+                let at = self.cards().iter().position(|c| c.id == id);
+                if let Some(i) = at.map(|l| self.global(l)) {
+                    if self.playlist.playing != Some(i) || !self.playlist.live {
+                        self.machine(Event::Started(i));
+                    }
+                }
+            }
+            None => {}
+        }
+    }
+
+    /// The selected card, if `event` about it (`Chosen` or `Autostart`) makes the machine play it.
+    fn selection_plays(&mut self, event: fn(u32) -> Event) -> Option<String> {
+        let i = self.queue.selected?;
+        self.sync_playing();
+        match self.machine(event(self.global(i))) {
+            Command::Play(_) => self.cards().get(i).map(|c| c.id.clone()),
+            _ => None,
+        }
+    }
+
+    /// The viewer chose the selected card (a click, Enter, the keyboard's rest, 011 R6): the scene
+    /// to play, unless it's playing already.
+    fn chosen(&mut self) -> Option<String> {
+        self.selection_plays(Event::Chosen)
+    }
+
+    /// The queue may start on its own at the selection (choosing Queue, new results, a switch to
+    /// the tab): the scene to play, with Autoplay on (011 R5).
+    pub fn autostart(&mut self) -> Option<String> {
+        if self.mode != Mode::Queue {
+            return None;
+        }
+        self.selection_plays(Event::Autostart)
+    }
+
+    /// A playlist event from the session (Ended, Skipped, Next, Previous): what to do.
+    pub fn queue_event(&mut self, event: Event, tab: TabId, layout: &Layout) -> Advance {
+        self.tab = tab;
+        if self.mode != Mode::Queue || !self.ready() {
+            return Advance::Stop;
+        }
+        self.sync_playing();
+        let command = self.machine(event);
+        self.apply(command, layout)
+    }
+
+    /// Carry out the machine's command: select and play a card on this page, or load the page
+    /// that has it (it plays when it arrives, 011 R2).
+    fn apply(&mut self, command: Command, layout: &Layout) -> Advance {
+        match command {
+            Command::Play(i) => match self.local(i) {
+                Some(card) => self.queue_play(card, layout),
+                None => {
+                    let effects = self.go_to_page(i / self.page_size + 1);
+                    self.queue.pending_play = PendingPlay::Index(i);
+                    Advance::Loading(effects)
+                }
+            },
+            Command::Replay => {
+                let id = self
+                    .playlist
+                    .playing
+                    .and_then(|i| self.local(i))
+                    .and_then(|l| self.cards().get(l))
+                    .map(|c| c.id.clone())
+                    .or_else(|| self.queue.playing.clone());
+                match id {
+                    Some(id) => Advance::Replay { id },
+                    None => Advance::Stop,
+                }
+            }
+            Command::Stop | Command::Nothing => Advance::Stop,
+        }
+    }
+
+    /// A scene began playing in this tab: the machine's position follows it.
+    pub fn queue_started(&mut self, id: &str) {
+        if let Some(i) = self.cards().iter().position(|c| c.id == id) {
+            let i = self.global(i);
+            self.machine(Event::Started(i));
+        }
+    }
+
+    /// The playing scene failed: nothing moves (011 FR-010).
+    pub fn queue_failed(&mut self) {
+        self.machine(Event::Failed);
     }
 
     /// Select queue row `index`: the panel follows and the row is kept in view. With no room for
@@ -573,42 +748,15 @@ impl ScenesState {
         }
     }
 
-    /// Next (`forward`) or Previous from scene `from` (the playing one, or the selection): the
-    /// neighbouring card, or across a page boundary (010 FR-010). When `from` isn't on the page
-    /// (the page changed while it played), the new list's first card.
-    pub fn advance(
-        &mut self,
-        from: Option<&str>,
-        forward: bool,
-        tab: TabId,
-        layout: &Layout,
-    ) -> Advance {
-        self.tab = tab;
-        if self.mode != Mode::Queue || !self.ready() {
-            return Advance::Stop;
+    /// The queue's keyboard crossed a page edge: the arriving page's card is a keyboard selection
+    /// (it plays once it rests), not the new results' first scene.
+    fn keyboard_edge(&mut self) {
+        if self.mode == Mode::Queue {
+            self.queue.pending_play = PendingPlay::Keyboard;
         }
-        let len = self.cards().len();
-        let at = from.and_then(|id| self.cards().iter().position(|c| c.id == id));
-        let target = match (at, forward) {
-            (Some(i), true) => (i + 1 < len).then_some(i + 1),
-            (Some(i), false) => i.checked_sub(1),
-            (None, _) => (len > 0).then_some(0),
-        };
-        if let Some(i) = target {
-            return self.queue_play(i, layout);
-        }
-        let last = self.last_page().unwrap_or(self.page);
-        let (page, pending) = match forward {
-            true if self.page < last => (self.page + 1, PendingPlay::First),
-            false if self.page > 1 => (self.page - 1, PendingPlay::Last),
-            _ => return Advance::Stop,
-        };
-        let effects = self.go_to_page(page);
-        self.queue.pending_play = pending;
-        Advance::Loading(effects)
     }
 
-    /// The card to play now that Play next's page arrived, once.
+    /// The card to play now that its page arrived, once.
     pub fn take_play_due(&mut self) -> Option<String> {
         self.play_due.take()
     }
@@ -634,9 +782,12 @@ impl ScenesState {
     }
 
     /// A rest for the queue's selection came due.
-    pub fn queue_rest_due(&mut self, generation: u64, tab: TabId) -> Vec<Effect> {
+    /// Its effects, and the scene to play when a keyboard move started it (011 R2).
+    pub fn queue_rest_due(&mut self, generation: u64, tab: TabId) -> (Vec<Effect>, Option<String>) {
         self.tab = tab;
-        self.queue.rest_due(generation, tab)
+        let (effects, plays) = self.queue.rest_due(generation, tab);
+        let play = if plays { self.chosen() } else { None };
+        (effects, play)
     }
 
     /// Whether this screen's queue waits for rest `generation`.
@@ -716,28 +867,38 @@ impl ScenesState {
                 self.scroll = layout.row_top(first, mode);
                 let mut step = Step::effect(self.scroll_to(self.scroll));
                 if mode == Mode::Queue {
-                    // Choosing Queue is deliberate: the selection's details load at once.
+                    // Choosing Queue loads the selection at once and, with Autoplay on, plays it
+                    // (011 FR-004).
                     if !self.cards().is_empty() {
                         let start = self.queue_start();
                         let more = self.queue_select(start, Via::Pointer, layout);
                         step.effects.extend(more.effects);
+                        step.up = more.up.or_else(|| self.autostart().map(ScenesUp::Play));
+                    } else if !self.ready() {
+                        self.queue.pending_play = PendingPlay::Start;
                     }
                 } else if leaving {
                     self.queue.clear();
                 }
                 step
             }
+            // 011 R6: a click plays the row (the playing row: selects only).
             ScenesMsg::QueueSelect(index) if self.mode == Mode::Queue => {
-                self.queue_select(index, Via::Pointer, layout)
+                let step = self.queue_select(index, Via::Pointer, layout);
+                match step.up {
+                    Some(up) => Step::up(up).with_all(step.effects),
+                    None => Step {
+                        effects: step.effects,
+                        up: self.chosen().map(ScenesUp::Play),
+                    },
+                }
             }
             ScenesMsg::QueueSelect(_) => Step::none(),
             ScenesMsg::QueuePlay(index) if self.mode == Mode::Queue => {
-                match self.queue_play(index, layout) {
-                    Advance::Play { id, effects } => Step {
-                        effects,
-                        up: Some(ScenesUp::Play(id)),
-                    },
-                    _ => Step::none(),
+                let effects = self.queue_select_here(index, Via::Pointer, layout);
+                Step {
+                    effects,
+                    up: self.chosen().map(ScenesUp::Play),
                 }
             }
             ScenesMsg::QueuePlay(_) => Step::none(),
@@ -748,8 +909,19 @@ impl ScenesState {
                 };
                 Step::none()
             }
-            ScenesMsg::TogglePlayNext => {
-                self.play_next = !self.play_next;
+            ScenesMsg::ToggleAutoplay => {
+                self.machine(Event::SetAutoplay(!self.autoplay));
+                Step::none()
+            }
+            ScenesMsg::ToggleShuffle => {
+                // Turning it on starts a round from the playing scene; off continues in list
+                // order (011 FR-007).
+                self.sync_playing();
+                self.machine(Event::ToggleShuffle { seed: new_seed64() });
+                Step::none()
+            }
+            ScenesMsg::CycleRepeat => {
+                self.machine(Event::CycleRepeat);
                 Step::none()
             }
             ScenesMsg::Scrolled { y } => {
@@ -870,6 +1042,7 @@ impl ScenesState {
             }
             ScenesMsg::ApplySaved(filter) => {
                 self.adopt(&filter);
+                self.new_results = true;
                 self.panel = Panel::None;
                 self.page = 1;
                 self.scroll = 0.0;
@@ -918,11 +1091,13 @@ impl ScenesState {
             GridAction::Edge(PageDirection::Next) if self.page < last => {
                 let effects = self.go_to_page(self.page + 1);
                 self.focused = Some(0);
+                self.keyboard_edge();
                 Step::effects(effects)
             }
             GridAction::Edge(PageDirection::Previous) if self.page > 1 => {
                 let effects = self.go_to_page(self.page - 1);
                 self.focused = Some(self.page_size as usize - 1);
+                self.keyboard_edge();
                 Step::effects(effects)
             }
             GridAction::Edge(_) => Step::none(),
@@ -959,6 +1134,14 @@ impl ScenesState {
             Ok(page) => {
                 self.page = page.page;
                 let last = last_page(page.count, self.page_size);
+                // The machine follows the result: a new query or a new size starts it over (a new
+                // shuffled round, 011 FR-007).
+                if std::mem::take(&mut self.new_results) || self.playlist.count != page.count {
+                    self.machine(Event::ResultsChanged {
+                        count: page.count,
+                        seed: new_seed64(),
+                    });
+                }
                 if let Some(f) = self.focused {
                     self.focused = (!page.items.is_empty()).then(|| f.min(page.items.len() - 1));
                 }
@@ -972,14 +1155,20 @@ impl ScenesState {
                     if self.cards().is_empty() {
                         self.queue.clear();
                     } else {
-                        // Play next, Next, or Previous crossed into this page: play its first
-                        // or last card (010 R4).
+                        // The machine's scene is on this page (Next, Previous, a shuffled pick,
+                        // Repeat all), or the queue may start here.
                         let pending = std::mem::take(&mut self.queue.pending_play);
-                        let last = self.cards().len() - 1;
+                        let wanted = match pending {
+                            PendingPlay::Index(i) => self.local(i),
+                            _ => None,
+                        };
                         let (start, via) = match pending {
-                            PendingPlay::First => (0, Via::Pointer),
-                            PendingPlay::Last => (last, Via::Pointer),
-                            PendingPlay::None => (self.queue_start(), Via::Keyboard),
+                            PendingPlay::Index(_) | PendingPlay::Start => {
+                                (wanted.unwrap_or_else(|| self.queue_start()), Via::Pointer)
+                            }
+                            PendingPlay::Keyboard => (self.queue_start(), Via::Keyboard),
+                            // A restore or a refresh: load only, never play (011 R6).
+                            PendingPlay::None => (self.queue_start(), Via::Arrival),
                         };
                         effects.extend(self.queue.select(
                             start,
@@ -988,9 +1177,15 @@ impl ScenesState {
                             self.tab,
                         ));
                         self.sync_queue_selection();
-                        if pending != PendingPlay::None {
-                            self.play_due = self.queue_selected.clone();
-                        }
+                        self.play_due = match pending {
+                            // The machine already chose it.
+                            PendingPlay::Index(_) if wanted.is_some() => self
+                                .queue_selected
+                                .clone()
+                                .filter(|id| self.queue.playing.as_deref() != Some(id)),
+                            PendingPlay::Start => self.autostart(),
+                            _ => None,
+                        };
                     }
                 }
                 if !refreshing {

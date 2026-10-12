@@ -22,7 +22,8 @@ use report::{
     gql_measurements, scroll_measurement, summarise, Check, GqlRow, Measurement, Report, Unit,
 };
 
-const LAUNCH_TIMEOUT: Duration = Duration::from_secs(300);
+/// The UI bench's whole run (011's playlist rows made it longer).
+const LAUNCH_TIMEOUT: Duration = Duration::from_secs(480);
 const LONG_PLAYBACK_SECS: u32 = 60;
 
 /// The app's package, and the name reports carry (reports compare within one app).
@@ -330,7 +331,7 @@ fn launch(app: &Path, base: &[(&str, String)], extra: &[(&str, &str)]) -> Result
                 let _ = child.kill();
                 let _ = child.wait();
                 result.lines.extend(rx.try_iter());
-                result.problem = Some("timed out after 5 minutes".into());
+                result.problem = Some("timed out after 8 minutes".into());
                 break;
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(100)),
@@ -678,6 +679,36 @@ fn picker_measurements(launch: &Launch) -> Vec<Measurement> {
             launch,
             "queue-next",
             "queue-next",
+            Some(1500.0),
+            Check::Median,
+        ),
+        // 011 SC-001–SC-003: a click, choosing Queue, Repeat (all and one), and a shuffled pick,
+        // each to a scene playing, within the playback open budget.
+        from_bench(
+            launch,
+            "queue-click-play",
+            "queue-click-play",
+            Some(1500.0),
+            Check::Median,
+        ),
+        from_bench(
+            launch,
+            "queue-autoplay",
+            "queue-autoplay",
+            Some(1500.0),
+            Check::Median,
+        ),
+        from_bench(
+            launch,
+            "queue-repeat",
+            "queue-repeat",
+            Some(1500.0),
+            Check::Median,
+        ),
+        from_bench(
+            launch,
+            "queue-shuffle",
+            "queue-shuffle",
             Some(1500.0),
             Check::Median,
         ),

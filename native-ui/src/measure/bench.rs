@@ -77,6 +77,8 @@ enum Act {
     MarkPlaying,
     /// Seek the playing scene to this many seconds before its end.
     SeekBeforeEnd(f64),
+    /// Play the queue page's last card (011 `queue-repeat`).
+    QueuePlayLast,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -117,6 +119,10 @@ enum Cond {
     PlaybackMoved,
     /// Another scene than the noted one is playing.
     PlayingMoved,
+    /// The noted scene reached its end (or playback moved on from it).
+    EndReached,
+    /// The noted scene is playing again from its start (Repeat one, 011).
+    Replayed,
 }
 
 #[derive(Debug, Clone)]
@@ -197,6 +203,12 @@ pub struct Bench {
     video_sized: u32,
     /// The scene `MarkPlaying` noted.
     playing_mark: Option<String>,
+    /// The noted scene was seen within 3 s of its end (after `SeekBeforeEnd`).
+    near_end: std::cell::Cell<bool>,
+    /// A queue scene that failed to play (Testing's undecodable sample), skipped with Next.
+    skipped: Option<String>,
+    /// A skip happened during this sample's wait: it timed the skip, so it isn't recorded.
+    void: bool,
 }
 
 fn script() -> Vec<Op> {
@@ -501,8 +513,10 @@ fn script() -> Vec<Op> {
     }
     ops.push(Report("preview-start"));
     // 010: the queue view on the same page (performer A's scenes on Testing). Choosing a row
-    // until the panel shows it; a quick keyboard sweep (no details), then the rest (one).
+    // until the panel shows it; a quick keyboard sweep (no details), then the rest (one). From
+    // 011 choosing Queue and a click play the scene, so play history is off from here: no writes.
     ops.extend([
+        Op::Act(A::History(false)),
         shell(ShellMsg::Scenes(ScenesMsg::Mode(Mode::Queue))),
         Until(Cond::QueueDetails, ms(15_000)),
         Sleep(ms(500)),
@@ -517,8 +531,22 @@ fn script() -> Vec<Op> {
             Until(Cond::QueueDetails, ms(15_000)),
         ]);
     }
+    // 011: a click to the clicked scene playing.
+    for i in [4, 6, 1] {
+        ops.extend([
+            Until(Cond::Playing, ms(20_000)),
+            Op::Act(A::MarkPlaying),
+            Start,
+            shell(ShellMsg::Scenes(ScenesMsg::QueueSelect(i))),
+            Until(Cond::PlayingMoved, ms(10_000)),
+            Sample("queue-click-play"),
+        ]);
+    }
     ops.extend([
         Report("queue-select"),
+        Report("queue-click-play"),
+        Op::Act(A::StopPlayback),
+        Frames(2),
         Sleep(ms(500)),
         GqlReset,
         // Twenty rows, ending on one not chosen yet (its details aren't cached).
@@ -531,9 +559,22 @@ fn script() -> Vec<Op> {
         Gql("gql-queue-rest"),
         GqlReset,
     ]);
-    // A scene's end to the next one playing (Play next), twice on the page and once across a
+    // 011: choosing Queue to its selection playing (Autoplay).
+    for _ in 0..3 {
+        ops.extend([
+            Op::Act(A::StopPlayback),
+            shell(ShellMsg::Scenes(ScenesMsg::Mode(Mode::Grid))),
+            Frames(2),
+            Sleep(ms(500)),
+            Start,
+            shell(ShellMsg::Scenes(ScenesMsg::Mode(Mode::Queue))),
+            Until(Cond::Playing, ms(20_000)),
+            Sample("queue-autoplay"),
+        ]);
+    }
+    ops.push(Report("queue-autoplay"));
+    // A scene's end to the next one playing (Autoplay), twice on the page and once across a
     // page boundary (20 per page, the whole library). Play history is off: no writes.
-    ops.push(Op::Act(A::History(false)));
     let next = |ops: &mut Vec<Op>| {
         ops.extend([
             Until(Cond::Playing, ms(20_000)),
@@ -551,14 +592,64 @@ fn script() -> Vec<Op> {
     ops.extend([
         Op::Act(A::StopPlayback),
         Frames(2),
-        shell(ShellMsg::Scenes(ScenesMsg::ClearFilters)),
+        // Scenes longer than 20 s (81 on Testing: five pages at 20), which leaves out the
+        // undecodable 10-second sample that is the whole library's last scene.
+        shell(ShellMsg::Scenes(ScenesMsg::FilterTo(
+            stash_core::scenes::filter::Criterion::new(
+                K::Duration,
+                stash_core::scenes::filter::Modifier::GreaterThan,
+                stash_core::scenes::filter::CriterionValue::Int(20, None),
+            ),
+        ))),
         Until(Cond::Ready, ms(15_000)),
         shell(ShellMsg::Scenes(ScenesMsg::PageSize(20))),
         Until(Cond::Ready, ms(15_000)),
         shell(ShellMsg::Scenes(ScenesMsg::QueuePlay(19))),
     ]);
     next(&mut ops);
+    // 011: a scene's end (seeked to) to what plays next, from the end itself: Repeat all from the
+    // last page's last scene to page 1's first, Repeat one to the same scene again from 0:00, and
+    // Shuffle to its pick (often on another page).
+    let from_end = |ops: &mut Vec<Op>, then: Cond, name: &'static str| {
+        ops.extend([
+            Until(Cond::Playing, ms(20_000)),
+            Op::Act(A::MarkPlaying),
+            Op::Act(A::SeekBeforeEnd(1.5)),
+            Until(Cond::EndReached, ms(30_000)),
+            Start,
+            Until(then, ms(10_000)),
+            Sample(name),
+        ]);
+    };
     ops.extend([
+        shell(ShellMsg::Scenes(ScenesMsg::CycleRepeat)),
+        Op::Act(A::StopPlayback),
+        Frames(2),
+    ]);
+    for _ in 0..2 {
+        // The last page (it may autoplay its first scene), then its last scene chosen.
+        ops.extend([
+            shell(ShellMsg::Scenes(ScenesMsg::Page(u32::MAX))),
+            Until(Cond::Ready, ms(15_000)),
+            Op::Act(A::QueuePlayLast),
+        ]);
+        from_end(&mut ops, Cond::PlayingMoved, "queue-repeat");
+    }
+    ops.push(shell(ShellMsg::Scenes(ScenesMsg::CycleRepeat)));
+    for _ in 0..2 {
+        from_end(&mut ops, Cond::Replayed, "queue-repeat");
+    }
+    ops.extend([
+        Report("queue-repeat"),
+        shell(ShellMsg::Scenes(ScenesMsg::CycleRepeat)),
+        shell(ShellMsg::Scenes(ScenesMsg::ToggleShuffle)),
+    ]);
+    for _ in 0..3 {
+        from_end(&mut ops, Cond::PlayingMoved, "queue-shuffle");
+    }
+    ops.extend([
+        Report("queue-shuffle"),
+        shell(ShellMsg::Scenes(ScenesMsg::ToggleShuffle)),
         Report("queue-next"),
         Op::Act(A::StopPlayback),
         Op::Act(A::History(true)),
@@ -614,6 +705,9 @@ fn script() -> Vec<Op> {
     ] {
         ops.extend([
             shell(ShellMsg::Scenes(ScenesMsg::Mode(mode))),
+            // 011: choosing Queue autoplays; the row measures the list as 010 did, with nothing
+            // playing (and nothing written to play history).
+            Op::Act(A::StopPlayback),
             Op::Act(A::ClearThumbs),
             shell(ShellMsg::Scenes(ScenesMsg::Scrolled { y: 0.0 })),
             Frames(2),
@@ -672,6 +766,9 @@ impl Bench {
             video_checked: 0,
             video_sized: 0,
             playing_mark: None,
+            near_end: std::cell::Cell::new(false),
+            skipped: None,
+            void: false,
         }
     }
 
@@ -689,15 +786,42 @@ impl Bench {
     }
 
     fn holds(&self, cond: Cond, session: &Session) -> bool {
+        // The scene mpv plays: the one asked for may still be opening while the last one plays.
+        let shown = session.playback.snapshot().scene_id.as_deref();
+        let asked = session.playback.playing_scene();
         if let Cond::Playing = cond {
-            return session.playback.snapshot().state == player::PlayerStateKind::Playing;
+            return session.playback.snapshot().state == player::PlayerStateKind::Playing
+                && shown == asked;
+        }
+        if let Cond::EndReached = cond {
+            use player::PlayerStateKind as K;
+            let snapshot = session.playback.snapshot();
+            // Repeat one's replay is a seek to 0 that can land within a frame of the end: once
+            // the scene was seen near its end, a jump back to its start is the end too.
+            let near = snapshot
+                .duration_seconds
+                .is_some_and(|d| snapshot.position_seconds >= d - 3.0);
+            let restarted = self.near_end.get() && !near;
+            if near {
+                self.near_end.set(true);
+            }
+            return !matches!(snapshot.state, K::Playing | K::Paused)
+                || asked != self.playing_mark.as_deref()
+                || restarted;
+        }
+        if let Cond::Replayed = cond {
+            let snapshot = session.playback.snapshot();
+            return snapshot.state == player::PlayerStateKind::Playing
+                && shown == asked
+                && shown == self.playing_mark.as_deref()
+                && snapshot.position_seconds < 5.0;
         }
         if let Cond::PlaybackMoved | Cond::PlayingMoved = cond {
-            let moved = session.playback.active()
-                && session.playback.playing_scene() != self.playing_mark.as_deref();
+            let moved = session.playback.active() && asked != self.playing_mark.as_deref();
             return moved
                 && (matches!(cond, Cond::PlaybackMoved)
-                    || session.playback.snapshot().state == player::PlayerStateKind::Playing);
+                    || (session.playback.snapshot().state == player::PlayerStateKind::Playing
+                        && shown == asked));
         }
         if let Cond::QueuePanel | Cond::QueueDetails = cond {
             let Some(s) = Self::scenes(session).filter(|s| s.mode == Mode::Queue) else {
@@ -797,7 +921,9 @@ impl Bench {
             | Cond::QueuePanel
             | Cond::QueueDetails
             | Cond::PlaybackMoved
-            | Cond::PlayingMoved => unreachable!("checked above"),
+            | Cond::PlayingMoved
+            | Cond::EndReached
+            | Cond::Replayed => unreachable!("checked above"),
             Cond::Cards(n) => s.cards().len() >= n.min(s.count().unwrap_or(0) as usize),
             Cond::CardsShown => changed(),
             Cond::AllThumbs => s
@@ -957,6 +1083,7 @@ impl Bench {
                 Step::none()
             }
             Act::MarkPlaying => {
+                self.near_end.set(false);
                 self.playing_mark = session.playback.playing_scene().map(str::to_owned);
                 Step::none()
             }
@@ -967,6 +1094,12 @@ impl Bench {
                         exact: false,
                     }))
                 }
+                _ => Step::none(),
+            },
+            Act::QueuePlayLast => match Self::scenes(session).map(|s| s.cards().len()) {
+                Some(n) if n > 0 => session.update(session::Msg::Shell(ShellMsg::Scenes(
+                    ScenesMsg::QueuePlay(n - 1),
+                ))),
                 _ => Step::none(),
             },
             Act::Jump => {
@@ -1038,6 +1171,32 @@ impl Bench {
         step.effects
     }
 
+    /// While waiting on playback in the queue view, a failed scene is skipped with Next.
+    fn skip_failure(&mut self, cond: Cond, session: &mut Session) -> Option<Vec<Effect>> {
+        let waits_on_playback = matches!(
+            cond,
+            Cond::Playing
+                | Cond::PlaybackMoved
+                | Cond::PlayingMoved
+                | Cond::EndReached
+                | Cond::Replayed
+        );
+        let failed = session.playback.snapshot().state == player::PlayerStateKind::Error;
+        let in_queue = Self::scenes(session).is_some_and(|s| s.mode == Mode::Queue);
+        let scene = session.playback.playing_scene().map(str::to_owned);
+        if !waits_on_playback || !failed || !in_queue || scene == self.skipped {
+            return None;
+        }
+        tracing::info!(scene = ?scene, "bench: skipping a scene that failed to play");
+        self.skipped = scene;
+        self.void = true;
+        Some(
+            session
+                .update(session::Msg::Shell(ShellMsg::QueueStep(true)))
+                .effects,
+        )
+    }
+
     /// One frame: advance the script as far as it can go. Returns the effects to run and whether
     /// the bench has finished.
     pub fn frame(&mut self, now: Instant, session: &mut Session) -> (Vec<Effect>, bool) {
@@ -1055,6 +1214,11 @@ impl Bench {
                 self.wait = Wait::None;
             }
             Wait::Until { cond, deadline } => {
+                // 011: the queue stops on a failure (FR-010); a person presses Next, so the
+                // bench does too, once per failed scene.
+                if let Some(skip) = self.skip_failure(cond, session) {
+                    return (skip, false);
+                }
                 if self.holds(cond, session) {
                     self.last_ok = true;
                     self.wait = Wait::None;
@@ -1127,7 +1291,9 @@ impl Bench {
                     self.last_ok = true;
                 }
                 Op::Sample(name) => {
-                    if self.last_ok {
+                    if std::mem::take(&mut self.void) {
+                        tracing::info!(name, "sample dropped: a failed scene was skipped");
+                    } else if self.last_ok {
                         let ms = self.started.elapsed().as_secs_f64() * 1000.0;
                         self.samples.entry(name).or_default().push(ms);
                     }

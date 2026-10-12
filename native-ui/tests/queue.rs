@@ -6,11 +6,12 @@ use semantic_stash_viewer_native::screens::scene::Details;
 use semantic_stash_viewer_native::screens::scenes::keyboard::GridAction;
 use semantic_stash_viewer_native::screens::scenes::layout::Layout;
 use semantic_stash_viewer_native::screens::scenes::queue::QUEUE_REST;
-use semantic_stash_viewer_native::screens::scenes::{ScenesMsg, ScenesState, Thumbs};
+use semantic_stash_viewer_native::screens::scenes::{ScenesMsg, ScenesState, ScenesUp, Thumbs};
 use semantic_stash_viewer_native::screens::{Context, Mode, Screen, Section};
 use semantic_stash_viewer_native::session::connection::Connection;
 use semantic_stash_viewer_native::session::{Msg, Session};
 use semantic_stash_viewer_native::shell::ShellMsg;
+use stash_core::playback::playlist::Repeat;
 use stash_core::profiles::ServerProfile;
 use stash_core::scenes::query::SceneSort;
 use stash_core::scenes::{SceneCard, ScenePage};
@@ -112,10 +113,17 @@ fn panel_id(s: &ScenesState) -> Option<&str> {
 #[test]
 fn choosing_queue_selects_the_first_scene_and_loads_its_details() {
     let mut s = ready(1, 120);
-    let effects = s
-        .update(ScenesMsg::Mode(Mode::Queue), TAB, &layout())
-        .effects;
-    assert_eq!(details(&effects), ["1"], "one details request, at once");
+    let step = s.update(ScenesMsg::Mode(Mode::Queue), TAB, &layout());
+    assert_eq!(
+        details(&step.effects),
+        ["1"],
+        "one details request, at once"
+    );
+    assert_eq!(
+        step.up,
+        Some(ScenesUp::Play("1".into())),
+        "011: choosing Queue plays"
+    );
     assert_eq!(s.queue.selected, Some(0));
     assert_eq!(s.queue_selected.as_deref(), Some("1"));
     assert_eq!(panel_id(&s), Some("1"));
@@ -135,19 +143,24 @@ fn a_keyboard_selection_shows_at_once_and_loads_after_a_rest() {
     );
     let current = rest(&key_move(&mut s, 4)).expect("a rest timer");
     assert!(
-        s.queue_rest_due(stale, TAB).is_empty(),
+        s.queue_rest_due(stale, TAB).0.is_empty(),
         "an older rest does nothing"
     );
-    assert_eq!(details(&s.queue_rest_due(current, TAB)), ["5"]);
+    assert_eq!(details(&s.queue_rest_due(current, TAB).0), ["5"]);
     assert_eq!(s.focused, Some(4), "the keyboard's card is the selection");
 }
 
 #[test]
 fn a_click_loads_at_once() {
     let mut s = queue(120);
-    let effects = s.update(ScenesMsg::QueueSelect(6), TAB, &layout()).effects;
-    assert_eq!(details(&effects), ["7"]);
-    assert!(rest(&effects).is_none());
+    let step = s.update(ScenesMsg::QueueSelect(6), TAB, &layout());
+    assert_eq!(details(&step.effects), ["7"]);
+    assert!(rest(&step.effects).is_none());
+    assert_eq!(
+        step.up,
+        Some(ScenesUp::Play("7".into())),
+        "011: a click plays"
+    );
     assert_eq!(s.queue.selected, Some(6));
 }
 
@@ -224,11 +237,10 @@ fn changing_the_results_selects_the_first_scene() {
         assert_eq!(s.queue_selected, None, "{label}");
         let effects = arrive(&mut s, &effects, 500);
         assert_eq!(s.queue.selected, Some(0), "{label}: the first scene");
-        assert!(
-            details(&effects).is_empty(),
-            "{label}: details wait for a rest"
-        );
-        assert!(rest(&effects).is_some(), "{label}");
+        let first = s.cards()[0].id.clone();
+        // 011 R3: the new results' first scene loads and plays at once.
+        assert_eq!(details(&effects), std::slice::from_ref(&first), "{label}");
+        assert_eq!(s.take_play_due(), Some(first), "{label}: it plays");
     }
 }
 
@@ -291,12 +303,12 @@ fn sweeping_rows_sends_no_details_and_resting_sends_one() {
         "nothing for rows only passed over"
     );
     // Only the last timer is current.
-    let effects = s.queue_rest_due(last, TAB);
+    let (effects, _) = s.queue_rest_due(last, TAB);
     assert_eq!(details(&effects), ["21"]);
     // Choosing it again (a click) asks for nothing more.
     let again = s.update(ScenesMsg::QueueSelect(20), TAB, &layout()).effects;
     assert!(details(&again).is_empty());
-    assert!(rest(&key_move(&mut s, 20)).is_none());
+    assert!(details(&key_move(&mut s, 20)).is_empty());
 }
 
 // The panel in a session: replies reach it, and the list's keys move it.
@@ -314,6 +326,11 @@ fn profile() -> ServerProfile {
 }
 
 fn session_in_queue() -> Session {
+    session_with(500)
+}
+
+/// A session showing a `count`-scene library in Queue, 50 per page.
+fn session_with(count: u32) -> Session {
     let p = profile();
     let (mut s, _) = Session::enter(p.clone(), true);
     let _ = s.update(Msg::Reply(Reply::SessionLoaded {
@@ -329,7 +346,7 @@ fn session_in_queue() -> Session {
     let _ = s.update(Msg::Reply(Reply::ScenesPage {
         tab,
         generation,
-        result: Ok(page(p, size, 500)),
+        result: Ok(page(p, size, count)),
     }));
     let _ = s.update(Msg::Shell(ShellMsg::Scenes(ScenesMsg::Mode(Mode::Queue))));
     s
@@ -426,6 +443,11 @@ fn clicking_a_row_shows_it_in_the_panel() {
         effects.extend(s.update(Msg::Shell(m)).effects);
     }
     assert_eq!(details(&effects), ["3"]);
+    assert_eq!(
+        opened(&effects).as_deref(),
+        Some("3"),
+        "011: the click plays it"
+    );
     let state = scenes(&s);
     assert_eq!(state.focused, Some(2), "the row is highlighted");
     assert_eq!(
@@ -531,7 +553,7 @@ fn after_the_pages_last_scene_the_next_page_plays_from_its_first() {
 }
 
 #[test]
-fn the_last_pages_last_scene_stops() {
+fn repeat_off_stops_at_the_end() {
     let mut s = session_in_queue();
     let effects = s
         .update(Msg::Shell(ShellMsg::Scenes(ScenesMsg::Page(10))))
@@ -544,13 +566,13 @@ fn the_last_pages_last_scene_stops() {
 }
 
 #[test]
-fn with_play_next_off_a_scene_stops_at_its_end() {
+fn with_autoplay_off_a_scene_stops_at_its_end() {
     let mut s = session_in_queue();
-    let _ = s.update(Msg::Shell(ShellMsg::Scenes(ScenesMsg::TogglePlayNext)));
-    assert!(!scenes(&s).play_next);
+    let _ = s.update(Msg::Shell(ShellMsg::Scenes(ScenesMsg::ToggleAutoplay)));
+    assert!(!scenes(&s).autoplay);
     let _ = s.update(Msg::Shell(ShellMsg::Scenes(ScenesMsg::QueuePlay(0))));
     assert!(opened(&plays_to_the_end(&mut s, "1")).is_none());
-    // The panel's Play next button advances once.
+    // The panel's Next button moves on once.
     let effects = s.update(Msg::Shell(ShellMsg::QueueStep(true))).effects;
     assert_eq!(opened(&effects).as_deref(), Some("2"));
 }
@@ -608,16 +630,16 @@ fn previous_from_a_pages_first_scene_plays_the_previous_pages_last() {
 }
 
 #[test]
-fn a_page_change_cancels_a_pending_play() {
+fn a_page_change_plays_the_new_pages_first() {
     let mut s = session_in_queue();
     let _ = s.update(Msg::Shell(ShellMsg::Scenes(ScenesMsg::QueuePlay(49))));
     let _ = plays_to_the_end(&mut s, "50");
-    // The user goes elsewhere before the page arrives.
+    // The user goes elsewhere before Play next's page arrives: their page wins (011 R3).
     let effects = s
         .update(Msg::Shell(ShellMsg::Scenes(ScenesMsg::Page(5))))
         .effects;
     let effects = answer(&mut s, &effects);
-    assert!(opened(&effects).is_none());
+    assert_eq!(opened(&effects).as_deref(), Some("201"));
     assert_eq!(scenes(&s).queue.selected, Some(0));
 }
 
@@ -689,12 +711,12 @@ fn f6_moves_the_keyboard_to_the_panel_and_back() {
 }
 
 #[test]
-fn a_toggles_play_next_and_o_opens_the_page() {
+fn a_toggles_autoplay_and_o_opens_the_page() {
     let mut s = session_in_queue();
     let _ = press(&mut s, ch("a"), Modifiers::empty());
-    assert!(!scenes(&s).play_next);
+    assert!(!scenes(&s).autoplay);
     let _ = press(&mut s, ch("a"), Modifiers::empty());
-    assert!(scenes(&s).play_next);
+    assert!(scenes(&s).autoplay);
     let _ = press(&mut s, ch("o"), Modifiers::CTRL);
     assert_eq!(s.shell.tabs.len(), 2, "Ctrl+O: a new tab");
     assert_eq!(s.shell.active().current().title(), "Scene 1");
@@ -742,4 +764,503 @@ fn another_tab_playing_clears_the_queues_mark() {
         _ => panic!("the queue tab"),
     };
     assert_eq!(queue.queue.playing, None);
+}
+
+// 011 US1 (T005): a click plays; the keyboard plays where it rests.
+
+fn scenes_msg(s: &mut Session, m: ScenesMsg) -> Vec<Effect> {
+    s.update(Msg::Shell(ShellMsg::Scenes(m))).effects
+}
+
+/// Answer `effects`' rest timer for the active tab.
+fn rest_reply(s: &mut Session, effects: &[Effect]) -> Vec<Effect> {
+    let generation = rest(effects).expect("a rest timer");
+    let tab = s.shell.active().id;
+    s.update(Msg::Reply(Reply::QueueRestDue { tab, generation }))
+        .effects
+}
+
+#[test]
+fn clicking_another_row_switches_playback() {
+    let mut s = session_in_queue();
+    let _ = observe(&mut s, "1", PlayerStateKind::Playing);
+    let effects = scenes_msg(&mut s, ScenesMsg::QueueSelect(3));
+    assert_eq!(opened(&effects).as_deref(), Some("4"));
+    assert_eq!(scenes(&s).queue.selected, Some(3));
+}
+
+#[test]
+fn clicking_the_playing_row_doesnt_restart() {
+    let mut s = session_in_queue();
+    let _ = observe(&mut s, "1", PlayerStateKind::Playing);
+    let effects = scenes_msg(&mut s, ScenesMsg::QueueSelect(0));
+    assert!(opened(&effects).is_none(), "{effects:?}");
+}
+
+#[test]
+fn the_keyboard_plays_where_it_rests() {
+    let mut s = session_in_queue();
+    let _ = observe(&mut s, "1", PlayerStateKind::Playing);
+    let mut effects = Vec::new();
+    for _ in 0..3 {
+        effects = press(
+            &mut s,
+            named(iced::keyboard::key::Named::ArrowDown),
+            Modifiers::empty(),
+        );
+        assert!(opened(&effects).is_none(), "nothing plays while it moves");
+    }
+    let effects = rest_reply(&mut s, &effects);
+    assert_eq!(opened(&effects).as_deref(), Some("4"));
+}
+
+#[test]
+fn passing_rows_plays_nothing() {
+    let mut s = queue(120);
+    for i in 1..=20 {
+        let step = s.update(ScenesMsg::Grid(GridAction::Move(i)), TAB, &layout());
+        assert!(step.up.is_none(), "row {i}");
+        assert!(details(&step.effects).is_empty(), "row {i}");
+    }
+}
+
+#[test]
+fn a_rest_on_the_playing_scene_plays_nothing() {
+    let mut s = session_in_queue();
+    let _ = observe(&mut s, "1", PlayerStateKind::Playing);
+    let down = named(iced::keyboard::key::Named::ArrowDown);
+    let up = named(iced::keyboard::key::Named::ArrowUp);
+    let _ = press(&mut s, down, Modifiers::empty());
+    let effects = press(&mut s, up, Modifiers::empty());
+    let effects = rest_reply(&mut s, &effects);
+    assert!(opened(&effects).is_none(), "{effects:?}");
+}
+
+// 011 US2 (T011): autoplay.
+
+#[test]
+fn switching_to_a_queue_tab_plays_when_idle() {
+    let mut s = session_in_queue();
+    let queue_tab = s.shell.active().id;
+    let _ = s.update(Msg::Shell(ShellMsg::NewTab));
+    let effects = s.update(Msg::Shell(ShellMsg::Select(queue_tab))).effects;
+    assert_eq!(opened(&effects).as_deref(), Some("1"));
+}
+
+#[test]
+fn switching_to_a_queue_tab_leaves_other_playback_alone() {
+    let mut s = session_in_queue();
+    let queue_tab = s.shell.active().id;
+    let _ = s.update(Msg::Shell(ShellMsg::OpenInNewTab(Screen::scene(
+        "77", "Other",
+    ))));
+    let _ = s.update(Msg::Shell(ShellMsg::Play("77".into())));
+    let _ = observe(&mut s, "77", PlayerStateKind::Playing);
+    let effects = s.update(Msg::Shell(ShellMsg::Select(queue_tab))).effects;
+    assert!(opened(&effects).is_none(), "{effects:?}");
+    assert!(s.now_playing(), "the other scene keeps playing in the bar");
+}
+
+#[test]
+fn returning_to_the_playing_queue_tab_doesnt_restart() {
+    let mut s = session_in_queue();
+    let queue_tab = s.shell.active().id;
+    let _ = observe(&mut s, "1", PlayerStateKind::Playing);
+    let _ = s.update(Msg::Shell(ShellMsg::NewTab));
+    let effects = s.update(Msg::Shell(ShellMsg::Select(queue_tab))).effects;
+    assert!(opened(&effects).is_none(), "{effects:?}");
+    assert!(s.player_visible());
+}
+
+/// A new session restored from `s`'s saved tabs.
+fn restored(s: &Session) -> Session {
+    let saved = s.shell.capture();
+    let p = profile();
+    let (mut r, _) = Session::enter(p.clone(), true);
+    r.shell.layout = layout();
+    let effects = r
+        .update(Msg::Reply(Reply::SessionLoaded {
+            profile: p.id,
+            saved: Some(saved),
+        }))
+        .effects;
+    if load(&effects).is_some() {
+        let effects = answer(&mut r, &effects);
+        assert!(opened(&effects).is_none(), "a restore never plays");
+    }
+    r
+}
+
+#[test]
+fn a_restored_queue_tab_doesnt_play_until_switched_to() {
+    let s = session_in_queue();
+    let r = restored(&s);
+    assert_eq!(scenes(&r).queue.selected, Some(0));
+    assert!(!r.playback.active());
+}
+
+#[test]
+fn a_switched_to_tab_plays_once_its_page_arrives() {
+    let mut s = session_in_queue();
+    let queue_tab_index = s.shell.selected;
+    let _ = s.update(Msg::Shell(ShellMsg::NewTab));
+    let mut r = restored(&s);
+    let effects = r
+        .update(Msg::Shell(ShellMsg::SelectIndex(queue_tab_index)))
+        .effects;
+    assert!(opened(&effects).is_none(), "the page isn't here yet");
+    let effects = answer(&mut r, &effects);
+    assert_eq!(opened(&effects).as_deref(), Some("1"));
+}
+
+#[test]
+fn a_refresh_never_plays() {
+    let mut s = queue(120);
+    let _ = s.update(ScenesMsg::QueueSelect(4), TAB, &layout());
+    let effects = s.cache_changed("*", TAB);
+    let _ = arrive(&mut s, &effects, 120);
+    assert_eq!(s.take_play_due(), None);
+    assert!(!s.queue.rest_plays);
+}
+
+// 011 US3 (T020): Repeat.
+
+/// Repeat: Off → All.
+fn repeat_all(s: &mut Session) {
+    let _ = scenes_msg(s, ScenesMsg::CycleRepeat);
+    assert_eq!(scenes(s).repeat, Repeat::All);
+}
+
+#[test]
+fn repeat_all_returns_to_page_one() {
+    let mut s = session_in_queue();
+    repeat_all(&mut s);
+    let effects = scenes_msg(&mut s, ScenesMsg::Page(10));
+    let _ = answer(&mut s, &effects);
+    let _ = scenes_msg(&mut s, ScenesMsg::QueuePlay(49));
+    let effects = plays_to_the_end(&mut s, "500");
+    assert_eq!(load(&effects).map(|l| l.1), Some(1), "page 1 loads");
+    let effects = answer(&mut s, &effects);
+    assert_eq!(opened(&effects).as_deref(), Some("1"));
+    assert_eq!(scenes(&s).page, 1);
+}
+
+#[test]
+fn a_one_page_queue_with_repeat_all_plays_the_first_again() {
+    let mut s = session_with(20);
+    repeat_all(&mut s);
+    let _ = scenes_msg(&mut s, ScenesMsg::QueuePlay(19));
+    let effects = plays_to_the_end(&mut s, "20");
+    assert!(load(&effects).is_none(), "no page request");
+    assert_eq!(opened(&effects).as_deref(), Some("1"));
+}
+
+#[test]
+fn a_one_scene_queue_with_repeat_all_replays_it() {
+    let mut s = session_with(1);
+    repeat_all(&mut s);
+    let _ = scenes_msg(&mut s, ScenesMsg::QueuePlay(0));
+    let effects = plays_to_the_end(&mut s, "1");
+    assert!(
+        effects.iter().any(|e| matches!(
+            e,
+            Effect::Player(semantic_stash_viewer_native::effects::PlayerAction::Replay)
+        )),
+        "it plays again from 0:00: {effects:?}"
+    );
+}
+
+#[test]
+fn previous_never_wraps() {
+    let mut s = session_in_queue();
+    let _ = observe(&mut s, "1", PlayerStateKind::Playing);
+    let effects = press(&mut s, ch("p"), Modifiers::empty());
+    assert!(opened(&effects).is_none() && load(&effects).is_none());
+}
+
+#[test]
+fn n_on_the_last_scene_with_repeat_all_returns_to_page_one() {
+    let mut s = session_in_queue();
+    repeat_all(&mut s);
+    let effects = scenes_msg(&mut s, ScenesMsg::Page(10));
+    let _ = answer(&mut s, &effects);
+    let _ = scenes_msg(&mut s, ScenesMsg::QueuePlay(49));
+    let _ = observe(&mut s, "500", PlayerStateKind::Playing);
+    let effects = press(&mut s, ch("n"), Modifiers::empty());
+    assert_eq!(load(&effects).map(|l| l.1), Some(1));
+}
+
+#[test]
+fn a_failure_never_repeats() {
+    let mut s = session_with(20);
+    repeat_all(&mut s);
+    let _ = scenes_msg(&mut s, ScenesMsg::QueuePlay(19));
+    let _ = observe(&mut s, "20", PlayerStateKind::Playing);
+    let effects = observe(&mut s, "20", PlayerStateKind::Error);
+    assert!(opened(&effects).is_none());
+}
+
+#[test]
+fn deleted_scenes_stop_after_one_round() {
+    let mut s = session_with(3);
+    repeat_all(&mut s);
+    let _ = scenes_msg(&mut s, ScenesMsg::QueuePlay(0));
+    let mut id = "1".to_owned();
+    let mut opens = 0;
+    for _ in 0..5 {
+        let effects = s
+            .update(Msg::SceneOpened(Err(AppError::SceneNotFound {
+                id: id.clone(),
+            })))
+            .effects;
+        match opened(&effects) {
+            Some(next) => {
+                opens += 1;
+                id = next;
+            }
+            None => break,
+        }
+    }
+    // 1 was deleted: 2, then 3; 3 deleted too makes three in a row, the whole result: it stops.
+    assert_eq!(opens, 2, "one round of the three scenes, then it stops");
+}
+
+#[test]
+fn repeat_one_replays_from_the_start() {
+    for autoplay in [true, false] {
+        let mut s = session_in_queue();
+        if !autoplay {
+            let _ = scenes_msg(&mut s, ScenesMsg::ToggleAutoplay);
+        }
+        let _ = scenes_msg(&mut s, ScenesMsg::CycleRepeat);
+        let _ = scenes_msg(&mut s, ScenesMsg::CycleRepeat);
+        assert_eq!(scenes(&s).repeat, Repeat::One);
+        let _ = scenes_msg(&mut s, ScenesMsg::QueuePlay(3));
+        let effects = plays_to_the_end(&mut s, "4");
+        // The player's own replay from 0:00 (not a reopen of the file it holds at its end).
+        assert!(
+            effects.iter().any(|e| matches!(
+                e,
+                Effect::Player(semantic_stash_viewer_native::effects::PlayerAction::Replay)
+            )),
+            "autoplay {autoplay}: replayed from 0:00, {effects:?}"
+        );
+        assert!(opened(&effects).is_none(), "no reopen");
+        assert_eq!(scenes(&s).queue.selected, Some(3), "it stays selected");
+    }
+}
+
+#[test]
+fn next_leaves_repeat_one_on() {
+    let mut s = session_in_queue();
+    let _ = scenes_msg(&mut s, ScenesMsg::CycleRepeat);
+    let _ = scenes_msg(&mut s, ScenesMsg::CycleRepeat);
+    let _ = observe(&mut s, "1", PlayerStateKind::Playing);
+    let effects = press(&mut s, ch("n"), Modifiers::empty());
+    assert_eq!(opened(&effects).as_deref(), Some("2"));
+    assert_eq!(scenes(&s).repeat, Repeat::One);
+}
+
+#[test]
+fn r_cycles_repeat() {
+    let mut s = session_in_queue();
+    let mut seen = vec![scenes(&s).repeat];
+    for _ in 0..3 {
+        let _ = press(&mut s, ch("r"), Modifiers::empty());
+        seen.push(scenes(&s).repeat);
+    }
+    assert_eq!(seen, [Repeat::Off, Repeat::All, Repeat::One, Repeat::Off]);
+}
+
+// 011 US1 (T015).
+
+#[test]
+fn a_click_plays_with_autoplay_off() {
+    let mut s = session_in_queue();
+    let _ = scenes_msg(&mut s, ScenesMsg::ToggleAutoplay);
+    let _ = observe(&mut s, "1", PlayerStateKind::Playing);
+    let effects = scenes_msg(&mut s, ScenesMsg::QueueSelect(3));
+    assert_eq!(opened(&effects).as_deref(), Some("4"));
+}
+
+#[test]
+fn a_closed_players_scene_plays_again_when_chosen() {
+    let mut s = session_in_queue();
+    let _ = observe(&mut s, "1", PlayerStateKind::Playing);
+    let _ = s.update(Msg::Playback(playback::Msg::Close));
+    let _ = observe(&mut s, "1", PlayerStateKind::Idle);
+    assert!(!s.playback.active());
+    let effects = scenes_msg(&mut s, ScenesMsg::QueueSelect(0));
+    assert_eq!(
+        opened(&effects).as_deref(),
+        Some("1"),
+        "nothing plays, so it plays"
+    );
+}
+
+// 011 US2 (T017): Autoplay.
+
+#[test]
+fn autostart_respects_autoplay_off() {
+    // Choosing Queue.
+    let mut s = ready(1, 120);
+    s.autoplay = false;
+    let step = s.update(ScenesMsg::Mode(Mode::Queue), TAB, &layout());
+    assert_eq!(step.up, None);
+    assert_eq!(s.queue.selected, Some(0), "it's still selected");
+
+    // Changing the results.
+    let effects = s
+        .update(ScenesMsg::Sort(SceneSort::Title), TAB, &layout())
+        .effects;
+    let _ = arrive(&mut s, &effects, 120);
+    assert_eq!(s.queue.selected, Some(0));
+    assert_eq!(s.take_play_due(), None);
+
+    // Switching to the tab while nothing plays.
+    let mut s = session_in_queue();
+    let _ = scenes_msg(&mut s, ScenesMsg::ToggleAutoplay);
+    let queue_tab = s.shell.active().id;
+    let _ = s.update(Msg::Shell(ShellMsg::NewTab));
+    let effects = s.update(Msg::Shell(ShellMsg::Select(queue_tab))).effects;
+    assert!(opened(&effects).is_none(), "{effects:?}");
+
+    // A pending start when the page arrives.
+    let queue_tab_index = s.shell.selected;
+    let _ = s.update(Msg::Shell(ShellMsg::NewTab));
+    let mut r = restored(&s);
+    let effects = r
+        .update(Msg::Shell(ShellMsg::SelectIndex(queue_tab_index)))
+        .effects;
+    let effects = answer(&mut r, &effects);
+    assert!(opened(&effects).is_none(), "{effects:?}");
+    assert!(!scenes(&r).autoplay, "Autoplay off was restored");
+}
+
+#[test]
+fn with_autoplay_on_new_results_play_their_first() {
+    let mut s = session_in_queue();
+    let _ = observe(&mut s, "1", PlayerStateKind::Playing);
+    let _ = scenes_msg(&mut s, ScenesMsg::QueueSelect(5));
+    let _ = observe(&mut s, "6", PlayerStateKind::Playing);
+    let effects = scenes_msg(&mut s, ScenesMsg::ToggleDirection);
+    let effects = answer(&mut s, &effects);
+    assert_eq!(opened(&effects).as_deref(), Some("1"));
+}
+
+// 011 US3 (T021): Shuffle.
+
+/// Press `n` (answering a page request) and report the scene that opened, now playing.
+fn next_scene(s: &mut Session) -> Option<String> {
+    let mut effects = press(s, ch("n"), Modifiers::empty());
+    if load(&effects).is_some() {
+        effects = answer(s, &effects);
+    }
+    let id = opened(&effects)?;
+    let _ = observe(s, &id, PlayerStateKind::Playing);
+    Some(id)
+}
+
+/// The scene's page and selection follow it.
+fn shows(s: &Session, id: &str) {
+    let n: u32 = id.parse().expect("a number");
+    let state = scenes(s);
+    assert_eq!(state.page, (n - 1) / 50 + 1, "scene {id}'s page");
+    let selected = state.queue.selected.and_then(|i| state.cards().get(i));
+    assert_eq!(
+        selected.map(|c| c.id.as_str()),
+        Some(id),
+        "scene {id} selected"
+    );
+}
+
+#[test]
+fn x_toggles_shuffle() {
+    let mut s = session_in_queue();
+    assert!(!scenes(&s).shuffle);
+    let _ = press(&mut s, ch("x"), Modifiers::empty());
+    assert!(scenes(&s).shuffle);
+    let _ = press(&mut s, ch("x"), Modifiers::empty());
+    assert!(!scenes(&s).shuffle);
+}
+
+#[test]
+fn shuffle_plays_each_scene_once() {
+    let mut s = session_in_queue();
+    let _ = observe(&mut s, "1", PlayerStateKind::Playing);
+    let _ = press(&mut s, ch("x"), Modifiers::empty());
+    let mut seen = std::collections::HashSet::from(["1".to_owned()]);
+    let mut pages = std::collections::HashSet::new();
+    for _ in 1..500 {
+        let id = next_scene(&mut s).expect("a scene not yet played");
+        shows(&s, &id);
+        pages.insert(scenes(&s).page);
+        assert!(seen.insert(id.clone()), "{id} repeated within the round");
+    }
+    assert_eq!(seen.len(), 500);
+    assert!(pages.len() > 1, "picks come from every page");
+    assert_eq!(next_scene(&mut s), None, "Repeat off: the round ends");
+}
+
+#[test]
+fn previous_retraces_the_round() {
+    let mut s = session_in_queue();
+    let _ = observe(&mut s, "1", PlayerStateKind::Playing);
+    let _ = press(&mut s, ch("x"), Modifiers::empty());
+    let mut played = vec!["1".to_owned()];
+    for _ in 0..5 {
+        played.push(next_scene(&mut s).expect("a pick"));
+    }
+    for want in played.iter().rev().skip(1) {
+        let mut effects = press(&mut s, ch("p"), Modifiers::empty());
+        if load(&effects).is_some() {
+            effects = answer(&mut s, &effects);
+        }
+        assert_eq!(opened(&effects).as_ref(), Some(want));
+        let _ = observe(&mut s, want, PlayerStateKind::Playing);
+        shows(&s, want);
+    }
+    let effects = press(&mut s, ch("p"), Modifiers::empty());
+    assert!(opened(&effects).is_none(), "the round's first");
+}
+
+#[test]
+fn turning_shuffle_off_continues_in_list_order() {
+    let mut s = session_in_queue();
+    let _ = observe(&mut s, "1", PlayerStateKind::Playing);
+    let _ = press(&mut s, ch("x"), Modifiers::empty());
+    let id = next_scene(&mut s).expect("a pick");
+    let _ = press(&mut s, ch("x"), Modifiers::empty());
+    let n: u32 = id.parse().expect("a number");
+    let next = next_scene(&mut s);
+    if n < 500 {
+        assert_eq!(next, Some((n + 1).to_string()));
+    } else {
+        assert_eq!(next, None);
+    }
+}
+
+#[test]
+fn new_results_start_a_new_round() {
+    let mut s = session_in_queue();
+    let _ = observe(&mut s, "1", PlayerStateKind::Playing);
+    let _ = press(&mut s, ch("x"), Modifiers::empty());
+    let before = scenes(&s).playlist.round.expect("a round");
+    let effects = scenes_msg(&mut s, ScenesMsg::Sort(SceneSort::Title));
+    let _ = answer(&mut s, &effects);
+    let after = scenes(&s).playlist.round.expect("a round");
+    assert_ne!(after.seed, before.seed, "a new round");
+    // Scene 1 plays on (it's still first): the round starts from it.
+    assert_eq!((after.first, after.pos), (0, 0), "from the new first scene");
+}
+
+#[test]
+fn choosing_a_scene_while_shuffling_starts_from_it() {
+    let mut s = session_in_queue();
+    let _ = observe(&mut s, "1", PlayerStateKind::Playing);
+    let _ = press(&mut s, ch("x"), Modifiers::empty());
+    let effects = scenes_msg(&mut s, ScenesMsg::QueueSelect(7));
+    assert_eq!(opened(&effects).as_deref(), Some("8"));
+    let round = scenes(&s).playlist.round.expect("a round");
+    assert_eq!((round.first, round.pos), (7, 0));
 }

@@ -163,8 +163,10 @@ pub enum Action {
     /// Play the next or previous scene.
     QueueNext,
     QueuePrevious,
-    /// Turn Play next on or off.
-    QueuePlayNext,
+    /// The playlist controls (011 FR-009): Autoplay, Shuffle, Repeat.
+    QueueAutoplay,
+    QueueShuffle,
+    QueueRepeat,
     /// Open the selected scene's page, here or in a new tab.
     QueueOpen {
         new_tab: bool,
@@ -379,8 +381,18 @@ pub fn bindings() -> Vec<Binding> {
         ),
         (
             Chord::plain(Char("a")),
-            Action::QueuePlayNext,
-            "Turn Play next on or off",
+            Action::QueueAutoplay,
+            "Turn Autoplay on or off",
+        ),
+        (
+            Chord::plain(Char("x")),
+            Action::QueueShuffle,
+            "Turn Shuffle on or off",
+        ),
+        (
+            Chord::plain(Char("r")),
+            Action::QueueRepeat,
+            "Repeat: off, all, one",
         ),
         (
             Chord::plain(Char("o")),

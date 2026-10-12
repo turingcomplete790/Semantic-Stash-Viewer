@@ -551,9 +551,10 @@ impl Shell {
     }
 
     /// The queue's selection rest came due in tab `tab` (010 R3): its panel loads.
-    pub fn queue_rest_due(&mut self, tab: TabId, generation: u64) -> Vec<Effect> {
+    /// Its effects, and the scene to play when a keyboard move started the rest (011 R2).
+    pub fn queue_rest_due(&mut self, tab: TabId, generation: u64) -> (Vec<Effect>, Option<String>) {
         let Some(i) = self.index_of(tab) else {
-            return Vec::new();
+            return (Vec::new(), None);
         };
         self.tabs[i]
             .history
