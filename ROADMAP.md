@@ -351,8 +351,50 @@ plugin's design documents (the documents are the reference, Principle II). Each 
       tags (Milestone 6)
 - [ ] Optimization: profiling, join ordering, query caching, memory footprint (Milestone 7);
       much of it comes with the engine
-- [ ] Optional extraction (Milestone 8): not planned for a native app, whose engine is already
-      an independent core module; revisit only if a second client needs the engine
+- [ ] Optional extraction (Milestone 8): see Phase 6, a shared engine cache as an optional
+      helper, after the core functionality
+
+---
+
+## Phase 6: Shared semantic engine cache (optional helper; last)
+
+**Goal:** let the clients of one Stash server (this viewer on several machines, and the
+semantic-tagging plugin) share one semantic engine instead of each building and polling its own.
+A helper is an optimisation, never a requirement: every client keeps its own in-process engine
+(Principle XII) and works against stock Stash without it. This is the plugin documents'
+Milestone 8 ("Optional Extraction … only if justified"), in Rust from this repo's engine crate
+rather than as a Node service. Comes after Phases 1–5, once the engine works (2026-10-11
+middleware analysis).
+
+- [ ] Spike: the engine as a Stash plugin (Stash's "raw" plugin interface, running the 009 engine
+      on the server). It keeps a snapshot (009 FR-023) current from Stash's plugin hooks (scenes,
+      images, performers, tags saved) instead of every client polling, since Stash has no change
+      subscription. Clients reach it only through Stash's GraphQL (`runPluginOperation`;
+      `runPluginTask` for builds), so the network destination stays Stash (Principle VII).
+      Measure and decide:
+      - a client syncing from the snapshot vs building itself (time and size, against 009 SC-001)
+      - `runPluginOperation` round trip (process start included) and the largest result it can
+        return
+      - how the snapshot reaches clients (an operation's result, or the plugin's asset folder that
+        Stash serves) and how a client catches up from it
+      - concurrent calls and the engine store's single-writer lock (one writer, read-only readers,
+        or snapshot-only)
+      - hook delivery and freshness when a tag is saved in the web UI, the plugin, or the viewer
+      - the plugin's JavaScript asking the same engine through `runPluginOperation` (one engine,
+        one set of answers: Principle II's query semantics)
+- [ ] If the spike holds: amend the constitution (minor) before a feature spec. Draft wording:
+      - Principle I, replacing "MUST NOT require a server-side component": "The viewer MUST work
+        fully against a stock Stash instance. It MAY use an optional companion running inside
+        Stash's plugin system (a shared semantic engine cache); without it, nothing is lost but
+        time."
+      - Principle XII, after "Disk store as a cache": "**Shared cache (optional).** A companion on
+        the Stash server MAY keep a snapshot of the engine for that server, reached only through
+        Stash's GraphQL. Clients MAY start from it and catch up, and still build on their own when
+        it's missing, stale, from another server, or from another format. The snapshot is a cache
+        under Principle I and never shared across servers."
+- [ ] Out of scope for the helper: scrapers (they already run in Stash and any client uses them
+      through Stash's scrape API, Phase 3) and sharing ordinary GraphQL response caches between
+      clients (Stash is already fast to query; only the semantic index is costly to build)
 
 ---
 

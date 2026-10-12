@@ -262,6 +262,18 @@ build it again.
   and shows the bindings as a table whose scenes, images, performers, and tags open their pages.
 - **FR-021**: The page and its query box MUST be keyboard-operable, as the rest of the app.
 
+**Ready for a shared helper later (2026-10-11 middleware analysis)**
+
+- **FR-022**: The engine MUST be usable apart from the viewer's screens, settings, and connection
+  handling: given a way to read from Stash and a folder for its stored copy, another program (a
+  future helper on the Stash server, roadmap Phase 6) can run the same engine and get the same
+  answers. This feature ships no such program.
+- **FR-023**: The engine MUST be able to write its stored copy out as a snapshot in a standard,
+  documented graph-exchange format, and to start from such a snapshot instead of a full build.
+  A snapshot names the server it came from, the engine's format version, and how far through the
+  library's changes it reflects, so a loaded snapshot catches up through FR-009 rather than
+  rebuilding, and a snapshot from another server or an older format is refused and rebuilt.
+
 ### Key Entities *(include if feature involves data)*
 
 - **Semantic graph**: the set of semantic facts for one server, built from its library; derived,
@@ -325,6 +337,10 @@ build it again.
 - **008's tag-type marking and colour rules** keep their own flag-filtered discovery: they aren't
   among Principle XII's engine-client features. The engine uses the same discovery queries, so
   the two never disagree about which tags are semantic.
+- **The middleware analysis (2026-10-11)**: the engine stays in-process in this feature
+  (constitution XII). FR-022 and FR-023 only keep a later shared helper cheap: an optional
+  program on the Stash server that keeps a snapshot current and lets clients sync from it
+  instead of building (roadmap Phase 6). Nothing here depends on that helper existing.
 - **The roadmap analysis (2026-10-11)** is applied: sources are design-document sections with the
   commit read, not the plugin's modules; the engine comes first and later semantic features are
   its clients; the documents, not the plugin's code, define correct answers; the Milestone 1D
