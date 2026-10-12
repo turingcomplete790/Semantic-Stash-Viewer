@@ -1,6 +1,6 @@
 # Feature Specification: Queue Autoplay and Loop
 
-**Feature Branch**: `010-queue-view` (builds on 010, not yet merged)
+**Feature Branch**: `011-queue-autoplay` (builds on 010, merged to `main`)
 
 **Created**: 2026-10-11
 
