@@ -1,50 +1,64 @@
-# Contract: Queue autoplay and loop (011)
+# Contract: Queue autoplay and playlist controls (011)
 
-What changes from 010's [queue-ui contract](../../010-queue-view/contracts/queue-ui.md); all else
+What changes from 010's [queue-ui contract](../../010-queue-view/contracts/queue-ui.md); the rest
 stays as written there.
 
-## Pointer
+## Layout
 
-| Action | 010 | 011 |
+```text
+┌─ list ──────────────────────────────┬─ panel ──────────────────────────┐
+│ 🔀  🔁/🔂  [▶ Autoplay ⏽]            │ player (or cover + Play)         │
+│ ▸ row (selected, ▶ playing)          │──────────────────────────────────│
+│   row                                │ details                          │
+│   …   pager                          │                                  │
+└──────────────────────────────────────┴──────────────────────────────────┘
+```
+
+The playlist strip sits at the top of the list: Shuffle, Repeat, Autoplay, as icon buttons with
+tooltips; the active state in the accent colour, the inactive muted. 010's "Play next: on/off" and
+011's first-pass "Loop" buttons leave the top controls bar.
+
+## Controls
+
+| Control | States (icon) | Default | Key |
+|---|---|---|---|
+| Shuffle | off / on (`shuffle`) | off | `X` |
+| Repeat | Off (`repeat`, muted) → All (`repeat`, accent) → One (`repeat-1`, accent) | Off | `R` (cycles) |
+| Autoplay | off / on (a switch with a play glyph) | on | `A` |
+
+All three are saved with the tab and listed under Scenes (queue view) in keyboard help and
+Settings → Keyboard. `L` (011's first pass) is removed.
+
+## Pointer and keys (unchanged from the first 011 pass)
+
+- Click a row: plays it (the playing row: selects only). Double-click: the same. Middle-click:
+  opens the page in a new tab.
+- ↑/↓ (list focused): move the selection; the row it rests on (250 ms) plays. Enter plays at once.
+- `n` / `p`: Next / Previous by the rules below.
+
+## Behaviour
+
+| Situation | Autoplay on | Autoplay off |
 |---|---|---|
-| Click a row | selects; details load at once | selects and **plays** (the playing scene: selects only) |
-| Double-click a row | plays | plays (same as a click) |
-| Middle-click a row | opens the page in a new tab | unchanged |
-| The panel's Play | plays the selection | unchanged (shown when the selection isn't playing) |
-| Controls | Play next: on/off | Play next: on/off, **Loop: on/off** |
+| Choosing Queue; results change; switching to the tab while idle | the selection (first) plays | nothing |
+| A scene ends, Repeat One | it plays again from 0 | it plays again from 0 |
+| A scene ends, not the last | the next (list or shuffle order) plays | stops (Replay; "Next" offered) |
+| The last scene ends, Repeat All | page 1's first, or a new shuffled round | stops |
+| The last scene ends, Repeat Off | stops (Replay) | stops |
+| Next / Previous | move by the same order; Next at the end follows Repeat All/Off; Previous never wraps | same |
+| A failure | nothing moves | nothing moves |
 
-## Keys (queue level)
-
-| Key | 011 |
-|---|---|
-| ↑ / ↓, Home / End (list focused) | move the selection; the scene it **rests** on (250 ms) plays |
-| Enter (list focused) | plays the selection at once (unchanged) |
-| `L` | **turn Loop on or off** (new; listed under Scenes (queue view)) |
-
-All other 010 keys unchanged.
-
-## Autoplay
-
-- Choosing Queue: the selection plays (takes over the one player).
-- Search, filter, sort, page size, page, saved filter: the new page's first scene plays when it
-  arrives.
-- Switching to a queue tab: its selection plays if nothing is playing; otherwise nothing changes.
-- A restored tab at launch, a refresh, a background tab: never play.
-
-## Loop
-
-- On (default): after the last scene of the last page, page 1's first scene plays (on a one-page
-  result, its first scene). Previous never wraps.
-- Off: 010's stop with Replay (and the panel's "Play next" button when Play next is off).
-- Never after a playback error; consecutive deleted-scene skips stop at the result's size.
+With Shuffle on, every scene of the result plays once per round, in random order, from any page;
+the list keeps its sort and shows the playing scene's page with it selected; Previous retraces the
+round; turning Shuffle off continues in list order.
 
 ## Request budget
 
-As 010: one page request per page shown (0 when cached), one `SceneDetails` per scene played or
-rested on (0 from the cache), nothing per row passed over.
+As 010: one page request per page shown (a shuffled pick or Repeat all's return to page 1 may show
+another page: 1 request, 0 when cached), one `SceneDetails` per scene played (0 from the cache),
+nothing per row passed over.
 
 ## Harness rows
 
-`queue-click-play` (≤ 1500 ms), `queue-autoplay` (≤ 1500 ms), `queue-loop` (≤ 1500 ms); every 010
-row still within budget (`queue-select`, `queue-next`, `gql-queue-sweep` 0, `gql-queue-rest` 1,
-`scenes-scroll-1000-queue` ≤ 1%).
+`queue-click-play`, `queue-autoplay`, `queue-repeat`, `queue-shuffle` (≤ 1500 ms each); every 010
+row still within budget.

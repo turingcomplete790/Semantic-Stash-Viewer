@@ -11,6 +11,7 @@ use iced::keyboard::{Key, Modifiers};
 use iced::widget::{button, column, container, mouse_area, opaque, stack, text, Space};
 use iced::Element;
 use stash_core::connection::snapshot::{ConnectionSnapshot, SessionState};
+use stash_core::playback::playlist;
 use stash_core::profiles::{ProfileDraft, ServerProfile};
 use stash_core::AppError;
 use uuid::Uuid;
@@ -251,15 +252,15 @@ impl Session {
         })
     }
 
-    /// Next or Previous in tab `tab`'s queue from scene `from` (010 R4): play the neighbour, or
-    /// load the page across the boundary (its first or last card plays when it arrives).
-    fn queue_advance(&mut self, tab: TabId, from: Option<String>, forward: bool) -> Step<Up> {
+    /// A playlist event for tab `tab`'s queue (011 R1): play what the machine chose, load the page
+    /// that has it (it plays when it arrives), or replay the scene from the beginning.
+    fn queue_advance(&mut self, tab: TabId, event: playlist::Event) -> Step<Up> {
         use crate::screens::scenes::Advance;
         let layout = self.shell.layout;
         let Some(state) = self.queue_tab(tab) else {
             return Step::none();
         };
-        let mut effects = match state.advance(from.as_deref(), forward, tab, &layout) {
+        let mut effects = match state.queue_event(event, tab, &layout) {
             Advance::Play { id, mut effects } => {
                 effects.extend(self.playback.open(id, tab));
                 self.sync_chapters();
@@ -267,6 +268,13 @@ impl Session {
                 effects
             }
             Advance::Loading(effects) => effects,
+            // Repeat one: a new viewing from 0:00, never the resume point (011 R4).
+            Advance::Replay { id } => {
+                let effects = self.playback.open_at(id, tab, Some(0.0));
+                self.sync_chapters();
+                self.sync_queue_playing();
+                effects
+            }
             Advance::Stop => return Step::none(),
         };
         effects.extend(self.thumbnails());
@@ -274,28 +282,70 @@ impl Session {
         Step::effects(effects)
     }
 
+    /// The user switched to another tab: a queue tab starts its selection with Autoplay on, only
+    /// while the player is idle (011 R6); one whose page isn't here yet starts when it arrives.
+    fn autoplay_on_switch(&mut self) -> Vec<Effect> {
+        if self.playback.active() {
+            return Vec::new();
+        }
+        let tab = self.shell.active().id;
+        let Some(state) = self.queue_tab(tab) else {
+            return Vec::new();
+        };
+        if !state.ready() {
+            state.queue.pending_play = crate::screens::scenes::queue::PendingPlay::Start;
+            return Vec::new();
+        }
+        match state.autostart() {
+            Some(id) => self.queue_open(id, tab),
+            None => Vec::new(),
+        }
+    }
+
+    /// Play scene `id` for queue tab `tab`.
+    fn queue_open(&mut self, id: String, tab: TabId) -> Vec<Effect> {
+        let effects = self.playback.open(id, tab);
+        self.sync_chapters();
+        self.sync_queue_playing();
+        effects
+    }
+
     /// The queue's Next or Previous control (`n`, `p`, or the panel's button): from the scene
     /// this tab plays, or the selection when it plays none.
     fn queue_step(&mut self, forward: bool) -> Step<Up> {
         let tab = self.shell.active().id;
-        let playing = (self.playback.active() && self.playback.owner == Some(tab))
-            .then(|| self.playback.playing_scene().map(str::to_owned))
-            .flatten();
-        let Some(state) = self.queue_tab(tab) else {
-            return Step::none();
+        let event = if forward {
+            playlist::Event::Next
+        } else {
+            playlist::Event::Previous
         };
-        let from = playing.or_else(|| state.queue_selected.clone());
-        self.queue_advance(tab, from, forward)
+        self.queue_advance(tab, event)
     }
 
-    /// A scene reached its end: with Play next on in its queue, the next one plays (FR-009).
-    fn ended(&mut self, id: String) -> Step<Up> {
+    /// A scene reached its end: its queue's machine decides what follows (011 R4, R5).
+    fn ended(&mut self) -> Step<Up> {
+        match self.playback.owner {
+            Some(owner) => self.queue_advance(owner, playlist::Event::Ended),
+            None => Step::none(),
+        }
+    }
+
+    /// The player's state, for the owner's queue: a scene that began playing is the machine's
+    /// position (and ends a run of skips); a failure moves nothing (011 FR-010).
+    fn queue_follow(&mut self) {
         let Some(owner) = self.playback.owner else {
-            return Step::none();
+            return;
         };
-        match self.queue_tab(owner) {
-            Some(state) if state.play_next => self.queue_advance(owner, Some(id), true),
-            _ => Step::none(),
+        let state = self.playback.snapshot().state;
+        // The scene mpv reports, not the one asked for: a scene still opening hasn't started.
+        let id = self.playback.snapshot().scene_id.clone();
+        let Some(queue) = self.queue_tab(owner) else {
+            return;
+        };
+        match (state, id) {
+            (player::PlayerStateKind::Playing, Some(id)) => queue.queue_started(&id),
+            (player::PlayerStateKind::Error, _) => queue.queue_failed(),
+            _ => {}
         }
     }
 
@@ -436,7 +486,11 @@ impl Session {
             },
             other => other,
         };
+        let before = self.shell.active().id;
         let Step { mut effects, up } = self.shell.update(msg);
+        if self.shell.active().id != before {
+            effects.extend(self.autoplay_on_switch());
+        }
         effects.extend(scrolled);
         effects.extend(self.thumbnails());
         effects.extend(self.sync_tag_colours());
@@ -580,7 +634,9 @@ impl Session {
                 | Action::QueueFocus
                 | Action::QueueNext
                 | Action::QueuePrevious
-                | Action::QueuePlayNext
+                | Action::QueueAutoplay
+                | Action::QueueShuffle
+                | Action::QueueRepeat
                 | Action::QueueOpen { .. },
             )
             | None => return self.scenes_key(key, mods).unwrap_or_else(Step::none),
@@ -593,7 +649,8 @@ impl Session {
 
     /// The queue view's keys (010 contracts/queue-ui.md), before the player's: the list's keys
     /// with the list focused (the arrows then move the selection, not the volume), and F6, `n`,
-    /// `p`, `a`, `o` in either area. In fullscreen only Next, Previous, and Play next apply.
+    /// `p`, `a`, `r`, `x`, `o` in either area. In fullscreen only Next, Previous, and the playlist
+    /// controls apply.
     fn queue_key(&mut self, key: &Key, mods: Modifiers) -> Option<Step<Up>> {
         use crate::screens::scenes::queue::QueueFocus;
         let state = self.active_scenes().filter(|s| s.mode == Mode::Queue)?;
@@ -607,7 +664,11 @@ impl Session {
         if fullscreen
             && !matches!(
                 action,
-                Action::QueueNext | Action::QueuePrevious | Action::QueuePlayNext
+                Action::QueueNext
+                    | Action::QueuePrevious
+                    | Action::QueueAutoplay
+                    | Action::QueueShuffle
+                    | Action::QueueRepeat
             )
         {
             return None;
@@ -623,7 +684,9 @@ impl Session {
             Action::QueueFocus => self.shell(ShellMsg::Scenes(ScenesMsg::QueueFocus)),
             Action::QueueNext => self.queue_step(true),
             Action::QueuePrevious => self.queue_step(false),
-            Action::QueuePlayNext => self.shell(ShellMsg::Scenes(ScenesMsg::TogglePlayNext)),
+            Action::QueueAutoplay => self.shell(ShellMsg::Scenes(ScenesMsg::ToggleAutoplay)),
+            Action::QueueShuffle => self.shell(ShellMsg::Scenes(ScenesMsg::ToggleShuffle)),
+            Action::QueueRepeat => self.shell(ShellMsg::Scenes(ScenesMsg::CycleRepeat)),
             Action::QueueOpen { new_tab } => {
                 let index = selected?;
                 self.shell(ShellMsg::Scenes(ScenesMsg::Open { index, new_tab }))
@@ -843,7 +906,11 @@ impl Session {
                 }
             }
             Msg::Reply(Reply::QueueRestDue { tab, generation }) => {
-                let mut effects = self.shell.queue_rest_due(tab, generation);
+                let (mut effects, play) = self.shell.queue_rest_due(tab, generation);
+                // The keyboard's selection plays where it rests, in the tab on screen (011 R2).
+                if let (Some(id), true) = (play, self.shell.active().id == tab) {
+                    effects.extend(self.queue_open(id, tab));
+                }
                 effects.extend(self.thumbnails());
                 Step::effects(effects)
             }
@@ -955,10 +1022,11 @@ impl Session {
             Msg::Playback(m) => {
                 let effects = self.playback.update(m);
                 self.sync_queue_playing();
+                self.queue_follow();
                 let step = Step::effects(effects);
                 match self.playback.take_ended() {
-                    Some(id) => {
-                        let next = self.ended(id);
+                    Some(_) => {
+                        let next = self.ended();
                         step.with_all(next.effects)
                     }
                     None => step,
@@ -987,16 +1055,16 @@ impl Session {
             Msg::Reply(Reply::PlayHistoryFlushed { profile, outcome }) => {
                 self.history_flushed(profile, &outcome)
             }
-            // A scene deleted on the server: with Play next on, its queue moves past it (010).
-            Msg::SceneOpened(Err(AppError::SceneNotFound { id }))
+            // A scene deleted on the server: its queue moves past it (010); the machine stops after
+            // a whole result's worth in a row, so a queue of only deleted scenes ends (011 R7).
+            Msg::SceneOpened(Err(AppError::SceneNotFound { .. }))
                 if self
                     .playback
                     .owner
-                    .and_then(|t| self.queue_tab(t).map(|s| s.play_next))
-                    .unwrap_or(false) =>
+                    .is_some_and(|t| self.queue_tab(t).is_some()) =>
             {
                 let owner = self.playback.owner.unwrap_or_default();
-                self.queue_advance(owner, Some(id), true)
+                self.queue_advance(owner, playlist::Event::Skipped)
             }
             Msg::SceneOpened(Err(e)) => {
                 tracing::warn!(error = %e, "couldn't open the scene");
@@ -1386,14 +1454,14 @@ impl Session {
                             ShellMsg::Player(playback::Msg::Close),
                             ShellMsg::Player(playback::Msg::ToggleFullscreen),
                         );
-                        // Play next off: at the end, Replay (the player's) and Play next.
-                        if !scenes.play_next
+                        // Autoplay off: at the end, Replay (the player's) and Next (011 R5).
+                        if !scenes.autoplay
                             && self.playback.snapshot().state == player::PlayerStateKind::Ended
                         {
                             player = stack![
                                 player,
                                 container(
-                                    button(text("Play next").size(14))
+                                    button(text("Next").size(14))
                                         .style(theme::chip)
                                         .padding([8, 18])
                                         .on_press(ShellMsg::QueueStep(true)),

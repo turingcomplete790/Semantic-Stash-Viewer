@@ -27,6 +27,12 @@ pub enum Icon {
     Play,
     Pause,
     More,
+    /// The playlist controls (011): Lucide `shuffle`, `repeat`, `repeat-1`, and Autoplay (a
+    /// switch with a play glyph, in the same stroke).
+    Shuffle,
+    Repeat,
+    RepeatOne,
+    Autoplay,
 }
 
 impl Icon {
@@ -58,6 +64,18 @@ impl Icon {
             Icon::More => {
                 r#"<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>"#
             }
+            Icon::Shuffle => {
+                r#"<path d="m18 14 4 4-4 4"/><path d="m18 2 4 4-4 4"/><path d="M2 18h1.973a4 4 0 0 0 3.3-1.7l5.454-8.6a4 4 0 0 1 3.3-1.7H22"/><path d="M2 6h1.972a4 4 0 0 1 3.6 2.2"/><path d="M22 18h-6.041a4 4 0 0 1-3.3-1.8l-.359-.45"/>"#
+            }
+            Icon::Repeat => {
+                r#"<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>"#
+            }
+            Icon::RepeatOne => {
+                r#"<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/><path d="M11 10h1v4"/>"#
+            }
+            Icon::Autoplay => {
+                r#"<rect x="2" y="6" width="20" height="12" rx="6"/><polygon points="13 9.5 18 12 13 14.5 13 9.5"/>"#
+            }
         }
     }
 
@@ -77,6 +95,14 @@ pub fn icon<'a>(which: Icon, size: f32) -> Svg<'a, Theme> {
         .style(|theme: &Theme, _status| svg::Style {
             color: Some(theme.palette().text),
         })
+}
+
+/// An icon `size` pixels square in `color` (a control's state: the accent when on).
+pub fn icon_in<'a>(which: Icon, size: f32, color: iced::Color) -> Svg<'a, Theme> {
+    svg(svg::Handle::from_memory(which.svg_source().into_bytes()))
+        .width(Length::Fixed(size))
+        .height(Length::Fixed(size))
+        .style(move |_: &Theme, _status| svg::Style { color: Some(color) })
 }
 
 /// Text kept to one line: iced 0.14 can't ellipsize, so the line is clipped at its container's

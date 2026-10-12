@@ -26,6 +26,8 @@ pub const QUEUE_LIST_MIN: f32 = 300.0;
 pub const QUEUE_PANEL_MIN: f32 = 480.0;
 /// Below this, the panel has no room even for the player or cover.
 pub const QUEUE_MEDIA_MIN: f32 = 240.0;
+/// The playlist strip above the queue's list (011: Shuffle, Repeat, Autoplay).
+pub const QUEUE_STRIP: f32 = 36.0;
 
 /// What fits of the queue view in the window (010 R7).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -170,6 +172,15 @@ impl Layout {
         (self.height - ABOVE).max(100.0)
     }
 
+    /// The scrolled list's visible height in `mode`: the queue's list sits below its playlist
+    /// strip.
+    pub fn list_viewport(&self, mode: Mode) -> f32 {
+        match mode {
+            Mode::Queue => (self.viewport() - QUEUE_STRIP).max(100.0),
+            Mode::Grid | Mode::List | Mode::Wall => self.viewport(),
+        }
+    }
+
     /// The first card at least partly visible at `scroll`.
     pub fn first_visible(&self, scroll: f32, mode: Mode) -> usize {
         let row = (scroll.max(0.0) / self.row_height(mode)).floor() as usize;
@@ -187,8 +198,8 @@ impl Layout {
         let bottom = top + self.row_height(mode);
         if top < scroll {
             Some(top)
-        } else if bottom > scroll + self.viewport() {
-            Some((bottom - self.viewport()).max(0.0))
+        } else if bottom > scroll + self.list_viewport(mode) {
+            Some((bottom - self.list_viewport(mode)).max(0.0))
         } else {
             None
         }
@@ -200,7 +211,7 @@ impl Layout {
         let rows = cards.div_ceil(self.cols(mode));
         let row_h = self.row_height(mode);
         let visible = (scroll.max(0.0) / row_h).floor() as usize;
-        let in_view = (self.viewport() / row_h).ceil() as usize + 1;
+        let in_view = (self.list_viewport(mode) / row_h).ceil() as usize + 1;
         let first = visible.saturating_sub(1);
         let end = (visible + in_view + 1).min(rows);
         (first.min(end), end)

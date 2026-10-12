@@ -1,4 +1,4 @@
-# Specification Quality Checklist: Queue Autoplay and Loop
+# Specification Quality Checklist: Queue Autoplay and Playlist Controls
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning
 **Created**: 2026-10-11
@@ -31,6 +31,9 @@
 
 ## Notes
 
-- Clarified 2026-10-11: autoloop loops the whole queue (back to page 1's first scene); the
-  keyboard selection plays once it rests (250 ms).
+- Clarified 2026-10-11: the keyboard selection plays once it rests (250 ms). Revised the same
+  day: playlist controls replace the single Loop switch (Autoplay like YouTube; one Repeat button
+  cycling Off → All → One like Spotify/VLC/Apple Music; Shuffle over the whole result, each scene
+  once per round). The "pure-function state machine" is the owner's explicit design constraint,
+  recorded under Assumptions for planning; it doesn't change what users see.
 - Items marked incomplete require spec updates before `/speckit-clarify` or `/speckit-plan`

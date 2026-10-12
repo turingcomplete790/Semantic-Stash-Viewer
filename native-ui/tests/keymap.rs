@@ -136,15 +136,32 @@ fn the_queue_views_keys_are_listed() {
         "N",
         "P",
         "A",
+        "X",
+        "R",
         "O",
         "Ctrl+O",
     ] {
         assert!(queue.iter().any(|k| k == key), "{key} in {queue:?}");
     }
-    // Next, Previous, Play next, focus, and open aren't the player's keys, so they reach the
-    // queue while something plays.
-    for c in ["n", "p", "a", "o"] {
+    // 011: Loop's `L` is gone; the playlist controls are Autoplay, Shuffle, Repeat.
+    assert!(!queue.iter().any(|k| k == "L"), "{queue:?}");
+    for (c, action) in [
+        ("a", Action::QueueAutoplay),
+        ("x", Action::QueueShuffle),
+        ("r", Action::QueueRepeat),
+    ] {
+        assert_eq!(
+            resolve(&ch(c), Modifiers::empty(), &[Level::Queue]),
+            Some(action)
+        );
+    }
+    // Next, Previous, the playlist controls, focus, and open aren't the player's or the Scenes
+    // screen's keys, so they reach the queue while something plays.
+    for c in ["n", "p", "a", "x", "r", "o"] {
         assert_eq!(resolve(&ch(c), Modifiers::empty(), &[Level::Player]), None);
+    }
+    for c in ["x", "r"] {
+        assert_eq!(resolve(&ch(c), Modifiers::empty(), &[Level::Scenes]), None);
     }
     assert_eq!(
         resolve(

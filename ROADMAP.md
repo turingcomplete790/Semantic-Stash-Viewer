@@ -101,8 +101,9 @@ mpv.
 - [x] Queue view: the list on one side and the selected scene's player and details on the
       other, so a run of scenes can be clicked through without leaving the list, with Play next
       across pages and full keyboard operation (010)
-- [ ] Queue autoplay and loop: clicking a scene plays it, the queue view starts playing on its
-      own, and the queue loops back to page 1 after its last scene (011, specified)
+- [x] Queue playlist controls: clicking a scene plays it; Autoplay (the queue starts on its own
+      and moves on), Shuffle (every scene once per round, from every page), and Repeat (all or
+      one), decided by a pure state machine in the core (011)
 
 ### Images
 - [ ] Image grid (sized thumbnails), filters, and sorting

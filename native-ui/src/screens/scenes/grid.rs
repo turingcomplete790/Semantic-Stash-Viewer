@@ -177,9 +177,9 @@ fn list_row(
     clickable(body.into(), index, focused, Length::Fill, LIST_ROW)
 }
 
-/// A queue row (010 FR-002): a small still, title, and details line. A click selects it (the
-/// panel follows), a middle-click opens its page in a new tab; no hover preview, so scrolling the
-/// list stays light.
+/// A queue row (010 FR-002): a small still, title, and details line. A click (or double-click)
+/// plays it and the panel follows (011 FR-001), a middle-click opens its page in a new tab; no
+/// hover preview, so scrolling the list stays light.
 fn queue_row(
     c: &SceneCard,
     index: usize,
@@ -394,6 +394,7 @@ pub fn view_with<'a>(
                 super::queue::view(
                     &state.queue,
                     state.cards(),
+                    super::queue::strip(state.shuffle, state.repeat, state.autoplay),
                     list,
                     player,
                     &ctx.layout,

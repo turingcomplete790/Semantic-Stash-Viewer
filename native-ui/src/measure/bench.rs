@@ -77,6 +77,8 @@ enum Act {
     MarkPlaying,
     /// Seek the playing scene to this many seconds before its end.
     SeekBeforeEnd(f64),
+    /// Play the queue page's last card (011 `queue-repeat`).
+    QueuePlayLast,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -117,6 +119,10 @@ enum Cond {
     PlaybackMoved,
     /// Another scene than the noted one is playing.
     PlayingMoved,
+    /// The noted scene reached its end (or playback moved on from it).
+    EndReached,
+    /// The noted scene is playing again from its start (Repeat one, 011).
+    Replayed,
 }
 
 #[derive(Debug, Clone)]
@@ -501,8 +507,10 @@ fn script() -> Vec<Op> {
     }
     ops.push(Report("preview-start"));
     // 010: the queue view on the same page (performer A's scenes on Testing). Choosing a row
-    // until the panel shows it; a quick keyboard sweep (no details), then the rest (one).
+    // until the panel shows it; a quick keyboard sweep (no details), then the rest (one). From
+    // 011 choosing Queue and a click play the scene, so play history is off from here: no writes.
     ops.extend([
+        Op::Act(A::History(false)),
         shell(ShellMsg::Scenes(ScenesMsg::Mode(Mode::Queue))),
         Until(Cond::QueueDetails, ms(15_000)),
         Sleep(ms(500)),
@@ -517,8 +525,22 @@ fn script() -> Vec<Op> {
             Until(Cond::QueueDetails, ms(15_000)),
         ]);
     }
+    // 011: a click to the clicked scene playing.
+    for i in [4, 6, 1] {
+        ops.extend([
+            Until(Cond::Playing, ms(20_000)),
+            Op::Act(A::MarkPlaying),
+            Start,
+            shell(ShellMsg::Scenes(ScenesMsg::QueueSelect(i))),
+            Until(Cond::PlayingMoved, ms(10_000)),
+            Sample("queue-click-play"),
+        ]);
+    }
     ops.extend([
         Report("queue-select"),
+        Report("queue-click-play"),
+        Op::Act(A::StopPlayback),
+        Frames(2),
         Sleep(ms(500)),
         GqlReset,
         // Twenty rows, ending on one not chosen yet (its details aren't cached).
@@ -531,9 +553,22 @@ fn script() -> Vec<Op> {
         Gql("gql-queue-rest"),
         GqlReset,
     ]);
-    // A scene's end to the next one playing (Play next), twice on the page and once across a
+    // 011: choosing Queue to its selection playing (Autoplay).
+    for _ in 0..3 {
+        ops.extend([
+            Op::Act(A::StopPlayback),
+            shell(ShellMsg::Scenes(ScenesMsg::Mode(Mode::Grid))),
+            Frames(2),
+            Sleep(ms(500)),
+            Start,
+            shell(ShellMsg::Scenes(ScenesMsg::Mode(Mode::Queue))),
+            Until(Cond::Playing, ms(20_000)),
+            Sample("queue-autoplay"),
+        ]);
+    }
+    ops.push(Report("queue-autoplay"));
+    // A scene's end to the next one playing (Autoplay), twice on the page and once across a
     // page boundary (20 per page, the whole library). Play history is off: no writes.
-    ops.push(Op::Act(A::History(false)));
     let next = |ops: &mut Vec<Op>| {
         ops.extend([
             Until(Cond::Playing, ms(20_000)),
@@ -558,7 +593,52 @@ fn script() -> Vec<Op> {
         shell(ShellMsg::Scenes(ScenesMsg::QueuePlay(19))),
     ]);
     next(&mut ops);
+    // 011: a scene's end (seeked to) to what plays next, from the end itself: Repeat all from the
+    // last page's last scene to page 1's first, Repeat one to the same scene again from 0:00, and
+    // Shuffle to its pick (often on another page).
+    let from_end = |ops: &mut Vec<Op>, then: Cond, name: &'static str| {
+        ops.extend([
+            Until(Cond::Playing, ms(20_000)),
+            Op::Act(A::MarkPlaying),
+            Op::Act(A::SeekBeforeEnd(1.5)),
+            Until(Cond::EndReached, ms(30_000)),
+            Start,
+            Until(then, ms(10_000)),
+            Sample(name),
+        ]);
+    };
     ops.extend([
+        shell(ShellMsg::Scenes(ScenesMsg::CycleRepeat)),
+        Op::Act(A::StopPlayback),
+        Frames(2),
+    ]);
+    for _ in 0..2 {
+        // The last page autoplays its first scene; then its last is chosen.
+        ops.extend([
+            shell(ShellMsg::Scenes(ScenesMsg::Page(u32::MAX))),
+            Until(Cond::Ready, ms(15_000)),
+            Until(Cond::Playing, ms(20_000)),
+            Op::Act(A::MarkPlaying),
+            Op::Act(A::QueuePlayLast),
+            Until(Cond::PlayingMoved, ms(20_000)),
+        ]);
+        from_end(&mut ops, Cond::PlayingMoved, "queue-repeat");
+    }
+    ops.push(shell(ShellMsg::Scenes(ScenesMsg::CycleRepeat)));
+    for _ in 0..2 {
+        from_end(&mut ops, Cond::Replayed, "queue-repeat");
+    }
+    ops.extend([
+        Report("queue-repeat"),
+        shell(ShellMsg::Scenes(ScenesMsg::CycleRepeat)),
+        shell(ShellMsg::Scenes(ScenesMsg::ToggleShuffle)),
+    ]);
+    for _ in 0..3 {
+        from_end(&mut ops, Cond::PlayingMoved, "queue-shuffle");
+    }
+    ops.extend([
+        Report("queue-shuffle"),
+        shell(ShellMsg::Scenes(ScenesMsg::ToggleShuffle)),
         Report("queue-next"),
         Op::Act(A::StopPlayback),
         Op::Act(A::History(true)),
@@ -692,6 +772,17 @@ impl Bench {
         if let Cond::Playing = cond {
             return session.playback.snapshot().state == player::PlayerStateKind::Playing;
         }
+        if let Cond::EndReached = cond {
+            use player::PlayerStateKind as K;
+            return !matches!(session.playback.snapshot().state, K::Playing | K::Paused)
+                || session.playback.playing_scene() != self.playing_mark.as_deref();
+        }
+        if let Cond::Replayed = cond {
+            let snapshot = session.playback.snapshot();
+            return snapshot.state == player::PlayerStateKind::Playing
+                && session.playback.playing_scene() == self.playing_mark.as_deref()
+                && snapshot.position_seconds < 5.0;
+        }
         if let Cond::PlaybackMoved | Cond::PlayingMoved = cond {
             let moved = session.playback.active()
                 && session.playback.playing_scene() != self.playing_mark.as_deref();
@@ -797,7 +888,9 @@ impl Bench {
             | Cond::QueuePanel
             | Cond::QueueDetails
             | Cond::PlaybackMoved
-            | Cond::PlayingMoved => unreachable!("checked above"),
+            | Cond::PlayingMoved
+            | Cond::EndReached
+            | Cond::Replayed => unreachable!("checked above"),
             Cond::Cards(n) => s.cards().len() >= n.min(s.count().unwrap_or(0) as usize),
             Cond::CardsShown => changed(),
             Cond::AllThumbs => s
@@ -967,6 +1060,12 @@ impl Bench {
                         exact: false,
                     }))
                 }
+                _ => Step::none(),
+            },
+            Act::QueuePlayLast => match Self::scenes(session).map(|s| s.cards().len()) {
+                Some(n) if n > 0 => session.update(session::Msg::Shell(ShellMsg::Scenes(
+                    ScenesMsg::QueuePlay(n - 1),
+                ))),
                 _ => Step::none(),
             },
             Act::Jump => {

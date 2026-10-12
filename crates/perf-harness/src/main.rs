@@ -681,6 +681,36 @@ fn picker_measurements(launch: &Launch) -> Vec<Measurement> {
             Some(1500.0),
             Check::Median,
         ),
+        // 011 SC-001–SC-003: a click, choosing Queue, Repeat (all and one), and a shuffled pick,
+        // each to a scene playing, within the playback open budget.
+        from_bench(
+            launch,
+            "queue-click-play",
+            "queue-click-play",
+            Some(1500.0),
+            Check::Median,
+        ),
+        from_bench(
+            launch,
+            "queue-autoplay",
+            "queue-autoplay",
+            Some(1500.0),
+            Check::Median,
+        ),
+        from_bench(
+            launch,
+            "queue-repeat",
+            "queue-repeat",
+            Some(1500.0),
+            Check::Median,
+        ),
+        from_bench(
+            launch,
+            "queue-shuffle",
+            "queue-shuffle",
+            Some(1500.0),
+            Check::Median,
+        ),
     ]
 }
 

@@ -3,22 +3,25 @@
 //! details, chips, chip cards, sections, and markers are the scene page's. A keyboard selection
 //! shows the card's still and title at once and loads details only once it rests (250 ms), so
 //! moving through the list sends nothing for rows only passed over (FR-005); a click is deliberate
-//! and loads at once.
+//! and loads at once. 011: a click plays, and a keyboard selection plays once it rests; a rest
+//! started by a page arriving only loads (restores and refreshes never start playback).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use iced::widget::{column, container, row};
-use iced::{Element, Length};
+use iced::widget::{button, column, container, row, text, tooltip};
+use iced::{Alignment, Element, Length};
+use stash_core::playback::playlist::Repeat;
 use stash_core::scenes::SceneCard;
 
-use super::layout::{Layout, QueueFit};
+use super::layout::{Layout, QueueFit, PAD, QUEUE_STRIP};
 use super::thumbs::{thumb_key, Thumbs};
+use super::ScenesMsg;
 use crate::effects::Effect;
 use crate::library::Library;
 use crate::screens::scene::{self, SceneState};
 use crate::shell::{ShellMsg, TabId};
-use crate::widgets::theme;
+use crate::widgets::{icon_in, theme, Icon};
 
 /// How long the keyboard selection rests on a scene before its details load (010 R3).
 pub const QUEUE_REST: Duration = Duration::from_millis(250);
@@ -33,20 +36,29 @@ pub enum QueueFocus {
     Panel,
 }
 
-/// A page change asked by Play next, Next, or Previous: play that card when the page arrives.
+/// What the queue does when the page it's loading arrives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PendingPlay {
     #[default]
     None,
-    First,
-    Last,
+    /// Play result index `i` (the playlist machine chose it: Next, Previous, a shuffled pick,
+    /// Repeat all's return to page 1).
+    Index(u32),
+    /// Start the selection (`queue_selected` or the first card) with Autoplay on: new results, or
+    /// a switch to a queue tab whose page isn't here yet (011 FR-004).
+    Start,
+    /// The keyboard crossed a page edge: select its card when the page arrives; it plays once it
+    /// rests, as any keyboard move (011 R2).
+    Keyboard,
 }
 
-/// How a selection was made: the keyboard waits for a rest, the pointer loads at once.
+/// How a selection was made: the keyboard waits for a rest (and plays then, 011), the pointer
+/// loads at once, a page arriving waits for a rest that only loads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Via {
     Keyboard,
     Pointer,
+    Arrival,
 }
 
 /// The queue view's transient state (data model "QueueState"); rebuilt on entry and on restore.
@@ -63,6 +75,9 @@ pub struct QueueState {
     pub pending_play: PendingPlay,
     /// The scene this tab is playing, marked in the list (the session keeps it current).
     pub playing: Option<String>,
+    /// The pending rest's intent: `true` when a keyboard move started it (it plays when due),
+    /// `false` when a page arrival started it (it only loads) (011 R2).
+    pub rest_plays: bool,
 }
 
 impl QueueState {
@@ -91,31 +106,38 @@ impl QueueState {
         let Some(panel) = self.panel.as_mut() else {
             return Vec::new();
         };
+        // A keyboard rest plays the scene unless it's the one playing (011 R2).
+        let plays = via == Via::Keyboard && self.playing.as_deref() != Some(card.id.as_str());
+        self.rest_plays = plays;
         match via {
             Via::Pointer => panel.enter(tab),
-            Via::Keyboard if panel.needs_load() => vec![Effect::QueueRestDue {
-                tab,
-                generation: self.rest,
-                after: QUEUE_REST,
-            }],
-            Via::Keyboard => Vec::new(),
+            Via::Keyboard | Via::Arrival if panel.needs_load() || plays => {
+                vec![Effect::QueueRestDue {
+                    tab,
+                    generation: self.rest,
+                    after: QUEUE_REST,
+                }]
+            }
+            Via::Keyboard | Via::Arrival => Vec::new(),
         }
     }
 
     /// Whether this queue waits for rest `generation`.
     pub fn awaits_rest(&self, generation: u64) -> bool {
-        self.rest == generation && self.panel.as_ref().is_some_and(|p| p.needs_load())
+        self.rest == generation && self.panel.is_some()
     }
 
-    /// Rest `generation` came due: the panel loads, if the selection is still the one it was for.
-    pub fn rest_due(&mut self, generation: u64, tab: TabId) -> Vec<Effect> {
+    /// Rest `generation` came due: the panel loads, if the selection is still the one it was for,
+    /// and whether a keyboard move started the rest (the selection is then chosen, 011 R6).
+    pub fn rest_due(&mut self, generation: u64, tab: TabId) -> (Vec<Effect>, bool) {
         if self.rest != generation {
-            return Vec::new();
+            return (Vec::new(), false);
         }
-        match self.panel.as_mut() {
-            Some(panel) => panel.enter(tab),
-            None => Vec::new(),
-        }
+        let plays = std::mem::take(&mut self.rest_plays);
+        let Some(panel) = self.panel.as_mut() else {
+            return (Vec::new(), false);
+        };
+        (panel.enter(tab), plays)
     }
 
     /// No selection: an empty page, or the results are changing.
@@ -164,17 +186,85 @@ fn area<'a>(content: Element<'a, ShellMsg>, focused: bool, width: Length) -> Ele
         .into()
 }
 
-/// The queue view: `list` (the windowed rows and the pager) on the left, the panel on the right
+/// The playlist strip above the list (011 FR-009): Shuffle, Repeat (Off → All → One), and
+/// Autoplay, each an icon button with a tooltip naming it and its state; on in the accent colour.
+pub fn strip<'a>(shuffle: bool, repeat: Repeat, autoplay: bool) -> Element<'a, ShellMsg> {
+    let control = |which: Icon, on: bool, tip: &'static str, msg: ScenesMsg| {
+        let colour = if on {
+            theme::FROSTED_BLUE
+        } else {
+            theme::MUTED
+        };
+        tooltip(
+            button(icon_in(which, 18.0, colour))
+                .padding(6)
+                .style(button::text)
+                .on_press(ShellMsg::Scenes(msg)),
+            container(text(tip).size(12))
+                .padding([4, 8])
+                .style(container::rounded_box),
+            tooltip::Position::Bottom,
+        )
+    };
+    let (repeat_icon, repeat_tip) = match repeat {
+        Repeat::Off => (Icon::Repeat, "Repeat: off (R)"),
+        Repeat::All => (Icon::Repeat, "Repeat: all (R)"),
+        Repeat::One => (Icon::RepeatOne, "Repeat: one (R)"),
+    };
+    let shuffle_tip = if shuffle {
+        "Shuffle: on (X)"
+    } else {
+        "Shuffle: off (X)"
+    };
+    let autoplay_tip = if autoplay {
+        "Autoplay: on (A)"
+    } else {
+        "Autoplay: off (A)"
+    };
+    container(
+        row![
+            control(
+                Icon::Shuffle,
+                shuffle,
+                shuffle_tip,
+                ScenesMsg::ToggleShuffle
+            ),
+            control(
+                repeat_icon,
+                repeat != Repeat::Off,
+                repeat_tip,
+                ScenesMsg::CycleRepeat
+            ),
+            control(
+                Icon::Autoplay,
+                autoplay,
+                autoplay_tip,
+                ScenesMsg::ToggleAutoplay
+            ),
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center),
+    )
+    .height(Length::Fixed(QUEUE_STRIP))
+    .padding([0.0, PAD - 6.0])
+    .align_y(Alignment::Center)
+    .into()
+}
+
+/// The queue view: `strip` above `list` (the windowed rows and the pager) on the left, the panel on the right
 /// with `player` in its picture slot when this tab's scene plays there.
+#[allow(clippy::too_many_arguments)]
 pub fn view<'a>(
     queue: &'a QueueState,
     cards: &'a [SceneCard],
+    strip: Element<'a, ShellMsg>,
     list: Element<'a, ShellMsg>,
     player: Option<Element<'a, ShellMsg>>,
     window: &Layout,
     library: &'a Library,
     thumbs: &'a Thumbs,
 ) -> Element<'a, ShellMsg> {
+    let list: Element<'a, ShellMsg> = column![strip, list].into();
     let fit = window.queue_fit();
     if fit == QueueFit::ListOnly {
         return list;
