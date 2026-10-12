@@ -50,6 +50,8 @@ pub enum Mode {
     List,
     /// Dense stills, no text (008 FR-020; Stash's Wall mode).
     Wall,
+    /// List beside the selected scene's panel (010 FR-001).
+    Queue,
 }
 
 /// One screen state, externally tagged by variant in the saved session.
@@ -114,6 +116,23 @@ impl Screen {
             Screen::Scenes(s) => Screen::Scenes(Box::new(s.persistent())),
             Screen::Scene(s) => Screen::Scene(s.persistent()),
             Screen::Settings(s) => Screen::Settings(s.persistent()),
+        }
+    }
+
+    /// The scene page this screen shows: the Scene screen, or a Scenes queue view's panel (010).
+    pub fn scene_panel(&self) -> Option<&SceneState> {
+        match self {
+            Screen::Scene(s) => Some(s),
+            Screen::Scenes(s) if s.mode == Mode::Queue => s.queue.panel.as_deref(),
+            _ => None,
+        }
+    }
+
+    pub fn scene_panel_mut(&mut self) -> Option<&mut SceneState> {
+        match self {
+            Screen::Scene(s) => Some(s),
+            Screen::Scenes(s) if s.mode == Mode::Queue => s.queue.panel.as_deref_mut(),
+            _ => None,
         }
     }
 

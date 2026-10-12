@@ -35,6 +35,9 @@ pub struct Playback {
     pub minimum_percent: Option<f64>,
     /// The viewing in progress, while play history is on.
     viewing: Option<Viewing>,
+    /// The scene that just reached its end (not a failure), for the session to take: the queue
+    /// view's Play next (010 R4).
+    ended: Option<String>,
 }
 
 impl Default for Playback {
@@ -49,6 +52,7 @@ impl Default for Playback {
             save_history: true,
             minimum_percent: None,
             viewing: None,
+            ended: None,
         }
     }
 }
@@ -96,6 +100,7 @@ impl Playback {
         self.screen.sprites_requested = false;
         self.screen.direct_failure = None;
         self.viewing = Viewing::start(&scene_id, self.minimum_percent, self.save_history);
+        self.ended = None;
         effects.push(Effect::OpenScene {
             id: scene_id,
             start,
@@ -158,18 +163,24 @@ impl Playback {
         }
     }
 
-    /// The scene playing (or opening).
+    /// The scene that reached its end since the last call, once (010 R4).
+    pub fn take_ended(&mut self) -> Option<String> {
+        self.ended.take()
+    }
+
+    /// The scene playing (or opening): the one asked for, which the snapshot reports once mpv
+    /// has it (until then it may still report the scene before, as Play next opens the next).
     pub fn playing_scene(&self) -> Option<&str> {
-        self.snapshot()
-            .scene_id
+        self.scene_id
             .as_deref()
-            .or(self.scene_id.as_deref())
+            .or(self.snapshot().scene_id.as_deref())
     }
 
     pub fn update(&mut self, msg: Msg) -> Vec<Effect> {
         match msg {
             Msg::Snapshot(s) => {
                 let was_active = self.active();
+                let was_ended = self.snapshot().state == PlayerStateKind::Ended;
                 let fullscreen = s.fullscreen;
                 let failure = (s.state == PlayerStateKind::Error)
                     .then(|| (s.title.clone(), s.error.as_ref().map(ToString::to_string)));
@@ -188,6 +199,10 @@ impl Playback {
                     _ => None,
                 };
                 effects.extend(self.report(checkpoint));
+                // Reached its end (an Error is never an end): reported once.
+                if state == PlayerStateKind::Ended && !was_ended {
+                    self.ended = self.playing_scene().map(str::to_owned);
+                }
                 // A failure is shown on the player and posted once (US5's centre lists it).
                 match failure {
                     Some((title, detail)) if !self.failure_posted => {

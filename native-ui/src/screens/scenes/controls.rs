@@ -153,7 +153,24 @@ pub fn top(state: &ScenesState) -> Element<'_, ShellMsg> {
         )
         .push(mode(Mode::Grid, "Grid"))
         .push(mode(Mode::List, "List"))
-        .push(mode(Mode::Wall, "Wall"));
+        .push(mode(Mode::Wall, "Wall"))
+        .push(mode(Mode::Queue, "Queue"));
+    if state.mode == Mode::Queue {
+        // Play next (010 FR-009): whether the queue advances when a scene ends.
+        bar = bar.push(
+            button(
+                text(if state.play_next {
+                    "Play next: on"
+                } else {
+                    "Play next: off"
+                })
+                .size(13),
+            )
+            .padding([4, 10])
+            .style(theme::menu_row(state.play_next))
+            .on_press(msg(ScenesMsg::TogglePlayNext)),
+        );
+    }
     container(bar)
         .padding([8.0, PAD])
         .width(Length::Fill)

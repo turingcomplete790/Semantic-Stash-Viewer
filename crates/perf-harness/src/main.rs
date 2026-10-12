@@ -665,6 +665,22 @@ fn picker_measurements(launch: &Launch) -> Vec<Measurement> {
             Some(50.0),
             Check::Median,
         ),
+        // The queue view (010 SC-001, SC-002): a row chosen to the panel showing it, within the
+        // navigation budget; a scene's end to the next playing, within the playback open budget.
+        from_bench(
+            launch,
+            "queue-select",
+            "queue-select",
+            Some(150.0),
+            Check::Median,
+        ),
+        from_bench(
+            launch,
+            "queue-next",
+            "queue-next",
+            Some(1500.0),
+            Check::Median,
+        ),
     ]
 }
 
@@ -689,7 +705,7 @@ fn scenes_measurements(launch: &Launch) -> Vec<Measurement> {
         ),
     ];
     // Each view at its own budget (the wall, 008 SC-007, at the 1% of views other than the grid).
-    for mode in ["grid", "list", "wall"] {
+    for mode in ["grid", "list", "wall", "queue"] {
         let line = bench_line(launch, &format!("scenes-scroll-1000-{mode}"));
         let invalid = line
             .and_then(|l| l.get("invalid").and_then(Value::as_str).map(str::to_owned))

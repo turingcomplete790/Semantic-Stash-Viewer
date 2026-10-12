@@ -9,9 +9,12 @@ pub mod keyboard;
 pub mod layout;
 pub mod picker;
 pub mod preview;
+pub mod queue;
 pub mod state;
 pub mod thumbs;
 
 pub use grid::view;
-pub use state::{page_key, scroll_id, Applied, Data, Panel, ScenesMsg, ScenesState, ScenesUp};
+pub use state::{
+    page_key, scroll_id, Advance, Applied, Data, Panel, ScenesMsg, ScenesState, ScenesUp,
+};
 pub use thumbs::Thumbs;

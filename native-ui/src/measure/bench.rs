@@ -69,6 +69,14 @@ enum Act {
     SaveSameColours,
     /// Send a simulated 10-minute viewing of this scene's play history (Testing only).
     SimulateViewing(String),
+    /// Move the queue's selection by keyboard over these rows, quickly (010 `gql-queue-sweep`).
+    QueueSweep(Vec<usize>),
+    /// Turn play history on or off (the queue-next row seeks to scenes' ends: no writes).
+    History(bool),
+    /// Note the scene playing now (for `PlaybackMoved`, `PlayingMoved`).
+    MarkPlaying,
+    /// Seek the playing scene to this many seconds before its end.
+    SeekBeforeEnd(f64),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -101,6 +109,14 @@ enum Cond {
     AllThumbs,
     /// The player is playing.
     Playing,
+    /// The queue's panel shows the selected card (its title, still, and Play).
+    QueuePanel,
+    /// The queue panel's details are here.
+    QueueDetails,
+    /// Playback moved on from the scene `MarkPlaying` noted (Play next opened another).
+    PlaybackMoved,
+    /// Another scene than the noted one is playing.
+    PlayingMoved,
 }
 
 #[derive(Debug, Clone)]
@@ -179,6 +195,8 @@ pub struct Bench {
     /// Switches to the playing tab, and how many showed a new video frame.
     video_checked: u32,
     video_sized: u32,
+    /// The scene `MarkPlaying` noted.
+    playing_mark: Option<String>,
 }
 
 fn script() -> Vec<Op> {
@@ -481,8 +499,71 @@ fn script() -> Vec<Op> {
             Frames(2),
         ]);
     }
+    ops.push(Report("preview-start"));
+    // 010: the queue view on the same page (performer A's scenes on Testing). Choosing a row
+    // until the panel shows it; a quick keyboard sweep (no details), then the rest (one).
     ops.extend([
-        Report("preview-start"),
+        shell(ShellMsg::Scenes(ScenesMsg::Mode(Mode::Queue))),
+        Until(Cond::QueueDetails, ms(15_000)),
+        Sleep(ms(500)),
+    ]);
+    for i in [3, 5, 7, 2, 8] {
+        ops.extend([
+            Start,
+            shell(ShellMsg::Scenes(ScenesMsg::QueueSelect(i))),
+            Until(Cond::QueuePanel, ms(5_000)),
+            Frames(2),
+            Sample("queue-select"),
+            Until(Cond::QueueDetails, ms(15_000)),
+        ]);
+    }
+    ops.extend([
+        Report("queue-select"),
+        Sleep(ms(500)),
+        GqlReset,
+        // Twenty rows, ending on one not chosen yet (its details aren't cached).
+        Op::Act(A::QueueSweep((0..10).rev().chain(0..10).collect())),
+        Sleep(ms(100)),
+        Gql("gql-queue-sweep"),
+        GqlReset,
+        Until(Cond::QueueDetails, ms(15_000)),
+        Sleep(ms(500)),
+        Gql("gql-queue-rest"),
+        GqlReset,
+    ]);
+    // A scene's end to the next one playing (Play next), twice on the page and once across a
+    // page boundary (20 per page, the whole library). Play history is off: no writes.
+    ops.push(Op::Act(A::History(false)));
+    let next = |ops: &mut Vec<Op>| {
+        ops.extend([
+            Until(Cond::Playing, ms(20_000)),
+            Op::Act(A::MarkPlaying),
+            Op::Act(A::SeekBeforeEnd(1.5)),
+            Until(Cond::PlaybackMoved, ms(30_000)),
+            Start,
+            Until(Cond::PlayingMoved, ms(10_000)),
+            Sample("queue-next"),
+        ]);
+    };
+    ops.push(shell(ShellMsg::Scenes(ScenesMsg::QueuePlay(0))));
+    next(&mut ops);
+    next(&mut ops);
+    ops.extend([
+        Op::Act(A::StopPlayback),
+        Frames(2),
+        shell(ShellMsg::Scenes(ScenesMsg::ClearFilters)),
+        Until(Cond::Ready, ms(15_000)),
+        shell(ShellMsg::Scenes(ScenesMsg::PageSize(20))),
+        Until(Cond::Ready, ms(15_000)),
+        shell(ShellMsg::Scenes(ScenesMsg::QueuePlay(19))),
+    ]);
+    next(&mut ops);
+    ops.extend([
+        Report("queue-next"),
+        Op::Act(A::StopPlayback),
+        Op::Act(A::History(true)),
+        Frames(2),
+        shell(ShellMsg::Scenes(ScenesMsg::Mode(Mode::Grid))),
         shell(ShellMsg::Back),
         Frames(2),
         shell(ShellMsg::Back),
@@ -523,6 +604,12 @@ fn script() -> Vec<Op> {
             Mode::Wall,
             "scenes-scroll-1000-wall-cold",
             "scenes-scroll-1000-wall",
+        ),
+        // 010: the queue's list (the lists' 1% budget).
+        (
+            Mode::Queue,
+            "scenes-scroll-1000-queue-cold",
+            "scenes-scroll-1000-queue",
         ),
     ] {
         ops.extend([
@@ -584,6 +671,7 @@ impl Bench {
             video_mark: 0,
             video_checked: 0,
             video_sized: 0,
+            playing_mark: None,
         }
     }
 
@@ -603,6 +691,30 @@ impl Bench {
     fn holds(&self, cond: Cond, session: &Session) -> bool {
         if let Cond::Playing = cond {
             return session.playback.snapshot().state == player::PlayerStateKind::Playing;
+        }
+        if let Cond::PlaybackMoved | Cond::PlayingMoved = cond {
+            let moved = session.playback.active()
+                && session.playback.playing_scene() != self.playing_mark.as_deref();
+            return moved
+                && (matches!(cond, Cond::PlaybackMoved)
+                    || session.playback.snapshot().state == player::PlayerStateKind::Playing);
+        }
+        if let Cond::QueuePanel | Cond::QueueDetails = cond {
+            let Some(s) = Self::scenes(session).filter(|s| s.mode == Mode::Queue) else {
+                return false;
+            };
+            let selected = s.queue.selected.and_then(|i| s.cards().get(i));
+            return match (selected, s.queue.panel.as_deref()) {
+                (Some(card), Some(panel)) if panel.scene_id == card.id => {
+                    matches!(cond, Cond::QueuePanel)
+                        || matches!(
+                            panel.details,
+                            crate::screens::scene::Details::Ready(_)
+                                | crate::screens::scene::Details::Failed(_)
+                        )
+                }
+                _ => false,
+            };
         }
         if let Cond::PreviewPlaying = cond {
             return session.previews.playing();
@@ -681,7 +793,11 @@ impl Bench {
             | Cond::GalleriesReady
             | Cond::CardReady
             | Cond::PortraitReady
-            | Cond::PreviewPlaying => unreachable!("checked above"),
+            | Cond::PreviewPlaying
+            | Cond::QueuePanel
+            | Cond::QueueDetails
+            | Cond::PlaybackMoved
+            | Cond::PlayingMoved => unreachable!("checked above"),
             Cond::Cards(n) => s.cards().len() >= n.min(s.count().unwrap_or(0) as usize),
             Cond::CardsShown => changed(),
             Cond::AllThumbs => s
@@ -823,6 +939,36 @@ impl Bench {
                 Step::effect(Effect::SaveTagColours(session.library.colour_rules()))
             }
             Act::SimulateViewing(scene_id) => Step::effect(Effect::SimulateViewing { scene_id }),
+            Act::QueueSweep(rows) => {
+                let mut effects = Vec::new();
+                for i in rows {
+                    effects.extend(
+                        session
+                            .update(session::Msg::Shell(ShellMsg::Scenes(ScenesMsg::Grid(
+                                GridAction::Move(i),
+                            ))))
+                            .effects,
+                    );
+                }
+                Step::effects(effects)
+            }
+            Act::History(on) => {
+                session.playback.save_history = on && session.prefs.save_history;
+                Step::none()
+            }
+            Act::MarkPlaying => {
+                self.playing_mark = session.playback.playing_scene().map(str::to_owned);
+                Step::none()
+            }
+            Act::SeekBeforeEnd(seconds) => match session.playback.snapshot().duration_seconds {
+                Some(d) if d > seconds => {
+                    Step::effect(Effect::Player(crate::effects::PlayerAction::Seek {
+                        seconds: d - seconds,
+                        exact: false,
+                    }))
+                }
+                _ => Step::none(),
+            },
             Act::Jump => {
                 let last = Self::scenes(session)
                     .and_then(|s| s.last_page())
@@ -1044,6 +1190,7 @@ impl Bench {
                         Mode::Grid => "grid",
                         Mode::List => "list",
                         Mode::Wall => "wall",
+                        Mode::Queue => "queue",
                     });
                     report(
                         &format!("scenes-thumbs-1000-{mode}"),

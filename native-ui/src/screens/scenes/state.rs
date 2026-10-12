@@ -16,7 +16,8 @@ use stash_core::scenes::filter::Criterion;
 
 use super::editor::{Editor, EditorMsg};
 use super::keyboard::{GridAction, PageDirection};
-use super::layout::Layout;
+use super::layout::{Layout, QueueFit};
+use super::queue::{PendingPlay, QueueFocus, QueueState, Via};
 use crate::effects::Effect;
 use crate::library::Need;
 use crate::machine::Step;
@@ -100,6 +101,16 @@ pub struct ScenesState {
     /// The saved filter applied to this tab, if the criteria haven't changed since.
     #[serde(default)]
     pub applied: Option<Applied>,
+    /// The queue view's selected scene (010 FR-007): after a restore, that card if it's on the
+    /// page, otherwise the first.
+    #[serde(default)]
+    pub queue_selected: Option<String>,
+    /// Whether the queue advances when a scene ends (010 FR-009); on by default.
+    #[serde(default = "yes")]
+    pub play_next: bool,
+    /// The queue view's selection and panel (010).
+    #[serde(skip)]
+    pub queue: QueueState,
     #[serde(skip)]
     pub data: Data,
     /// What's typed in the search box, before the debounce runs it (`None`: the query's search).
@@ -130,6 +141,9 @@ pub struct ScenesState {
     /// A bench scroll to run (the UI bench only).
     #[serde(skip)]
     pub auto_scroll: Option<AutoScroll>,
+    /// A card to play now that its page arrived (Play next across pages), for the session.
+    #[serde(skip)]
+    play_due: Option<String>,
 }
 
 impl Default for ScenesState {
@@ -142,6 +156,9 @@ impl Default for ScenesState {
             scroll: 0.0,
             focused: None,
             applied: None,
+            queue_selected: None,
+            play_next: true,
+            queue: QueueState::default(),
             data: Data::Loading,
             search_draft: None,
             search_pending: None,
@@ -153,8 +170,20 @@ impl Default for ScenesState {
             tab: 0,
             loaded: 0,
             auto_scroll: None,
+            play_due: None,
         }
     }
+}
+
+fn cards_of(data: &Data) -> &[SceneCard] {
+    match data {
+        Data::Ready { cards, .. } => cards,
+        _ => &[],
+    }
+}
+
+fn yes() -> bool {
+    true
 }
 
 #[derive(Debug, Clone)]
@@ -179,6 +208,14 @@ pub enum ScenesMsg {
         index: usize,
         new_tab: bool,
     },
+    /// A queue row was clicked: select it, loading its details at once (010 FR-004).
+    QueueSelect(usize),
+    /// A queue row was double-clicked: select and play it (010 FR-008).
+    QueuePlay(usize),
+    /// F6: move the keyboard between the queue's list and panel (010 R5).
+    QueueFocus,
+    /// Turn Play next on or off (010 FR-009).
+    TogglePlayNext,
     /// The pointer moved onto card `index` (its preview may start, 008 FR-019).
     Hover(usize),
     /// The pointer left card `index`.
@@ -221,6 +258,19 @@ pub enum ScenesUp {
     },
     /// Something from the library (a picker's list, the vocabulary, the saved filters).
     Need(Need),
+    /// Play this scene, owned by this tab (the queue view, 010).
+    Play(String),
+}
+
+/// Where the queue goes next (010 R4).
+#[derive(Debug)]
+pub enum Advance {
+    /// Play this card now (it's selected).
+    Play { id: String, effects: Vec<Effect> },
+    /// The next or previous page is loading; its first or last card plays when it arrives.
+    Loading(Vec<Effect>),
+    /// Nothing more in that direction.
+    Stop,
 }
 
 fn new_seed() -> u32 {
@@ -239,10 +289,7 @@ impl ScenesState {
     }
 
     pub fn cards(&self) -> &[SceneCard] {
-        match &self.data {
-            Data::Ready { cards, .. } => cards,
-            _ => &[],
-        }
+        cards_of(&self.data)
     }
 
     pub fn count(&self) -> Option<u32> {
@@ -285,6 +332,8 @@ impl ScenesState {
             scroll: self.scroll,
             focused: self.focused,
             applied: self.applied.clone(),
+            queue_selected: self.queue_selected.clone(),
+            play_next: self.play_next,
             ..Self::default()
         }
     }
@@ -311,6 +360,8 @@ impl ScenesState {
                 .unwrap_or(self.page_size);
         }
         match filter.mode {
+            // A Stash saved filter has no Queue mode: a tab in Queue stays there (010 R6).
+            _ if self.mode == Mode::Queue => {}
             Some(DisplayMode::Grid) => self.mode = Mode::Grid,
             Some(DisplayMode::List) => self.mode = Mode::List,
             Some(DisplayMode::Wall) => self.mode = Mode::Wall,
@@ -456,6 +507,7 @@ impl ScenesState {
         self.scroll = 0.0;
         self.focused = None;
         self.refreshing = false;
+        self.results_changed();
         self.load()
     }
 
@@ -465,7 +517,131 @@ impl ScenesState {
         self.scroll = 0.0;
         self.focused = None;
         self.refreshing = false;
+        self.results_changed();
         self.load()
+    }
+
+    /// The search, a filter, the sort, the page size, or the page changed: the queue's first
+    /// scene will be selected when the new page arrives (010 FR-006).
+    fn results_changed(&mut self) {
+        self.queue.clear();
+        self.queue.pending_play = PendingPlay::None;
+        self.play_due = None;
+        self.queue_selected = None;
+    }
+
+    /// Select queue row `index`: the panel follows and the row is kept in view. With no room for
+    /// the panel, a click opens the scene's page instead (010 R7).
+    fn queue_select(&mut self, index: usize, via: Via, layout: &Layout) -> Step<ScenesUp> {
+        if via == Via::Pointer && layout.queue_fit() == QueueFit::ListOnly {
+            return self.update(
+                ScenesMsg::Open {
+                    index,
+                    new_tab: false,
+                },
+                self.tab,
+                layout,
+            );
+        }
+        Step::effects(self.queue_select_here(index, via, layout))
+    }
+
+    /// Select queue row `index` in the list, keeping it in view.
+    fn queue_select_here(&mut self, index: usize, via: Via, layout: &Layout) -> Vec<Effect> {
+        let mut effects = self
+            .queue
+            .select(index, via, cards_of(&self.data), self.tab);
+        self.sync_queue_selection();
+        if let Some(i) = self.queue.selected {
+            if let Some(y) = layout.reveal(i, self.scroll, self.mode) {
+                self.scroll = y;
+                effects.push(self.scroll_to(y));
+            }
+        }
+        effects
+    }
+
+    /// Play card `index` from the queue: it's selected (its details load) and plays.
+    fn queue_play(&mut self, index: usize, layout: &Layout) -> Advance {
+        let effects = self.queue_select_here(index, Via::Pointer, layout);
+        match self.queue.selected.and_then(|i| self.cards().get(i)) {
+            Some(card) => Advance::Play {
+                id: card.id.clone(),
+                effects,
+            },
+            None => Advance::Stop,
+        }
+    }
+
+    /// Next (`forward`) or Previous from scene `from` (the playing one, or the selection): the
+    /// neighbouring card, or across a page boundary (010 FR-010). When `from` isn't on the page
+    /// (the page changed while it played), the new list's first card.
+    pub fn advance(
+        &mut self,
+        from: Option<&str>,
+        forward: bool,
+        tab: TabId,
+        layout: &Layout,
+    ) -> Advance {
+        self.tab = tab;
+        if self.mode != Mode::Queue || !self.ready() {
+            return Advance::Stop;
+        }
+        let len = self.cards().len();
+        let at = from.and_then(|id| self.cards().iter().position(|c| c.id == id));
+        let target = match (at, forward) {
+            (Some(i), true) => (i + 1 < len).then_some(i + 1),
+            (Some(i), false) => i.checked_sub(1),
+            (None, _) => (len > 0).then_some(0),
+        };
+        if let Some(i) = target {
+            return self.queue_play(i, layout);
+        }
+        let last = self.last_page().unwrap_or(self.page);
+        let (page, pending) = match forward {
+            true if self.page < last => (self.page + 1, PendingPlay::First),
+            false if self.page > 1 => (self.page - 1, PendingPlay::Last),
+            _ => return Advance::Stop,
+        };
+        let effects = self.go_to_page(page);
+        self.queue.pending_play = pending;
+        Advance::Loading(effects)
+    }
+
+    /// The card to play now that Play next's page arrived, once.
+    pub fn take_play_due(&mut self) -> Option<String> {
+        self.play_due.take()
+    }
+
+    /// The keyboard's card and the saved id follow the queue's selection.
+    fn sync_queue_selection(&mut self) {
+        self.focused = self.queue.selected;
+        self.queue_selected = self
+            .queue
+            .selected
+            .and_then(|i| self.cards().get(i))
+            .map(|c| c.id.clone());
+    }
+
+    /// Which card the queue selects when a page shows: the saved one if it's on the page, else
+    /// the keyboard's (a page edge), else the first.
+    fn queue_start(&self) -> usize {
+        self.queue_selected
+            .as_deref()
+            .and_then(|id| self.cards().iter().position(|c| c.id == id))
+            .or(self.focused)
+            .unwrap_or(0)
+    }
+
+    /// A rest for the queue's selection came due.
+    pub fn queue_rest_due(&mut self, generation: u64, tab: TabId) -> Vec<Effect> {
+        self.tab = tab;
+        self.queue.rest_due(generation, tab)
+    }
+
+    /// Whether this screen's queue waits for rest `generation`.
+    pub fn awaits_queue_rest(&self, generation: u64) -> bool {
+        self.mode == Mode::Queue && self.queue.awaits_rest(generation)
     }
 
     /// The first card at least partly visible, as an index into the whole result.
@@ -503,6 +679,7 @@ impl ScenesState {
                 self.scroll = layout.row_top(on_page, self.mode);
                 self.focused = None;
                 self.refreshing = false;
+                self.results_changed();
                 Step::effects(self.load())
             }
             ScenesMsg::Sort(sort) => {
@@ -534,9 +711,46 @@ impl ScenesState {
                     return Step::none();
                 }
                 let first = layout.first_visible(self.scroll, self.mode);
+                let leaving = self.mode == Mode::Queue;
                 self.mode = mode;
                 self.scroll = layout.row_top(first, mode);
-                Step::effect(self.scroll_to(self.scroll))
+                let mut step = Step::effect(self.scroll_to(self.scroll));
+                if mode == Mode::Queue {
+                    // Choosing Queue is deliberate: the selection's details load at once.
+                    if !self.cards().is_empty() {
+                        let start = self.queue_start();
+                        let more = self.queue_select(start, Via::Pointer, layout);
+                        step.effects.extend(more.effects);
+                    }
+                } else if leaving {
+                    self.queue.clear();
+                }
+                step
+            }
+            ScenesMsg::QueueSelect(index) if self.mode == Mode::Queue => {
+                self.queue_select(index, Via::Pointer, layout)
+            }
+            ScenesMsg::QueueSelect(_) => Step::none(),
+            ScenesMsg::QueuePlay(index) if self.mode == Mode::Queue => {
+                match self.queue_play(index, layout) {
+                    Advance::Play { id, effects } => Step {
+                        effects,
+                        up: Some(ScenesUp::Play(id)),
+                    },
+                    _ => Step::none(),
+                }
+            }
+            ScenesMsg::QueuePlay(_) => Step::none(),
+            ScenesMsg::QueueFocus => {
+                self.queue.focus = match self.queue.focus {
+                    QueueFocus::List => QueueFocus::Panel,
+                    QueueFocus::Panel => QueueFocus::List,
+                };
+                Step::none()
+            }
+            ScenesMsg::TogglePlayNext => {
+                self.play_next = !self.play_next;
+                Step::none()
             }
             ScenesMsg::Scrolled { y } => {
                 self.scroll = y;
@@ -661,6 +875,7 @@ impl ScenesState {
                 self.scroll = 0.0;
                 self.focused = None;
                 self.refreshing = false;
+                self.results_changed();
                 Step::effects(self.load())
             }
             ScenesMsg::DismissLeftOut => {
@@ -680,6 +895,10 @@ impl ScenesState {
         let count = self.cards().len();
         if count == 0 {
             return Vec::new();
+        }
+        if self.mode == Mode::Queue {
+            // The list's arrows move the queue's selection (010 R3).
+            return self.queue_select(index, Via::Keyboard, layout).effects;
         }
         let index = index.min(count - 1);
         self.focused = Some(index);
@@ -710,6 +929,13 @@ impl ScenesState {
             GridAction::Page(PageDirection::Next) => Step::effects(self.go_to_page(self.page + 1)),
             GridAction::Page(PageDirection::Previous) => {
                 Step::effects(self.go_to_page(self.page.saturating_sub(1)))
+            }
+            // Enter plays the queue's selection (010 R5); Ctrl+Enter still opens a new tab.
+            GridAction::Open {
+                index,
+                new_tab: false,
+            } if self.mode == Mode::Queue => {
+                self.update(ScenesMsg::QueuePlay(index), self.tab, layout)
             }
             GridAction::Open { index, new_tab } => {
                 self.update(ScenesMsg::Open { index, new_tab }, self.tab, layout)
@@ -742,6 +968,31 @@ impl ScenesState {
                 };
                 self.loaded = generation;
                 let mut effects = Vec::new();
+                if self.mode == Mode::Queue {
+                    if self.cards().is_empty() {
+                        self.queue.clear();
+                    } else {
+                        // Play next, Next, or Previous crossed into this page: play its first
+                        // or last card (010 R4).
+                        let pending = std::mem::take(&mut self.queue.pending_play);
+                        let last = self.cards().len() - 1;
+                        let (start, via) = match pending {
+                            PendingPlay::First => (0, Via::Pointer),
+                            PendingPlay::Last => (last, Via::Pointer),
+                            PendingPlay::None => (self.queue_start(), Via::Keyboard),
+                        };
+                        effects.extend(self.queue.select(
+                            start,
+                            via,
+                            cards_of(&self.data),
+                            self.tab,
+                        ));
+                        self.sync_queue_selection();
+                        if pending != PendingPlay::None {
+                            self.play_due = self.queue_selected.clone();
+                        }
+                    }
+                }
                 if !refreshing {
                     effects.push(self.scroll_to(self.scroll));
                 }

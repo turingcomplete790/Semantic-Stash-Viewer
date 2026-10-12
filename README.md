@@ -10,7 +10,8 @@ Jellyfin server.
 > **Status:** pre-alpha. Saved servers with automatic reconnection and a connection-security
 > indicator; a Stash-style navigation bar with tabs that never reset and come back exactly after
 > a restart; the whole scene library as a paged grid, list, or wall in every web UI sort, with
-> search, every web UI filter, saved and default filters, and animated previews on hover; the full
+> search, every web UI filter, saved and default filters, and animated previews on hover; a queue
+> view that plays a run of scenes beside the list, the next one starting as each ends; the full
 > scene page (performers, tags marked by semantic type and coloured by rules you set, groups,
 > markers, files, galleries); mpv playback inside the window with resume, markers as chapters,
 > seek-bar thumbnails, play history saved to Stash, and an explicit transcode fallback; a
@@ -91,6 +92,9 @@ from inside the app. If you used the earlier web demo, its `semantic-stash-viewe
 - Alt+←/→ (or the mouse's back and forward buttons) to go back and forward
 - In Scenes: arrows, Home/End, `[` `]` for pages, Enter to open, Ctrl+Enter in a new tab, `/`
   to search, F for the filter menu, S for saved filters
+- In the queue view: ↑/↓, Home/End, `[` `]` move through the list and Enter plays (with the list
+  focused), F6 moves between the list and the panel, N / P play the next / previous scene, A
+  turns Play next on or off, O opens the scene's page (Ctrl+O in a new tab)
 - In the player: Space, ←/→, ↑/↓, `[` `]` `\`, `.` `,`, F, M, Esc, PageUp/PageDown for the
   previous/next chapter (scene markers)
 - F1 or `?` lists every shortcut
@@ -122,7 +126,8 @@ doing one thing, in the two crates that need it (`player`, `native-ui`); none in
 
 Measures every budget from the constitution against one of your saved servers: cold start,
 navigation, control presses, tab switching with a video playing, Scenes paging and 1000-card
-scrolling (grid, list, and wall), card previews, pickers, playback (open, seek, dropped and
+scrolling (grid, list, wall, and queue), the queue view (choosing a row, a scene's end to the
+next playing), card previews, pickers, playback (open, seek, dropped and
 displayed frames), memory and CPU, and the requests each action sends to Stash against its
 budget (the `gql-*` rows):
 

@@ -178,3 +178,29 @@ fn a_filtered_scenes_tab_round_trips_without_a_request() {
     assert_eq!((back.page, back.page_size), (4, 120));
     assert_eq!(back.scroll, 640.0);
 }
+
+/// 010 T007: a session from 008 (no queue fields) loads with Play next on and no selection, and
+/// a Queue tab round-trips its mode, selection, and Play next.
+#[test]
+fn queue_fields_are_additive() {
+    use semantic_stash_viewer_native::screens::ScenesState;
+    let mut value = serde_json::to_value(ScenesState::default()).expect("serialise");
+    let map = value.as_object_mut().expect("an object");
+    map.remove("queue_selected");
+    map.remove("play_next");
+    let old: ScenesState = serde_json::from_value(value).expect("a 008 tab loads");
+    assert!(old.play_next, "Play next defaults to on");
+    assert_eq!(old.queue_selected, None);
+
+    let mut queue = ScenesState::default();
+    queue.mode = Mode::Queue;
+    queue.queue_selected = Some("42".into());
+    queue.play_next = false;
+    let json = serde_json::to_string(&queue.persistent()).expect("serialise");
+    let back: ScenesState = serde_json::from_str(&json).expect("parse");
+    assert_eq!(
+        (back.mode, back.queue_selected.as_deref(), back.play_next),
+        (Mode::Queue, Some("42"), false)
+    );
+    assert_eq!(VERSION, 2, "no version bump");
+}

@@ -18,6 +18,26 @@ pub const SCROLLBAR: f32 = 12.0;
 pub const CARD_TEXT: f32 = 52.0;
 /// A row in the list.
 pub const LIST_ROW: f32 = 76.0;
+/// A row in the queue's list (010): a small still, title, and details line.
+pub const QUEUE_ROW: f32 = 60.0;
+/// The queue's list is a third of the window, at least this wide (010 research R7).
+pub const QUEUE_LIST_MIN: f32 = 300.0;
+/// The queue's panel is at least this wide with its details.
+pub const QUEUE_PANEL_MIN: f32 = 480.0;
+/// Below this, the panel has no room even for the player or cover.
+pub const QUEUE_MEDIA_MIN: f32 = 240.0;
+
+/// What fits of the queue view in the window (010 R7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueueFit {
+    /// The list and the whole panel.
+    Both,
+    /// The list and the panel's player or cover, no details.
+    MediaOnly,
+    /// The list alone: choosing a scene opens its page.
+    ListOnly,
+}
+
 /// The navigation bar, the tab strip, and the page controls above the grid.
 pub const ABOVE: f32 = 88.0 + 52.0;
 
@@ -67,9 +87,35 @@ impl Layout {
         (self.width - 2.0 * PAD - SCROLLBAR).max(MIN_CARD)
     }
 
+    /// How much of the queue view fits.
+    pub fn queue_fit(&self) -> QueueFit {
+        if self.width >= QUEUE_LIST_MIN + QUEUE_PANEL_MIN {
+            QueueFit::Both
+        } else if self.width >= QUEUE_LIST_MIN + QUEUE_MEDIA_MIN {
+            QueueFit::MediaOnly
+        } else {
+            QueueFit::ListOnly
+        }
+    }
+
+    /// The queue's list width: a third of the window, at least its minimum; all of it when the
+    /// panel doesn't fit.
+    pub fn queue_list_width(&self) -> f32 {
+        match self.queue_fit() {
+            QueueFit::Both => (self.width / 3.0).max(QUEUE_LIST_MIN),
+            QueueFit::MediaOnly => QUEUE_LIST_MIN,
+            QueueFit::ListOnly => self.width,
+        }
+    }
+
+    /// The queue's panel width (0 when it doesn't show).
+    pub fn queue_panel_width(&self) -> f32 {
+        (self.width - self.queue_list_width()).max(0.0)
+    }
+
     pub fn cols(&self, mode: Mode) -> usize {
         match mode {
-            Mode::List => 1,
+            Mode::List | Mode::Queue => 1,
             Mode::Grid => {
                 (((self.content_width() + GAP) / (MIN_CARD + GAP)).floor() as usize).max(1)
             }
@@ -83,7 +129,7 @@ impl Layout {
     pub fn gap(&self, mode: Mode) -> f32 {
         match mode {
             Mode::Wall => WALL_GAP,
-            Mode::Grid | Mode::List => GAP,
+            Mode::Grid | Mode::List | Mode::Queue => GAP,
         }
     }
 
@@ -114,6 +160,7 @@ impl Layout {
         match mode {
             Mode::Grid => self.thumb_height() + CARD_TEXT + GAP,
             Mode::List => LIST_ROW + GAP / 2.0,
+            Mode::Queue => QUEUE_ROW + GAP / 2.0,
             Mode::Wall => self.wall_height() + WALL_GAP,
         }
     }
@@ -157,5 +204,34 @@ impl Layout {
         let first = visible.saturating_sub(1);
         let end = (visible + in_view + 1).min(rows);
         (first.min(end), end)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_queue_list_is_a_third_with_minimums() {
+        let wide = Layout::new(1800.0, 1000.0);
+        assert_eq!(wide.queue_fit(), QueueFit::Both);
+        assert_eq!(wide.queue_list_width(), 600.0);
+        assert_eq!(wide.queue_panel_width(), 1200.0);
+        // A third would be under the list's minimum: it keeps the minimum.
+        let small = Layout::new(800.0, 700.0);
+        assert_eq!(small.queue_fit(), QueueFit::Both);
+        assert_eq!(small.queue_list_width(), QUEUE_LIST_MIN);
+        assert!(small.queue_panel_width() >= QUEUE_PANEL_MIN);
+    }
+
+    #[test]
+    fn a_narrow_window_drops_the_details_then_the_panel() {
+        let narrow = Layout::new(640.0, 700.0);
+        assert_eq!(narrow.queue_fit(), QueueFit::MediaOnly);
+        assert_eq!(narrow.queue_list_width(), QUEUE_LIST_MIN);
+        let tiny = Layout::new(500.0, 700.0);
+        assert_eq!(tiny.queue_fit(), QueueFit::ListOnly);
+        assert_eq!(tiny.queue_list_width(), 500.0);
+        assert_eq!(tiny.queue_panel_width(), 0.0);
     }
 }
