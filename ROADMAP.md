@@ -1,8 +1,9 @@
 # Roadmap
 
 This roadmap orders the work to build Semantic Stash Viewer. It starts with a read-only viewer,
-adds editing, then covers the rest of the Stash web UI, and finally brings over the
-`semantic-tagging` plugin's features. Every phase must follow the
+adds editing, then covers the rest of the Stash web UI, and finally builds the semantic model the
+`semantic-tagging` plugin's design documents describe, on an embedded semantic engine
+(constitution Principles II and XII). Every phase must follow the
 [constitution](.specify/memory/constitution.md).
 
 Each checkbox group is meant to become one or more Spec Kit features
@@ -17,8 +18,8 @@ Each checkbox group is meant to become one or more Spec Kit features
 | 1 | Browse & play | The app shell (navigation bar, tabs, notifications), then read-only browsing of the whole library, with mpv playback |
 | 2 | Tags & editing | Everyday editing: tags, metadata, ratings, markers |
 | 3 | Advanced Stash features | Scrapers, StashBox, tasks, and settings. Full web UI parity (Principle VIII) |
-| 4 | Semantic tagging | Parity with the semantic-tagging plugin (Principle II) |
-| 5 | Semantic query engine | Follows the plugin's own roadmap: query language, CONSTRUCT, rules |
+| 4 | Semantic engine & tagging | The semantic model from the plugin's design documents, built on an embedded engine (Principles II, XII) |
+| 5 | Semantic query language | The engine's query language for users: search bar, Matrix as a query producer, CONSTRUCT, rules |
 
 **Platform (2026-10-05):** features 001–005 were first built as a Tauri/SolidJS app. Feature 007
 ([specs/007-port-to-iced](specs/007-port-to-iced/)) rebuilt everything natively in Rust with
@@ -100,6 +101,8 @@ mpv.
 - [x] Queue view: the list on one side and the selected scene's player and details on the
       other, so a run of scenes can be clicked through without leaving the list, with Play next
       across pages and full keyboard operation (010)
+- [ ] Queue autoplay and loop: clicking a scene plays it, the queue view starts playing on its
+      own, and the queue loops back to page 1 after its last scene (011, specified)
 
 ### Images
 - [ ] Image grid (sized thumbnails), filters, and sorting
@@ -235,92 +238,121 @@ reason, per Principle VIII.
 
 ---
 
-## Phase 4: Semantic tagging (plugin parity)
+## Phase 4: Semantic engine & tagging
 
-**Goal:** bring every feature of `~/Projects/Stash-Plugins/semantic-tagging/` over, reading and
-writing the same data so the plugin and the viewer can safely be used on the same library
-(Principle II). Each spec names the plugin module it mirrors.
+**Goal:** build the semantic model that the `semantic-tagging` plugin's design documents describe
+(`README.md`, `semantic-query-engine-roadmap.md`, `archetype-system-plan.md` in
+`~/Projects/Stash-Plugins/semantic-tagging/`) on an embedded semantic engine (Principle XII), reading
+and writing the same Stash data as the plugin so both can be used on the same library (Principle
+II). The plugin's JavaScript is not ported: each spec cites the document sections it builds on and
+the plugin commit (or date) it read them at, and every semantic feature is a query or rule on the
+engine, not a hand-written filter.
 
-### 4a: Semantic core (Rust)
-- [ ] Vocabulary: a port of `src/semantic/vocabulary.js` (classes, predicates, scope annotations)
-- [ ] Semantic parsing of `custom_fields` for Tags, Scenes, Images, and Performers, following
-      `src/semantic/engine.js`
-- [ ] Semantic index and graph with reverse indexes, following `src/semantic/graph.js`
-- [ ] Bounded vocabulary discovery: flag-filtered tag queries only, never loading every tag
-      (Principle IV)
-- [ ] Compatibility fixtures: data captured from a library tagged by the plugin must round-trip
-      through the viewer unchanged
+The documents' own engine plan (`semantic-query-engine-roadmap.md`, "Target Architecture" and
+Where To Start Steps 4–6: the semantic index, Traqula as parser and algebra, a hand-written
+evaluator) maps onto the viewer like this: Oxigraph provides the parsing, algebra, and evaluation,
+and the engine's graph is the semantic index.
 
-### 4b: Tagging dimensions
-- [ ] Pluggables: per scene/image, per performer (`src/ui/pluggables.js`)
-- [ ] Actions with variations, own and inherited (`src/ui/actions.js`)
-- [ ] Roles with categories (`src/ui/roles.js`)
-- [ ] Traits: performer-global, curated, with categories and variations (`src/ui/traits.js`)
-- [ ] Labels: computed from Field Rules and label formulas (`src/ui/labels.js`)
+### 4a: Semantic engine (foundation; 009, specified)
+- [ ] Oxigraph embedded in the core behind a semantic-engine interface (Redland as the fallback,
+      only by a constitution amendment recording why), running in-process
+- [ ] The semantic graph built from Stash with the documents' vocabulary ("Core Design
+      Decisions §2: The semantic graph is the abstraction boundary" and its "Vocabulary
+      corrections"; Milestone 1D for Variations and Labels): Scene and Image media entities,
+      performers, the six flagged tag types plus Variations, reified Role and Action instances,
+      tag categories and variations, parent tags, Label formulas, archetype parents
+- [ ] The data contract read exactly as the documents define it: per-type tag flags (`plugtag`,
+      `isAction`, `isRole`, `isTrait`, `isLabel`, `isMiseEnScene`, `isVariation`), `variantOfTagId`,
+      scene- and image-scoped assignments, performer-global Traits and Labels
+- [ ] Bounded, flag-filtered discovery: only the semantic vocabulary is fetched ("Performance
+      Strategy: Preserve the lessons from the existing plugin"; Principle IV). Started in
+      [specs/008-finish-browse-play](specs/008-finish-browse-play/) (the flag-filtered semantic
+      vocabulary and colour rules)
+- [ ] SPARQL `SELECT` over the graph: triple patterns, variables, joins, projection, basic
+      filters ("Query Features: Phase 1 — Minimal"; Milestone 2), with the documents' scoping
+      rules enforced (scene-scoped predicates only join within one scene)
+- [ ] A derived index (Principle I): built off the UI thread, the first build showing progress
+      and cancellable, kept current incrementally as Stash changes, safe to delete
+- [ ] The engine's on-disk store as a cache: one per server profile, in the cache folder, rebuilt
+      when missing, damaged, or from an older format, and cleared with the other caches
+- [ ] Compatibility fixtures: data captured read-only from a library tagged by the plugin gives
+      the same graph, and round-trips through the viewer unchanged
+
+### 4b: Tagging dimensions (engine clients; README §Features; Milestone 1D)
+- [ ] Pluggables: per scene/image, and per Variation (Milestone 1D §3)
+- [ ] Actions with variations, own and inherited
+- [ ] Roles with categories
+- [ ] Traits: performer-global, curated, with categories and variations
+- [ ] Labels: computed from their formula (Trait, Field, and Label-dependency rules with weights
+      and a threshold; Milestone 1D §3), with "why does this performer have this Label?" answered
+      by the engine
 - [ ] Mise-en-scène: scene/image only, with categories and variations
-      (`src/ui/mise-en-scene.js`)
+- [ ] Variations as real tags (`isVariation`), replacing Looks: a performer's Variations and the
+      Pluggables they carry (Milestone 1D §2, §4)
 - [ ] Performer-to-performer pairings for Roles and Actions
-- [ ] Looks: saved Trait/Pluggable combinations applied to a performer
-- [ ] Performer card badges and tag-chip colour-coding by category
-- [ ] Tag metadata management pages for each dimension (`src/ui/tag-metadata.js`)
+- [ ] Performer card badges by semantic type and category. Tag-chip colours by flag rules are
+      done ([specs/008-finish-browse-play](specs/008-finish-browse-play/), Principle XI); colours
+      by category, if wanted, extend the rules
+- [ ] Tag metadata management pages for each dimension (README §Features)
 
-### 4c: Timeline
+### 4c: Timeline (README §Features)
 - [ ] Timeline editor: Action and Role instances at timestamps, integrated with mpv playback
-      (`src/ui/timeline.js`)
 - [ ] Stages: scene headings carrying Mise-en-scène tags that apply to the slots after them
 - [ ] Generating Stash markers from timeline slots, including the active stage's tags
 - [ ] Timeline slots and Stages shown as mpv chapters
 
-### 4d: Archetypes
-- [ ] Archetype index: parents-only DAG with nearest-ancestor-wins inherited recipes
-      (`src/archetypes/index.js`)
-- [ ] Bank manager: creating and configuring archetypes and their recipes and parents
-      (`src/ui/archetypes.js`)
+### 4d: Archetypes (`archetype-system-plan.md`; Milestones 1B and 1D §1)
+- [ ] Archetypes as performers with parents-only adjacency, and nearest-ancestor-wins inherited
+      recipes computed by the engine (§Data model, §Hierarchy index)
+- [ ] Bank manager: creating and configuring archetypes, their recipes, and parents (§Bank
+      manager UI)
 - [ ] Hierarchy graph editor: node/edge DAG, link editing, saved node positions
-      (`src/ui/archetype-hierarchy-graph.js`)
-- [ ] Scene/image archetype quick-add (`src/ui/archetype-quick-add.js`)
-- [ ] Applying an archetype to a regular performer, with precise re-apply reconciliation
-      (`src/ui/archetype-apply.js`)
+- [ ] Scene/image archetype quick-add
 - [ ] Archetype Compare (union/intersect)
+- (Applying an archetype to a regular performer was removed by Milestone 1D §1.)
 
-### 4e: Tag recommendations & common variants
+### 4e: Tag recommendations & common variants (Milestone 1C)
 - [ ] Marking common variants (`variantOfTagId`) against canonical tags
-- [ ] Recommendations in assignment dropdowns and the Stage picker
+- [ ] Recommendations in assignment dropdowns and the Stage picker, as engine queries
 
-### 4f: Semantic search
+### 4f: Semantic search (README §Features)
 - [ ] Semantic Search Matrix: Side A/B criteria, Mise-en-scène filter, timeline relation
-      constraints, recursive archetype filter, results for both scenes and images
-      (`src/ui/matrix.js`)
-- [ ] Quick Pairings
-- [ ] Graph Query Preview (SELECT/WHERE/FILTER against the local index)
-- [ ] Gallery results view and a native image deck with scene playback in mpv (replacing the
-      plugin's `src/image-deck/` and video.js player)
+      constraints, recursive archetype filter, results for both scenes and images; each search an
+      engine query
+- [ ] Quick Pairings, as an engine query
+- [ ] A query preview panel: shows the `SELECT` a search runs and its bindings (the documents'
+      "Graph Query Preview"; the query language itself is 4a)
+- [ ] Gallery results view and the Image Deck viewer (README §Features), on mpv
 
-**Exit criteria:** for the same library, the viewer and the plugin show the same semantic data
-and return the same search results. Editing in one is immediately valid in the other.
+**Exit criteria:** the viewer reads and writes the same data contract as the plugin, so both are
+safe on the same library at once, and for the same library state it gives the answers the design
+documents define. Where the plugin's current code answers differently, the difference is
+reported to the plugin rather than copied.
 
-**Suggested specs:** `semantic-core`, `semantic-tagging-dimensions`, `semantic-timeline`,
-`archetypes`, `tag-recommendations`, `semantic-search-matrix`, `image-deck`
+**Suggested specs:** `semantic-engine` (4a, first), `semantic-tagging-dimensions`,
+`semantic-timeline`, `archetypes`, `tag-recommendations`, `semantic-search-matrix`, `image-deck`
 
 ---
 
-## Phase 5: Semantic query engine (following the plugin roadmap)
+## Phase 5: Semantic query language (the documents' Milestones 3–8)
 
-**Goal:** keep pace with the plugin's `semantic-query-engine-roadmap.md`. The plugin is still
-the reference implementation (Principle II), so these items are built alongside the plugin, or
-right after it, so that both give the same results.
+**Goal:** give users the engine's query language, following the query-engine roadmap in the
+plugin's design documents (the documents are the reference, Principle II). Each item extends the
+4a engine; none adds a second matching path.
 
-- [ ] Query language: SPARQL-inspired SELECT, triple patterns, variables, joins, projection,
-      filters (plugin Milestone 2)
-- [ ] General semantic search bar with query errors and result bindings (plugin Milestone 3)
+- [ ] General semantic search bar with query errors and result bindings (Milestone 3)
 - [ ] Matrix as a query producer: Matrix state translated into query patterns, with one shared
-      matching path (plugin Milestone 4)
+      matching path (Milestone 4)
+- [ ] Boolean logic and more SPARQL constructs in user queries ("Query Features: Phase 2 —
+      Boolean logic", "Phase 3 — More SPARQL-style constructs")
 - [ ] CONSTRUCT: previewing derived facts and applying derived tags through Stash, with
-      provenance recorded (plugin Milestone 5)
+      provenance recorded (Milestone 5)
 - [ ] Saved queries and rules: rule management, manual or scheduled runs, explaining derived
-      tags (plugin Milestone 6)
-- [ ] Optimization: evaluator profiling, join ordering, query caching, memory footprint (plugin
-      Milestone 7). The Rust core may reach this sooner than the JS plugin.
+      tags (Milestone 6)
+- [ ] Optimization: profiling, join ordering, query caching, memory footprint (Milestone 7);
+      much of it comes with the engine
+- [ ] Optional extraction (Milestone 8): not planned for a native app, whose engine is already
+      an independent core module; revisit only if a second client needs the engine
 
 ---
 
@@ -328,7 +360,8 @@ right after it, so that both give the same results.
 
 - Tick items off when their spec is implemented, and link the spec folder (`specs/NNN-name/`)
   next to the item.
-- When the semantic-tagging plugin adds a feature, add it to Phase 4 or 5 (Principle II).
+- When the semantic-tagging plugin's design documents add or change a feature or data structure,
+  update Phase 4 or 5 and note the plugin commit read (Principle II).
 - When a new stable Stash release adds a web UI capability, add it to the relevant phase
   (Principle VIII).
 - Reordering phases is fine. Changes that conflict with the constitution need a constitution
