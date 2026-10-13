@@ -522,6 +522,48 @@ impl Shell {
         }
     }
 
+    /// The looping image `id` started over in tab `tab`'s viewer.
+    pub fn image_looped(&mut self, tab: TabId, id: &str) -> Step<Up> {
+        let active = self.index_of(tab) == Some(self.selected);
+        match self.viewer_in(tab, id) {
+            Some(s) if active => {
+                let step = s.image_looped(id);
+                self.images_up(step)
+            }
+            _ => Step::none(),
+        }
+    }
+
+    /// A slideshow timer came due in tab `tab`; a tab out of sight pauses its slideshow (only
+    /// the tab on screen moves the player).
+    pub fn slideshow_due(
+        &mut self,
+        tab: TabId,
+        generation: u64,
+        due: crate::screens::images::viewer::SlideDue,
+    ) -> Step<Up> {
+        let Some(i) = self.index_of(tab) else {
+            return Step::none();
+        };
+        let active = i == self.selected;
+        let Some(s) = self.tabs[i]
+            .history
+            .iter_mut()
+            .find_map(|screen| match screen {
+                Screen::Images(s) if s.awaits_slideshow(generation) => Some(&mut **s),
+                _ => None,
+            })
+        else {
+            return Step::none();
+        };
+        let step = if active {
+            s.slideshow_due(generation, due)
+        } else {
+            s.pause_slideshow()
+        };
+        self.images_up(step)
+    }
+
     /// A scene took the player: every open viewer closes (one player, 012 FR-019).
     pub fn close_viewers(&mut self) -> Vec<Effect> {
         let mut effects = Vec::new();

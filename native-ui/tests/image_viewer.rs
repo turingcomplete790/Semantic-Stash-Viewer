@@ -358,3 +358,173 @@ fn backspace_on_the_first_image_closes() {
     press(&mut s, Key::Named(Named::Backspace));
     assert!(images(&s).viewer.is_none());
 }
+
+// ---- 012 US3: the slideshow, looping images, card previews ------------------------------------
+
+use semantic_stash_viewer_native::screens::images::viewer::SlideDue;
+
+fn timers(effects: &[Effect]) -> Vec<(u64, SlideDue, std::time::Duration)> {
+    effects
+        .iter()
+        .filter_map(|e| match e {
+            Effect::SlideshowDue {
+                generation,
+                due,
+                after,
+                ..
+            } => Some((*generation, *due, *after)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn due(s: &mut Session, generation: u64, due: SlideDue) -> Vec<Effect> {
+    let tab = s.shell.active().id;
+    s.update(Msg::Reply(Reply::SlideshowDue {
+        tab,
+        generation,
+        due,
+    }))
+    .effects
+}
+
+fn playing_at(position: f64) -> Msg {
+    Msg::Playback(playback::Msg::Snapshot(PlayerSnapshot {
+        state: PlayerStateKind::Playing,
+        position_seconds: position,
+        ..PlayerSnapshot::default()
+    }))
+}
+
+#[test]
+fn p_starts_a_slideshow_that_moves_on_at_its_delay() {
+    let mut s = session();
+    open_at(&mut s, 10);
+    let effects = press(&mut s, Key::Character("p".into()));
+    let t = timers(&effects);
+    assert_eq!(t.len(), 1);
+    assert_eq!(
+        (t[0].1, t[0].2),
+        (SlideDue::Tick, std::time::Duration::from_secs(5))
+    );
+    assert!(effects
+        .iter()
+        .any(|e| matches!(e, Effect::PrefetchImageFiles(ids) if ids == &["11", "12"])));
+    let effects = due(&mut s, t[0].0, SlideDue::Tick);
+    assert_eq!(opens(&effects), vec![("11".to_owned(), false)]);
+    let next = timers(&effects);
+    assert_eq!(next.len(), 1, "the next image is timed");
+    // An older timer does nothing.
+    assert!(opens(&due(&mut s, t[0].0, SlideDue::Tick)).is_empty());
+
+    // A step by hand pauses it: its timer does nothing, and P resumes.
+    let _ = press(&mut s, Key::Named(Named::ArrowRight));
+    assert!(opens(&due(&mut s, next[0].0, SlideDue::Tick)).is_empty());
+    let effects = press(&mut s, Key::Character("p".into()));
+    assert_eq!(timers(&effects).len(), 1);
+}
+
+#[test]
+fn the_brackets_change_the_delay_and_save_it() {
+    let mut s = session();
+    open_at(&mut s, 0);
+    let effects = press(&mut s, Key::Character("]".into()));
+    assert!(effects
+        .iter()
+        .any(|e| matches!(e, Effect::SavePlaybackPreferences(p) if p.slideshow_delay_s == 6)));
+    let effects = press(&mut s, Key::Character("p".into()));
+    assert_eq!(timers(&effects)[0].2, std::time::Duration::from_secs(6));
+    for _ in 0..10 {
+        let _ = press(&mut s, Key::Character("[".into()));
+    }
+    assert_eq!(s.prefs.slideshow_delay_s, 1, "never under a second");
+}
+
+#[test]
+fn a_looping_image_waits_for_its_loop_after_the_delay() {
+    let mut s = session();
+    open_at(&mut s, 3);
+    let _ = s.update(snapshot(PlayerStateKind::Loading));
+    let _ = s.update(playing_at(0.0));
+    let effects = press(&mut s, Key::Character("p".into()));
+    let (generation, ..) = timers(&effects)[0];
+    // A loop before the delay doesn't count.
+    let _ = s.update(playing_at(0.4));
+    assert!(opens(&s.update(playing_at(0.0)).effects).is_empty());
+    // The delay passes: it waits for the loop, at most 60 s from its start.
+    let effects = due(&mut s, generation, SlideDue::Tick);
+    assert!(opens(&effects).is_empty());
+    let cap = timers(&effects);
+    assert_eq!(
+        (cap[0].1, cap[0].2),
+        (SlideDue::LoopCap, std::time::Duration::from_secs(55))
+    );
+    let _ = s.update(playing_at(0.4));
+    let effects = s.update(playing_at(0.01)).effects;
+    assert_eq!(opens(&effects), vec![("4".to_owned(), false)]);
+}
+
+#[test]
+fn a_looping_image_moves_on_at_the_cap_without_a_loop() {
+    let mut s = session();
+    open_at(&mut s, 3);
+    let _ = s.update(snapshot(PlayerStateKind::Loading));
+    let _ = s.update(playing_at(0.0));
+    let effects = press(&mut s, Key::Character("p".into()));
+    let (generation, ..) = timers(&effects)[0];
+    let effects = due(&mut s, generation, SlideDue::Tick);
+    let (cap, ..) = timers(&effects)[0];
+    let effects = due(&mut s, cap, SlideDue::LoopCap);
+    assert_eq!(opens(&effects), vec![("4".to_owned(), false)]);
+}
+
+#[test]
+fn a_slideshow_in_a_tab_out_of_sight_pauses() {
+    let mut s = session();
+    open_at(&mut s, 0);
+    let tab = s.shell.active().id;
+    let effects = press(&mut s, Key::Character("p".into()));
+    let (generation, ..) = timers(&effects)[0];
+    let _ = s.update(Msg::Shell(ShellMsg::NewTab));
+    let effects = s
+        .update(Msg::Reply(Reply::SlideshowDue {
+            tab,
+            generation,
+            due: SlideDue::Tick,
+        }))
+        .effects;
+    assert!(opens(&effects).is_empty());
+    let back = s.shell.tabs.iter().find(|t| t.id == tab).expect("tab");
+    let Screen::Images(i) = back.current() else {
+        panic!("Images")
+    };
+    assert!(i
+        .viewer
+        .as_ref()
+        .and_then(|v| v.machine.slideshow)
+        .is_some_and(|s| s.paused));
+}
+
+#[test]
+fn an_animated_cards_hover_previews_its_own_file() {
+    use semantic_stash_viewer_native::screens::browse::state::BrowseMsg;
+    let mut s = session();
+    let hover = |i: usize| Msg::Shell(ShellMsg::Images(ImagesMsg::List(BrowseMsg::Hover(i))));
+    // A still card: nothing.
+    assert!(s.update(hover(2)).effects.is_empty());
+    // The animated card (3): a rest, then its preview loads as an image's.
+    let effects = s.update(hover(3)).effects;
+    let Some(Effect::PreviewDue { generation, .. }) = effects.first().cloned() else {
+        panic!("a rest: {effects:?}")
+    };
+    let effects = s.update(Msg::Reply(Reply::PreviewDue(generation))).effects;
+    assert!(
+        effects
+            .iter()
+            .any(|e| matches!(e, Effect::LoadPreview { scene_id, .. } if scene_id == "image:3")),
+        "{effects:?}"
+    );
+    // Opening the viewer drops it.
+    let effects = open_at(&mut s, 3);
+    assert!(effects.contains(&Effect::StopPreview));
+}

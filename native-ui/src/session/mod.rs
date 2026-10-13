@@ -213,20 +213,30 @@ impl Session {
             }
     }
 
-    /// What became of an image open goes to the viewer that asked (012).
-    fn image_events(&mut self) {
-        let (Some(event), Some(owner)) = (self.playback.take_image_event(), self.playback.owner)
-        else {
-            return;
+    /// What became of the image shown goes to the viewer that asked (012); a loop may move its
+    /// slideshow on.
+    fn image_events(&mut self) -> Step<Up> {
+        let events = self.playback.take_image_events();
+        let Some(owner) = self.playback.owner else {
+            return Step::none();
         };
-        match event {
-            playback::ImageEvent::Shown { id, picture } => {
-                self.shell.image_shown(owner, &id, picture);
-            }
-            playback::ImageEvent::Failed { id, reason } => {
-                self.shell.image_failed(owner, &id, reason);
+        let mut out = Step::none();
+        for event in events {
+            match event {
+                playback::ImageEvent::Shown { id, picture } => {
+                    self.shell.image_shown(owner, &id, picture);
+                }
+                playback::ImageEvent::Failed { id, reason } => {
+                    self.shell.image_failed(owner, &id, reason);
+                }
+                playback::ImageEvent::Looped { id } => {
+                    let Step { effects, up } = self.shell.image_looped(owner, &id);
+                    let step = self.shell_up(Step::effects(effects), up);
+                    out = out.with_all(step.effects);
+                }
             }
         }
+        out
     }
 
     /// Tab `tab`'s Scenes screen, if it shows the queue view.
@@ -496,24 +506,44 @@ impl Session {
         // The viewer's input (pointer movement among it) skips the grid's work below; a wheel
         // turn zooms with Ctrl held (012).
         if let ShellMsg::Images(ImagesMsg::Viewer(m)) = msg {
+            use crate::screens::images::ViewerMsg as V;
             let m = match m {
-                crate::screens::images::ViewerMsg::Wheel { y, .. } => {
-                    crate::screens::images::ViewerMsg::Wheel {
-                        y,
-                        ctrl: self.modifiers.control(),
-                    }
+                V::Wheel { y, .. } => V::Wheel {
+                    y,
+                    ctrl: self.modifiers.control(),
+                },
+                // The slideshow starts at the preference's delay.
+                V::Event(stash_core::images::viewer::Event::ToggleSlideshow { .. }) => {
+                    V::Event(stash_core::images::viewer::Event::ToggleSlideshow {
+                        delay_s: self.prefs.slideshow_delay_s,
+                    })
                 }
                 other => other,
             };
             let Step { effects, up } = self.shell.update(ShellMsg::Images(ImagesMsg::Viewer(m)));
             return self.shell_up(Step::effects(effects), up);
         }
-        // Image cards have no preview yet (US3).
-        if let ShellMsg::Images(ImagesMsg::List(BrowseMsg::Hover(_) | BrowseMsg::HoverEnd(_))) = msg
+        // An animated image's card previews its own file (012 FR-016); stills and clips keep
+        // theirs.
+        if let ShellMsg::Images(ImagesMsg::List(
+            BrowseMsg::Hover(index) | BrowseMsg::HoverEnd(index),
+        )) = msg
         {
-            return Step::none();
+            let on = matches!(msg, ShellMsg::Images(ImagesMsg::List(BrowseMsg::Hover(_))));
+            let Some(key) = self.image_preview_key(index) else {
+                return Step::none();
+            };
+            return Step::effects(if on {
+                self.previews.enter(key, true)
+            } else {
+                self.previews.left(&key)
+            });
         }
-        let scrolled = if matches!(msg, ShellMsg::Scenes(ScenesMsg::Scrolled { .. })) {
+        let scrolled = if matches!(
+            msg,
+            ShellMsg::Scenes(ScenesMsg::Scrolled { .. })
+                | ShellMsg::Images(ImagesMsg::List(BrowseMsg::Scrolled { .. }))
+        ) {
             self.previews.scrolled(std::time::Instant::now())
         } else {
             Vec::new()
@@ -551,8 +581,8 @@ impl Session {
         effects.extend(scrolled);
         effects.extend(self.thumbnails());
         effects.extend(self.sync_tag_colours());
-        // Another screen: no cards, so no preview.
-        if self.active_scenes().is_none() {
+        // Another screen (or the image viewer): no cards, so no preview.
+        if !self.cards_showing() {
             effects.extend(self.previews.clear());
         }
         if self.restored {
@@ -794,6 +824,26 @@ impl Session {
                     s.viewer_event(Event::ToggleActual)
                 }
             }),
+            K::Slideshow => {
+                let delay_s = self.prefs.slideshow_delay_s;
+                self.shell
+                    .with_viewer(|s| s.viewer_event(Event::ToggleSlideshow { delay_s }))
+            }
+            K::DelayDown | K::DelayUp => {
+                let step: i64 = if k == K::DelayUp { 1 } else { -1 };
+                let (lo, hi) = (
+                    *stash_core::images::viewer::DELAYS.start(),
+                    *stash_core::images::viewer::DELAYS.end(),
+                );
+                let delay = (i64::from(self.prefs.slideshow_delay_s) + step)
+                    .clamp(i64::from(lo), i64::from(hi)) as u32;
+                let mut prefs = self.prefs;
+                prefs.slideshow_delay_s = delay;
+                self.apply_prefs(prefs);
+                self.shell
+                    .with_viewer(|s| s.viewer_event(Event::SetDelay(delay)))
+                    .with(Effect::SavePlaybackPreferences(prefs))
+            }
             K::Rotate => {
                 let clockwise = !mods.shift();
                 self.shell
@@ -862,6 +912,27 @@ impl Session {
             self.library.want(crate::library::Need::Vocabulary)
         } else {
             Vec::new()
+        }
+    }
+
+    /// Whether the active screen shows cards (Scenes, or Images without its viewer).
+    fn cards_showing(&self) -> bool {
+        match self.shell.active().current() {
+            crate::screens::Screen::Scenes(_) => true,
+            crate::screens::Screen::Images(s) => s.viewer.is_none(),
+            _ => false,
+        }
+    }
+
+    /// Card `index`'s preview key on the active Images screen, if it animates.
+    fn image_preview_key(&self, index: usize) -> Option<String> {
+        use crate::screens::browse::state::Kind;
+        match self.shell.active().current() {
+            crate::screens::Screen::Images(s) if s.viewer.is_none() => s
+                .cards()
+                .get(index)
+                .and_then(crate::screens::images::ImageKind::preview_key),
+            _ => None,
         }
     }
 
@@ -1045,12 +1116,20 @@ impl Session {
                 self.library.saved_loaded(result);
                 Step::none()
             }
+            Msg::Reply(Reply::SlideshowDue {
+                tab,
+                generation,
+                due,
+            }) => {
+                let Step { effects, up } = self.shell.slideshow_due(tab, generation, due);
+                self.shell_up(Step::effects(effects), up)
+            }
             Msg::Reply(Reply::ImageOpened { id, result }) => {
                 if let Err(e) = result {
                     tracing::warn!(error = %e, "couldn't open the image");
                     let reason = crate::messages::for_error(&e).title.to_owned();
                     self.playback.image_open_failed(&id, reason);
-                    self.image_events();
+                    return self.image_events();
                 }
                 Step::none()
             }
@@ -1211,8 +1290,8 @@ impl Session {
                 }
             }
             Msg::Playback(m) => {
-                let effects = self.playback.update(m);
-                self.image_events();
+                let mut effects = self.playback.update(m);
+                effects.extend(self.image_events().effects);
                 self.sync_queue_playing();
                 self.queue_follow();
                 let step = Step::effects(effects);
@@ -1392,15 +1471,21 @@ impl Session {
                 let step = self.key(&key, mods);
                 // The keyboard's card previews as the pointer's does (008 FR-019); the queue's
                 // compact rows don't preview (010).
-                let focused = self
-                    .active_scenes()
-                    .filter(|s| s.mode != Mode::Queue)
-                    .and_then(|s| {
-                        s.focused
-                            .and_then(|i| s.cards().get(i))
-                            .map(|c| (c.id.clone(), true))
-                    });
-                let more = self.previews.focus(focused);
+                let focused = match self.shell.active().current() {
+                    crate::screens::Screen::Scenes(s) if s.mode != Mode::Queue => s
+                        .focused
+                        .and_then(|i| s.cards().get(i))
+                        .map(|c| (c.id.clone(), true)),
+                    crate::screens::Screen::Images(s) if s.viewer.is_none() => s
+                        .focused
+                        .and_then(|i| self.image_preview_key(i))
+                        .map(|k| (k, true)),
+                    _ => None,
+                };
+                let mut more = self.previews.focus(focused);
+                if !self.cards_showing() {
+                    more.extend(self.previews.clear());
+                }
                 step.with_all(more)
             }
             Msg::PreviewFrame(now) => {
@@ -1408,7 +1493,7 @@ impl Session {
                 Step::none()
             }
             Msg::Reply(Reply::PreviewDue(generation)) => {
-                let width = self.shell.layout.card_width().ceil() as u32;
+                let width = self.shell.active_layout().card_width().ceil() as u32;
                 Step::effects(
                     self.previews
                         .due(generation, width, std::time::Instant::now()),
@@ -1564,7 +1649,8 @@ impl Session {
         } else {
             Space::new().into()
         };
-        crate::screens::images::viewer::view(v, picture).map(Msg::Shell)
+        crate::screens::images::viewer::view(v, picture, self.prefs.slideshow_delay_s)
+            .map(Msg::Shell)
     }
 
     /// Whether the viewer's controls are showing and will fade (a timer redraws until then).

@@ -43,8 +43,10 @@ pub struct Playback {
     pub image: Option<String>,
     /// The image open hasn't been answered yet (shown or failed).
     image_pending: bool,
-    /// What happened to the image open, for the session to take.
-    image_event: Option<ImageEvent>,
+    /// What happened to the image shown, for the session to take.
+    image_events: Vec<ImageEvent>,
+    /// The image's last position: going back means a loop finished.
+    image_position: f64,
 }
 
 /// What became of an image open (012).
@@ -58,6 +60,10 @@ pub enum ImageEvent {
     Failed {
         id: String,
         reason: String,
+    },
+    /// A looping image (animated, or a clip) started over (012 FR-015).
+    Looped {
+        id: String,
     },
 }
 
@@ -76,7 +82,8 @@ impl Default for Playback {
             ended: None,
             image: None,
             image_pending: false,
-            image_event: None,
+            image_events: Vec::new(),
+            image_position: 0.0,
         }
     }
 }
@@ -149,7 +156,8 @@ impl Playback {
         self.scene_id = None;
         self.image = Some(id.clone());
         self.image_pending = true;
-        self.image_event = None;
+        self.image_events.clear();
+        self.image_position = 0.0;
         self.failure_posted = false;
         self.ended = None;
         self.screen.chapters.clear();
@@ -161,16 +169,16 @@ impl Playback {
         effects
     }
 
-    /// What became of the image open since the last call, once.
-    pub fn take_image_event(&mut self) -> Option<ImageEvent> {
-        self.image_event.take()
+    /// What became of the image shown since the last call, once each.
+    pub fn take_image_events(&mut self) -> Vec<ImageEvent> {
+        std::mem::take(&mut self.image_events)
     }
 
     /// The image open couldn't be handed to the player.
     pub fn image_open_failed(&mut self, id: &str, reason: String) {
         if self.image.as_deref() == Some(id) {
             self.image_pending = false;
-            self.image_event = Some(ImageEvent::Failed {
+            self.image_events.push(ImageEvent::Failed {
                 id: id.to_owned(),
                 reason,
             });
@@ -269,6 +277,7 @@ impl Playback {
                 let state = s.state;
                 let observed = (s.scene_id.clone(), s.position_seconds, s.duration_seconds);
                 let picture = s.picture;
+                let position = s.position_seconds;
                 // In an image's words (the player's are a video's).
                 let reason = s.error.as_ref().map(|e| match e {
                     player::PlayerError::UnsupportedFormat => {
@@ -288,12 +297,20 @@ impl Playback {
                             if self.image_pending =>
                         {
                             self.image_pending = false;
-                            self.image_event = Some(ImageEvent::Shown { id, picture });
+                            self.image_position = position;
+                            self.image_events.push(ImageEvent::Shown { id, picture });
+                        }
+                        // mpv's loop starts the file over: its position goes back.
+                        PlayerStateKind::Playing => {
+                            if position + 0.05 < self.image_position {
+                                self.image_events.push(ImageEvent::Looped { id });
+                            }
+                            self.image_position = position;
                         }
                         PlayerStateKind::Error if self.image_pending || !self.failure_posted => {
                             self.image_pending = false;
                             self.failure_posted = true;
-                            self.image_event = Some(ImageEvent::Failed {
+                            self.image_events.push(ImageEvent::Failed {
                                 id,
                                 reason: reason
                                     .unwrap_or_else(|| "The file couldn't be read.".into()),

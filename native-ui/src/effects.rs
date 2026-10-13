@@ -131,6 +131,13 @@ pub enum Effect {
     },
     /// Fetch the viewer's neighbours' files to disk (012 R4).
     PrefetchImageFiles(Vec<String>),
+    /// The image slideshow's timer (012 FR-014): report back after `after`.
+    SlideshowDue {
+        tab: TabId,
+        generation: u64,
+        due: crate::screens::images::viewer::SlideDue,
+        after: std::time::Duration,
+    },
     /// The same for neighbours on another page: the cards at `positions` of that page (read
     /// through the cache, where paging's prefetch put it).
     PrefetchPageImageFiles {
@@ -375,6 +382,12 @@ pub enum Reply {
     },
     UiSettings(Result<stash_core::adapter::filters::UiSettings, AppError>),
     SavedFilters(Result<Vec<stash_core::scenes::filter::saved::SavedFilter>, AppError>),
+    /// The slideshow's timer came due (012).
+    SlideshowDue {
+        tab: TabId,
+        generation: u64,
+        due: crate::screens::images::viewer::SlideDue,
+    },
     /// An image open was handed to the player, or couldn't be (012).
     ImageOpened {
         id: String,
@@ -597,6 +610,18 @@ pub fn run(effect: Effect, services: &Arc<Services>, window: Option<window::Id>)
                 |(id, result)| Message::Reply(Reply::ImageOpened { id, result }),
             )
         }
+        Effect::SlideshowDue {
+            tab,
+            generation,
+            due,
+            after,
+        } => Task::perform(tokio::time::sleep(after), move |()| {
+            Message::Reply(Reply::SlideshowDue {
+                tab,
+                generation,
+                due,
+            })
+        }),
         Effect::PrefetchImageFiles(ids) => {
             let services = Arc::clone(services);
             Task::perform(
@@ -1132,7 +1157,12 @@ fn preview_frames(
 ) -> impl iced::futures::Stream<Item = (crate::screens::scenes::preview::Frames, bool)> {
     iced::stream::channel(8, async move |mut out| {
         use iced::futures::SinkExt;
-        let bytes = match services.preview_file(&scene_id).await {
+        // An animated image's preview is its own file (012); a scene's is Stash's WebP.
+        let file = match scene_id.strip_prefix("image:") {
+            Some(image) => services.image_animation_file(image).await,
+            None => services.preview_file(&scene_id).await,
+        };
+        let bytes = match file {
             Ok(Some(bytes)) => bytes,
             Ok(None) => {
                 let _ = out.send((Vec::new(), true)).await;
@@ -1147,7 +1177,7 @@ fn preview_frames(
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let wanted = Arc::clone(&services);
         let decode = tokio::task::spawn_blocking(move || {
-            stash_core::previews::decode_preview_each(&bytes, width, |frame| {
+            stash_core::previews::decode_animation_each(&bytes, width, |frame| {
                 wanted.preview_wanted(generation) && tx.send(frame).is_ok()
             })
         });

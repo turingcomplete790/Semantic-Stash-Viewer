@@ -42,7 +42,23 @@ pub struct ViewerState {
     pub drag: Option<Point>,
     /// The last pointer movement (the controls show for [`CONTROLS_FADE`] after it).
     pub activity: Option<Instant>,
+    /// The slideshow timer in force (an older one coming due does nothing).
+    pub slide_generation: u64,
+    /// The slideshow's delay passed on a looping image: its next loop moves on.
+    pub tick_passed: bool,
 }
+
+/// Which slideshow timer came due.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlideDue {
+    /// The delay passed.
+    Tick,
+    /// A looping image has waited its longest (60 s from its start).
+    LoopCap,
+}
+
+/// A looping image moves on after one loop, but never later than this after it showed.
+pub const LOOP_CAP: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone)]
 pub enum ViewerMsg {
@@ -128,9 +144,23 @@ fn event(e: Event) -> ShellMsg {
     msg(ViewerMsg::Event(e))
 }
 
-/// The top bar: close, position and title, rotate, fit or actual size.
-fn top_bar<'a>(v: &'a ViewerState) -> Element<'a, ShellMsg> {
+/// The top bar: close, position and title, rotate, fit or actual size, and the slideshow with
+/// its delay (`delay_s`: the preference, when none runs).
+fn top_bar<'a>(v: &'a ViewerState, delay_s: u32) -> Element<'a, ShellMsg> {
     let actual = v.machine.view.actual;
+    let running = v.machine.slideshow.is_some_and(|s| !s.paused);
+    let delay = v.machine.slideshow.map_or(delay_s, |s| s.delay_s);
+    let slideshow = button(
+        row![
+            crate::widgets::icon(if running { Icon::Pause } else { Icon::Play }, 14.0),
+            text(format!("{delay}s")).size(13),
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center),
+    )
+    .padding([3, 8])
+    .style(theme::chip)
+    .on_press(event(Event::ToggleSlideshow { delay_s }));
     container(
         row![
             icon_button(Icon::Close, 16.0, Some(msg(ViewerMsg::Close))),
@@ -151,6 +181,7 @@ fn top_bar<'a>(v: &'a ViewerState) -> Element<'a, ShellMsg> {
                 16.0,
                 Some(event(Event::ToggleActual))
             ),
+            slideshow,
         ]
         .spacing(10)
         .padding([6, 10])
@@ -180,7 +211,11 @@ fn edge(which: Icon, enabled: bool, step: Event) -> Element<'static, ShellMsg> {
 }
 
 /// The viewer: `picture` is the player's picture (black when the player shows something else).
-pub fn view<'a>(v: &'a ViewerState, picture: Element<'a, ShellMsg>) -> Element<'a, ShellMsg> {
+pub fn view<'a>(
+    v: &'a ViewerState,
+    picture: Element<'a, ShellMsg>,
+    delay_s: u32,
+) -> Element<'a, ShellMsg> {
     let mut layers = stack![container(picture)
         .width(Length::Fill)
         .height(Length::Fill)
@@ -207,7 +242,7 @@ pub fn view<'a>(v: &'a ViewerState, picture: Element<'a, ShellMsg>) -> Element<'
     if visible {
         let m = &v.machine;
         layers = layers.push(column![
-            top_bar(v),
+            top_bar(v, delay_s),
             row![
                 edge(Icon::ChevronLeft, m.at > 0, Event::Previous),
                 Space::new().width(Length::Fill),

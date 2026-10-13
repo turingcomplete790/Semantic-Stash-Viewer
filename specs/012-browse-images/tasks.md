@@ -228,19 +228,19 @@ actual size, close to the card (FR-008–FR-013, FR-019).
 
 **Independent Test**: quickstart V3.
 
-- [ ] T038 [P] [US3] (the machine's slideshow rules and their tests landed with T029–T030; this
+- [X] T038 [P] [US3] (the machine's slideshow rules and their tests landed with T029–T030; this
       task checks them against the clock's wiring) Slideshow tests in
       `crates/stash-core/tests/image_viewer.rs`: "`Tick` advances
       only when not paused"; a manual `Next`, `Previous`, `Zoom`, or `Pan` pauses; it stops after
       the last image (`slideshow = None`); a looping image waits for `LoopDone` "at most 60 s";
       `Prefetch` of `i + 1, i + 2` while running; `SetDelay` keeps "1..=60"
-- [ ] T039 [US3] Slideshow in the machine (`crates/stash-core/src/images/viewer.rs`) and its timer
+- [X] T039 [US3] Slideshow in the machine (`crates/stash-core/src/images/viewer.rs`) and its timer
       (`Effect::SlideshowDue`) in `native-ui/src/effects.rs` and `native-ui/src/screens/images/state.rs`;
       `slideshow_delay_s` ("default 5", 1–60) in the playback preferences
       (`native-ui/src/services/settings.rs`)
-- [ ] T040 [US3] Looped opens for `MayAnimate` and `Clip` cards (done in US2) and `LoopDone` from the player's
+- [X] T040 [US3] Looped opens for `MayAnimate` and `Clip` cards (done in US2) and `LoopDone` from the player's
       restart near 0 in `native-ui/src/session/mod.rs`; test in `native-ui/tests/image_viewer.rs`
-- [ ] T041 [US3] Animated card previews: decode GIF/WebP/APNG originals under 16 MB into frames at
+- [X] T041 [US3] Animated card previews: decode GIF/WebP/APNG originals under 16 MB into frames at
       the card's width in `crates/stash-core/src/previews.rs` (generalised from scene previews), one
       card at a time on hover in `native-ui/src/screens/browse/preview.rs`; clips show their still;
       test in `crates/stash-core/tests/previews.rs`

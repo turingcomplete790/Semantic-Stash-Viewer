@@ -11,13 +11,13 @@ use stash_core::images::{ImageCard, ImagePage, ImageQuery, ImageSort, Media};
 use stash_core::scenes::filter::saved::SavedFilterOf;
 use stash_core::AppError;
 
-use super::viewer::{ViewerMsg, ViewerState, PAN_KEY, ZOOM_WHEEL};
+use super::viewer::{SlideDue, ViewerMsg, ViewerState, LOOP_CAP, PAN_KEY, ZOOM_WHEEL};
 use crate::effects::{Effect, PlayerAction};
 use crate::library::Need;
 use crate::machine::Step;
 use crate::screens::browse::keyboard::GridAction;
 use crate::screens::browse::layout::Layout;
-use crate::screens::browse::state::{Arrival, BrowseMsg, BrowseUp, Kind, List};
+use crate::screens::browse::state::{next_generation, Arrival, BrowseMsg, BrowseUp, Kind, List};
 use crate::screens::Mode;
 use crate::shell::TabId;
 
@@ -54,6 +54,11 @@ impl Kind for ImageKind {
         msg: crate::screens::browse::controls::Map<Self>,
     ) -> iced::Element<'static, crate::shell::ShellMsg> {
         super::grid::card_view(card, index, focused, mode, layout, pictures, msg)
+    }
+
+    /// Only animated files preview (clips keep their still, 012 FR-016).
+    fn preview_key(card: &ImageCard) -> Option<String> {
+        matches!(card.media, Media::MayAnimate).then(|| format!("image:{}", card.id))
     }
 
     fn page_parts(page: ImagePage) -> (u32, u32, Vec<ImageCard>) {
@@ -304,14 +309,96 @@ impl ImagesState {
         self.event(Event::Open { at, count })
     }
 
-    /// Step the machine and carry out its command.
+    /// Step the machine and carry out its command; the slideshow's timer follows.
     fn event(&mut self, event: Event) -> Step<ImagesUp> {
         let Some(v) = &mut self.viewer else {
             return Step::none();
         };
         let (next, command) = machine::step(&v.machine, event);
         v.machine = next;
-        self.apply(command)
+        let timer = self.slideshow_timer(&command);
+        self.apply(command).with_all(timer)
+    }
+
+    /// A slideshow that runs times each new image (and its start or resume); one that's paused or
+    /// stopped cancels its timer.
+    fn slideshow_timer(&mut self, command: &Command) -> Vec<Effect> {
+        let tab = self.list.tab;
+        let Some(v) = &mut self.viewer else {
+            return Vec::new();
+        };
+        match v.machine.slideshow {
+            Some(s) if !s.paused => match command {
+                Command::Show { .. } | Command::Prefetch(_) => {
+                    v.slide_generation = next_generation();
+                    v.tick_passed = false;
+                    vec![Effect::SlideshowDue {
+                        tab,
+                        generation: v.slide_generation,
+                        due: SlideDue::Tick,
+                        after: std::time::Duration::from_secs(u64::from(s.delay_s)),
+                    }]
+                }
+                _ => Vec::new(),
+            },
+            _ => {
+                v.slide_generation = next_generation();
+                Vec::new()
+            }
+        }
+    }
+
+    /// Whether this screen's slideshow waits for timer `generation`.
+    pub fn awaits_slideshow(&self, generation: u64) -> bool {
+        self.viewer
+            .as_ref()
+            .is_some_and(|v| v.slide_generation == generation)
+    }
+
+    /// A slideshow timer came due: the delay passed (a looping image then waits for its loop, at
+    /// most [`LOOP_CAP`]), or a looping image waited its longest.
+    pub fn slideshow_due(&mut self, generation: u64, due: SlideDue) -> Step<ImagesUp> {
+        let tab = self.list.tab;
+        let Some(v) = &mut self.viewer else {
+            return Step::none();
+        };
+        if v.slide_generation != generation {
+            return Step::none();
+        }
+        match due {
+            SlideDue::Tick if v.machine.looping => {
+                v.tick_passed = true;
+                let delay = v.machine.slideshow.map_or(0, |s| u64::from(s.delay_s));
+                let after = LOOP_CAP.saturating_sub(std::time::Duration::from_secs(delay));
+                Step::effect(Effect::SlideshowDue {
+                    tab,
+                    generation,
+                    due: SlideDue::LoopCap,
+                    after,
+                })
+            }
+            SlideDue::Tick => self.event(Event::Tick),
+            SlideDue::LoopCap => self.event(Event::LoopDone),
+        }
+    }
+
+    /// The looping image in the player finished a loop: a slideshow past its delay moves on.
+    pub fn image_looped(&mut self, id: &str) -> Step<ImagesUp> {
+        let Some(v) = &self.viewer else {
+            return Step::none();
+        };
+        if v.showing.as_deref() != Some(id) || !v.tick_passed {
+            return Step::none();
+        }
+        self.event(Event::LoopDone)
+    }
+
+    /// A tab out of sight doesn't move the player: its slideshow pauses.
+    pub fn pause_slideshow(&mut self) -> Step<ImagesUp> {
+        match self.viewer.as_ref().and_then(|v| v.machine.slideshow) {
+            Some(s) if !s.paused => self.event(Event::ToggleSlideshow { delay_s: s.delay_s }),
+            _ => Step::none(),
+        }
     }
 
     fn apply(&mut self, command: Command) -> Step<ImagesUp> {

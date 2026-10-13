@@ -39,7 +39,7 @@ turbojpeg = { version = "1", default-features = false, features = ["pkg-config",
 # SIMD resizing to the thumbnail width.
 fast_image_resize = "5"
 # Non-JPEG covers (uploaded or scraped PNG/WebP) only.
-image = { version = "0.25", default-features = false, features = ["png", "webp"] }
+image = { version = "0.25", default-features = false, features = ["png", "webp", "gif"] }
 # Accent-folded picker search (008 FR-003a): NFD decomposition, then combining marks dropped.
 # Already in the tree through url/idna.
 icu_normalizer = "2"

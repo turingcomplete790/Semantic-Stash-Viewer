@@ -1,14 +1,18 @@
-//! Animated scene previews: fetch and decode to frames (spec FR-019, research R8).
+//! Animated card previews: fetch and decode to frames (spec FR-019, research R8; images since 012
+//! research R7).
 //!
-//! The preview is Stash's animated WebP (`/scene/<id>/webp`), an image format: it's decoded here,
-//! off the UI thread, into RGBA frames at the card's width, never played as video (constitution
-//! Principle V). A scene without a generated preview is a quiet `None`.
+//! A scene's preview is Stash's animated WebP (`/scene/<id>/webp`); an animated image's is its own
+//! file (GIF, WebP, or APNG, under 16 MB). Both are image formats: they're decoded here, off the UI
+//! thread, into RGBA frames at the card's width, never played as video (constitution Principle
+//! V). A scene without a generated preview is a quiet `None`.
 
 use std::io::Cursor;
 
 use fast_image_resize as fr;
+use image::codecs::gif::GifDecoder;
+use image::codecs::png::PngDecoder;
 use image::codecs::webp::WebPDecoder;
-use image::AnimationDecoder;
+use image::{AnimationDecoder, Frame, ImageResult};
 
 use crate::adapter::scenes::resource_bytes;
 use crate::adapter::StashClient;
@@ -16,6 +20,8 @@ use crate::error::AppError;
 
 /// The largest preview fetched (Stash's are around 1–2 MB).
 const MAX_PREVIEW_BYTES: usize = 32 * 1024 * 1024;
+/// The largest image file decoded as a card preview (012 FR-016): bigger ones keep their still.
+pub const MAX_ANIMATION_BYTES: usize = 16 * 1024 * 1024;
 /// A frame shown for less than this is shown this long (as browsers do for 0 or tiny delays).
 const MIN_DELAY_MS: u32 = 20;
 /// The delay for frames that don't say.
@@ -41,6 +47,46 @@ pub async fn preview_bytes(client: &StashClient, id: &str) -> Result<Option<Vec<
     )
 }
 
+/// An animated image's own file (`/image/<id>/image`) as its card preview, or `None` when Stash
+/// has no such image or it's over [`MAX_ANIMATION_BYTES`].
+pub async fn image_animation_bytes(
+    client: &StashClient,
+    id: &str,
+) -> Result<Option<Vec<u8>>, AppError> {
+    Ok(resource_bytes(
+        client,
+        "image",
+        id,
+        "image",
+        "image-preview",
+        MAX_ANIMATION_BYTES,
+    )
+    .await?
+    .map(|(bytes, _)| bytes))
+}
+
+/// An animation's container, from its first bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnimationFormat {
+    Gif,
+    WebP,
+    /// A PNG; animated (APNG) when it has an `acTL` chunk, otherwise one frame.
+    Png,
+}
+
+/// The format of `bytes`, or `None` for anything else (a JPEG, a video).
+pub fn animation_format(bytes: &[u8]) -> Option<AnimationFormat> {
+    if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        Some(AnimationFormat::Gif)
+    } else if bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        Some(AnimationFormat::WebP)
+    } else if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some(AnimationFormat::Png)
+    } else {
+        None
+    }
+}
+
 /// Decode an animated WebP into frames `width` pixels wide (aspect kept; never enlarged). A still
 /// WebP is one frame.
 pub fn decode_preview(bytes: &[u8], width: u32) -> Result<Vec<PreviewFrame>, String> {
@@ -58,11 +104,43 @@ pub fn decode_preview(bytes: &[u8], width: u32) -> Result<Vec<PreviewFrame>, Str
 pub fn decode_preview_each(
     bytes: &[u8],
     width: u32,
+    on_frame: impl FnMut(PreviewFrame) -> bool,
+) -> Result<usize, String> {
+    decode_animation_each(bytes, width, on_frame)
+}
+
+/// Decode a GIF, WebP, or APNG (a still one is one frame) into frames `width` pixels wide, a frame
+/// at a time as [`decode_preview_each`].
+pub fn decode_animation_each(
+    bytes: &[u8],
+    width: u32,
     mut on_frame: impl FnMut(PreviewFrame) -> bool,
 ) -> Result<usize, String> {
-    let decoder = WebPDecoder::new(Cursor::new(bytes)).map_err(|e| e.to_string())?;
+    let error = |e: image::ImageError| e.to_string();
+    let frames: Box<dyn Iterator<Item = ImageResult<Frame>>> = match animation_format(bytes) {
+        Some(AnimationFormat::Gif) => Box::new(
+            GifDecoder::new(Cursor::new(bytes))
+                .map_err(error)?
+                .into_frames(),
+        ),
+        Some(AnimationFormat::WebP) => Box::new(
+            WebPDecoder::new(Cursor::new(bytes))
+                .map_err(error)?
+                .into_frames(),
+        ),
+        Some(AnimationFormat::Png) => {
+            let png = PngDecoder::new(Cursor::new(bytes)).map_err(error)?;
+            if png.is_apng().map_err(error)? {
+                Box::new(png.apng().map_err(error)?.into_frames())
+            } else {
+                let image = image::DynamicImage::from_decoder(png).map_err(error)?;
+                Box::new(std::iter::once(Ok(Frame::new(image.into_rgba8()))))
+            }
+        }
+        None => return Err("not an animated image format".into()),
+    };
     let mut count = 0;
-    for frame in decoder.into_frames() {
+    for frame in frames {
         let frame = frame.map_err(|e| e.to_string())?;
         let (numer, denom) = frame.delay().numer_denom_ms();
         let delay = numer

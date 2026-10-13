@@ -200,6 +200,11 @@ pub enum ViewerKey {
     ActualSize,
     /// Clockwise; with Shift, anticlockwise (characters ignore Shift when matching).
     Rotate,
+    /// Start, pause, or resume the slideshow.
+    Slideshow,
+    /// The slideshow's delay, a second less or more (1–60).
+    DelayDown,
+    DelayUp,
     Fullscreen,
     Close,
 }
@@ -539,6 +544,21 @@ pub fn bindings() -> Vec<Binding> {
             },
             ViewerKey::Rotate,
             "Rotate anticlockwise",
+        ),
+        (
+            Chord::plain(Char("p")),
+            ViewerKey::Slideshow,
+            "Start or pause the slideshow",
+        ),
+        (
+            Chord::plain(Char("[")),
+            ViewerKey::DelayDown,
+            "Slideshow delay a second shorter",
+        ),
+        (
+            Chord::plain(Char("]")),
+            ViewerKey::DelayUp,
+            "Slideshow delay a second longer",
         ),
         (Chord::plain(Char("f")), ViewerKey::Fullscreen, "Fullscreen"),
         (

@@ -65,6 +65,9 @@ pub trait Kind: Clone + std::fmt::Debug + PartialEq + Default + 'static {
         pictures: super::grid::Pictures<'_>,
         msg: super::controls::Map<Self>,
     ) -> iced::Element<'static, crate::shell::ShellMsg>;
+    /// The card's key in the session's preview (008 FR-019; 012 FR-016), if it has one: a
+    /// scene's id, an animated image's `image:<id>`.
+    fn preview_key(card: &Self::Card) -> Option<String>;
     /// `(count, page, cards)`.
     fn page_parts(page: Self::Page) -> (u32, u32, Vec<Self::Card>);
     /// Load `page` of `query` for tab `tab`, answered as request `generation`.

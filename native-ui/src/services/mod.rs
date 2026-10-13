@@ -627,6 +627,17 @@ impl Services {
         .await
     }
 
+    /// An animated image's own file as its card preview (012 FR-016): one GET the first time,
+    /// then the disk cache. `None` when Stash has no such image or it's over 16 MB.
+    pub async fn image_animation_file(&self, image_id: &str) -> Result<Option<Vec<u8>>, AppError> {
+        let id = image_id.to_owned();
+        let key = stash_core::cache::keys::preview(&format!("image:{image_id}"));
+        self.cached_bytes(&key, |client| async move {
+            stash_core::previews::image_animation_bytes(&client, &id).await
+        })
+        .await
+    }
+
     /// The preview that may decode now; others stop at their next frame (the pointer left).
     pub fn want_preview(&self, generation: Option<u64>) {
         self.preview_wanted

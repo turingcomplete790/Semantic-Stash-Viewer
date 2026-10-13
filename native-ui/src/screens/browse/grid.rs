@@ -34,10 +34,13 @@ pub fn thumb<K: Kind>(
     width: f32,
     height: f32,
 ) -> Element<'static, ShellMsg> {
-    let handle = pictures
+    // Only while a preview plays is the card's key worth working out.
+    let previewing = pictures
         .previews
-        .frame_for(K::card_id(card))
-        .cloned()
+        .key()
+        .and_then(|_| K::preview_key(card))
+        .and_then(|key| pictures.previews.frame_for(&key).cloned());
+    let handle = previewing
         .or_else(|| {
             K::card_thumb(card)
                 .and_then(key_of)

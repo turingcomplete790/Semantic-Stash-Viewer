@@ -69,6 +69,10 @@ impl Kind for SceneKind {
         super::grid::card_view(card, index, focused, marked, mode, layout, pictures, msg)
     }
 
+    fn preview_key(card: &SceneCard) -> Option<String> {
+        Some(card.id.clone())
+    }
+
     fn page_parts(page: ScenePage) -> (u32, u32, Vec<SceneCard>) {
         (page.count, page.page, page.items)
     }

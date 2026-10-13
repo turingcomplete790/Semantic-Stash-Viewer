@@ -12,6 +12,16 @@ pub struct PlaybackPreferences {
     pub resume: bool,
     /// "Save play history": resume points, playing time, and play counts go to Stash.
     pub save_history: bool,
+    /// The image slideshow's seconds per image (012 FR-014), 1–60; files from before 012 read 5.
+    #[serde(default = "default_delay")]
+    pub slideshow_delay_s: u32,
+}
+
+/// The slideshow's default delay.
+pub const DEFAULT_SLIDESHOW_DELAY_S: u32 = 5;
+
+fn default_delay() -> u32 {
+    DEFAULT_SLIDESHOW_DELAY_S
 }
 
 impl Default for PlaybackPreferences {
@@ -19,6 +29,7 @@ impl Default for PlaybackPreferences {
         Self {
             resume: true,
             save_history: true,
+            slideshow_delay_s: DEFAULT_SLIDESHOW_DELAY_S,
         }
     }
 }
@@ -60,6 +71,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_file_from_before_the_slideshow_reads_the_default_delay() {
+        let old: PlaybackPreferences =
+            serde_json::from_str(r#"{"resume":false,"save_history":true}"#).expect("parse");
+        assert!(!old.resume);
+        assert_eq!(old.slideshow_delay_s, 5);
+    }
+
+    #[test]
     fn both_switches_default_on_and_round_trip() {
         let dir = tempfile::tempdir().expect("dir");
         let path = dir.path().join("playback.json");
@@ -67,6 +86,7 @@ mod tests {
         let off = PlaybackPreferences {
             resume: false,
             save_history: false,
+            slideshow_delay_s: 12,
         };
         save(&path, off).expect("save");
         assert_eq!(load(&path), off);
