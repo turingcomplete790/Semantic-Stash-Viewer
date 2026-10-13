@@ -90,6 +90,11 @@ pub enum ShellMsg {
         criterion: stash_core::scenes::filter::Criterion,
         new_tab: bool,
     },
+    /// Open Images filtered to a performer, tag, or studio (012 FR-018), here or in a new tab.
+    FilterImagesTo {
+        criterion: stash_core::scenes::filter::Criterion,
+        new_tab: bool,
+    },
     // Handled above the shell.
     Play(String),
     /// The player's controls drawn inside a screen (the queue view's panel, 010).
@@ -309,7 +314,7 @@ impl Shell {
                 return self.images_up(step);
             }
             ShellMsg::Back => self.active_mut().back(),
-            ShellMsg::Forward => self.active_mut().forward(),
+            ShellMsg::Forward => return self.forward(),
             ShellMsg::NewTab => self.new_tab(len, Screen::home()),
             ShellMsg::Close(id) => return self.close_tab(id),
             ShellMsg::CloseActive => return self.close_tab(self.active().id),
@@ -376,10 +381,18 @@ impl Shell {
                 let Screen::Images(state) = self.active_mut().current_mut() else {
                     return Step::none();
                 };
+                let had_viewer = state.viewer.is_some();
                 let step = state.update(m, tab, &layout);
+                // Opening the viewer is a new place: Forward no longer leads to what was ahead.
+                if !had_viewer && state.viewer.is_some() {
+                    self.active_mut().drop_forward();
+                }
                 return self.images_up(step);
             }
             ShellMsg::FilterTo { criterion, new_tab } => self.filter_to(criterion, new_tab),
+            ShellMsg::FilterImagesTo { criterion, new_tab } => {
+                return self.filter_images_to(criterion, new_tab)
+            }
             ShellMsg::PlaybackChange(change) => return Step::up(Up::PlaybackChange(change)),
             ShellMsg::Scene(m) => {
                 let tab = self.active().id;
@@ -486,6 +499,37 @@ impl Shell {
             _ => return Step::none(),
         };
         self.images_up(step)
+    }
+
+    /// Forward: the viewer Back closed opens again first; then the tab's next screen (leaving an
+    /// open viewer behind it, its image let go, as a chip's grid does).
+    fn forward(&mut self) -> Step<Up> {
+        let can_go_forward = self.active().can_go_forward();
+        let step = match self.active_mut().current_mut() {
+            Screen::Images(s) if s.viewer.is_none() && s.closed_viewer.is_some() => {
+                let step = s.reopen_viewer();
+                return self.images_up(step);
+            }
+            Screen::Images(s) if s.viewer.is_some() && can_go_forward => s.leave_viewer(),
+            _ => Step::none(),
+        };
+        let Step { mut effects, up } = self.images_up(step);
+        effects.extend(self.active_mut().forward());
+        Step { effects, up }
+    }
+
+    /// Whether Back does something here: the tab's history, or closing the viewer.
+    pub fn can_go_back(&self) -> bool {
+        self.active().can_go_back() || self.active_viewer().is_some()
+    }
+
+    /// Whether Forward does something here: the viewer Back closed, or the tab's history.
+    pub fn can_go_forward(&self) -> bool {
+        self.active().can_go_forward()
+            || matches!(
+                self.active().current(),
+                Screen::Images(s) if s.viewer.is_none() && s.closed_viewer.is_some()
+            )
     }
 
     /// The active tab's Images viewer, if one is open.
@@ -611,6 +655,54 @@ impl Shell {
             self.new_tab(self.selected + 1, screen)
         } else {
             self.active_mut().open(screen)
+        }
+    }
+
+    /// Open Images filtered to `criterion` (an image's chip), here or in a new tab (012 FR-018).
+    /// Here, the viewer is left open behind it (its image leaves the player until Back).
+    pub fn filter_images_to(
+        &mut self,
+        criterion: stash_core::scenes::filter::Criterion,
+        new_tab: bool,
+    ) -> Step<Up> {
+        let mut state = crate::screens::ImagesState::default();
+        state.list.query.criteria = vec![criterion];
+        let screen = Screen::Images(Box::new(state));
+        if new_tab {
+            return Step::effects(self.new_tab(self.selected + 1, screen));
+        }
+        // The viewer stays in the history (Back returns to the image); the player lets it go.
+        let closed = match self.active_mut().current_mut() {
+            Screen::Images(s) => s.leave_viewer(),
+            _ => Step::none(),
+        };
+        let Step { mut effects, up } = self.images_up(closed);
+        effects.extend(self.active_mut().open(screen));
+        Step { effects, up }
+    }
+
+    /// `id`'s details arrived for tab `tab`'s viewer; whether a panel took them.
+    pub fn image_details(
+        &mut self,
+        tab: TabId,
+        id: &str,
+        result: Result<stash_core::images::ImageDetails, AppError>,
+    ) -> bool {
+        let Some(i) = self.index_of(tab) else {
+            return false;
+        };
+        match self.tabs[i]
+            .history
+            .iter_mut()
+            .find_map(|screen| match screen {
+                Screen::Images(s) if s.awaits_details(id) => Some(s),
+                _ => None,
+            }) {
+            Some(s) => {
+                s.details_loaded(id, result);
+                true
+            }
+            None => false,
         }
     }
 
@@ -911,12 +1003,12 @@ impl Shell {
                 icon_button(
                     Icon::Back,
                     16.0,
-                    tab.can_go_back().then_some(ShellMsg::Back)
+                    self.can_go_back().then_some(ShellMsg::Back)
                 ),
                 icon_button(
                     Icon::Forward,
                     16.0,
-                    tab.can_go_forward().then_some(ShellMsg::Forward)
+                    self.can_go_forward().then_some(ShellMsg::Forward)
                 ),
                 section(Section::Home, Icon::Home, "Home"),
                 section(Section::Scenes, Icon::Scenes, "Scenes"),

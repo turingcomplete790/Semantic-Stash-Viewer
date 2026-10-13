@@ -121,7 +121,11 @@ async fn a_still_image_plays_and_stays() {
     let player = headless();
     let mut rx = player.subscribe();
     player.open(request(&file, MediaKind::Image { looped: false }));
-    let s = until(&mut rx, "playing", |s| s.state == PlayerStateKind::Playing).await;
+    // The picture's size can follow the state by a snapshot.
+    let s = until(&mut rx, "playing with its size", |s| {
+        s.state == PlayerStateKind::Playing && s.picture.is_some()
+    })
+    .await;
     assert_eq!(s.picture, Some((320, 240)));
     property_becomes(&player, "image-display-duration", "inf").await;
     tokio::time::sleep(Duration::from_millis(1500)).await;

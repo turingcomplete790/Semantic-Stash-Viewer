@@ -46,6 +46,30 @@ pub struct ViewerState {
     pub slide_generation: u64,
     /// The slideshow's delay passed on a looping image: its next loop moves on.
     pub tick_passed: bool,
+    /// The details panel's image and what's known of it (US4).
+    pub details: Option<DetailsSlot>,
+}
+
+/// One image's details for the panel.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DetailsSlot {
+    pub id: String,
+    pub state: Details,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Details {
+    Loading,
+    Ready(Box<stash_core::images::ImageDetails>),
+    Failed(String),
+}
+
+/// Under this window width the details panel opens over the picture (012 spec edge cases).
+pub const NARROW: f32 = 900.0;
+
+/// Whether the details panel sits beside the picture (not over it) in this window.
+pub fn panel_beside(layout: &Layout) -> bool {
+    layout.width >= NARROW
 }
 
 /// Which slideshow timer came due.
@@ -86,9 +110,18 @@ impl ViewerState {
                 .is_none_or(|t| now.duration_since(t) < CONTROLS_FADE)
     }
 
-    /// The picture's area: the tab's content (the whole window in fullscreen).
-    pub fn area(layout: &Layout) -> (f32, f32) {
-        (layout.width, (layout.height - CHROME).max(1.0))
+    /// The picture's area: the tab's content (the whole window in fullscreen), less the details
+    /// panel when it sits beside the picture.
+    pub fn area(&self, layout: &Layout) -> (f32, f32) {
+        let panel = if self.machine.details && panel_beside(layout) {
+            crate::screens::scene::side_width(layout)
+        } else {
+            0.0
+        };
+        (
+            (layout.width - panel).max(1.0),
+            (layout.height - CHROME).max(1.0),
+        )
     }
 
     /// The size the picture shows at with zoom 0 (fitted, or one image pixel per screen pixel),
@@ -106,7 +139,7 @@ impl ViewerState {
         if view.actual {
             return Some((w / layout.scale, h / layout.scale));
         }
-        let (aw, ah) = Self::area(layout);
+        let (aw, ah) = self.area(layout);
         let fit = (aw / w).min(ah / h);
         Some((w * fit, h * fit))
     }
@@ -118,7 +151,7 @@ impl ViewerState {
         let (Some(p), Some((bw, bh))) = (self.pointer, self.base_size(layout, &view)) else {
             return (0.0, 0.0);
         };
-        let (aw, ah) = Self::area(layout);
+        let (aw, ah) = self.area(layout);
         ((p.x - aw / 2.0) / bw, (p.y - ah / 2.0) / bh)
     }
 
@@ -182,6 +215,7 @@ fn top_bar<'a>(v: &'a ViewerState, delay_s: u32) -> Element<'a, ShellMsg> {
                 Some(event(Event::ToggleActual))
             ),
             slideshow,
+            icon_button(Icon::Info, 16.0, Some(event(Event::ToggleDetails))),
         ]
         .spacing(10)
         .padding([6, 10])
@@ -210,11 +244,16 @@ fn edge(which: Icon, enabled: bool, step: Event) -> Element<'static, ShellMsg> {
     .into()
 }
 
-/// The viewer: `picture` is the player's picture (black when the player shows something else).
+/// The viewer: `picture` is the player's picture (black when the player shows something else);
+/// the details panel beside it, or over it in a narrow window.
+#[allow(clippy::too_many_arguments)]
 pub fn view<'a>(
     v: &'a ViewerState,
     picture: Element<'a, ShellMsg>,
     delay_s: u32,
+    layout: &Layout,
+    library: &'a crate::library::Library,
+    thumbs: &'a crate::screens::scenes::Thumbs,
 ) -> Element<'a, ShellMsg> {
     let mut layers = stack![container(picture)
         .width(Length::Fill)
@@ -251,7 +290,7 @@ pub fn view<'a>(
             .height(Length::Fill),
         ]);
     }
-    mouse_area(layers)
+    let main: Element<'a, ShellMsg> = mouse_area(layers)
         .on_move(|p| msg(ViewerMsg::Pointer(p)))
         .on_press(msg(ViewerMsg::Press))
         .on_release(msg(ViewerMsg::Release))
@@ -270,5 +309,24 @@ pub fn view<'a>(
         } else {
             mouse::Interaction::Hidden
         })
+        .into();
+    if !v.machine.details {
+        return main;
+    }
+    let panel = container(super::details::view(v.details.as_ref(), library, thumbs))
+        .width(Length::Fixed(crate::screens::scene::side_width(layout)))
+        .height(Length::Fill)
+        .style(theme::bar);
+    if panel_beside(layout) {
+        row![container(main).width(Length::Fill), panel].into()
+    } else {
+        stack![
+            main,
+            container(panel)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(Alignment::End),
+        ]
         .into()
+    }
 }

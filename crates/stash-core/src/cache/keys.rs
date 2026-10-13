@@ -35,6 +35,11 @@ pub fn scene_details(id: &str) -> String {
     format!("scene:details:{id}")
 }
 
+/// An image's details panel (012 US4).
+pub fn image_details(id: &str) -> String {
+    format!("image:details:{id}")
+}
+
 /// A scene's "All files" section.
 pub fn scene_files(id: &str) -> String {
     format!("scene:files:{id}")
@@ -78,6 +83,7 @@ mod tests {
             scene_details(id),
             scene_files(id),
             scene_galleries(id),
+            image_details(id),
             chip("performer", id),
             chip("tag", id),
             chip("studio", id),

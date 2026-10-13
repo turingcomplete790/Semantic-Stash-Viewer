@@ -255,13 +255,13 @@ actual size, close to the card (FR-008–FR-013, FR-019).
 
 **Independent Test**: quickstart V4.
 
-- [ ] T042 [P] [US4] Tests in `native-ui/tests/image_viewer.rs`: `I` loads `ImageDetails` once per
+- [X] T042 [P] [US4] Tests in `native-ui/tests/image_viewer.rs`: `I` loads `ImageDetails` once per
       image (0 cached) and shows every field; the panel follows → ; empty sections are left out; a
       tag chip filters Images (Ctrl: a new tab); under 900 px the panel overlays the picture
-- [ ] T043 [US4] `Effect::LoadImageDetails` (cache key `image:<id>`) in `native-ui/src/effects.rs` and
+- [X] T043 [US4] `Effect::LoadImageDetails` (cache key `image:details:<id>`, as scenes') in `native-ui/src/effects.rs` and
       the panel in `native-ui/src/screens/images/details.rs`, reusing the scene page's chip and tag
       colouring widgets from `native-ui/src/screens/scene.rs`
-- [ ] T044 [US4] Chips → `FilterTo` on Images (a new tab with Ctrl) and the narrow-window overlay in
+- [X] T044 [US4] Chips → `FilterTo` on Images (a new tab with Ctrl) and the narrow-window overlay in
       `native-ui/src/screens/images/viewer.rs`
 
 **Checkpoint**: quickstart V1–V4; T042 passes.

@@ -47,6 +47,8 @@ pub struct Playback {
     image_events: Vec<ImageEvent>,
     /// The image's last position: going back means a loop finished.
     image_position: f64,
+    /// An image was let go and the player is closing it (no now-playing bar meanwhile).
+    pub releasing: bool,
 }
 
 /// What became of an image open (012).
@@ -84,6 +86,7 @@ impl Default for Playback {
             image_pending: false,
             image_events: Vec::new(),
             image_position: 0.0,
+            releasing: false,
         }
     }
 }
@@ -124,6 +127,7 @@ impl Playback {
         let mut effects = self.finish();
         self.owner = Some(owner);
         self.image = None;
+        self.releasing = false;
         self.image_pending = false;
         self.scene_id = Some(scene_id.clone());
         self.failure_posted = false;
@@ -155,6 +159,7 @@ impl Playback {
         self.owner = Some(owner);
         self.scene_id = None;
         self.image = Some(id.clone());
+        self.releasing = false;
         self.image_pending = true;
         self.image_events.clear();
         self.image_position = 0.0;
@@ -167,6 +172,17 @@ impl Playback {
         self.screen.direct_failure = None;
         effects.push(Effect::OpenImage { id, title, looped });
         effects
+    }
+
+    /// Let the image go (its viewer closed or was left): the player closes it, and from now the
+    /// image isn't shown anywhere, even before the player says it has closed.
+    pub fn release_image(&mut self) -> Vec<Effect> {
+        if self.image.take().is_none() {
+            return Vec::new();
+        }
+        self.image_pending = false;
+        self.releasing = true;
+        self.update(Msg::Close)
     }
 
     /// What became of the image shown since the last call, once each.
@@ -366,6 +382,7 @@ impl Playback {
                 if was_active && !self.active() {
                     self.owner = None;
                     self.scene_id = None;
+                    self.releasing = false;
                     // Playback stopped by any path: leave fullscreen (002 FR-007).
                     if fullscreen {
                         effects.push(Effect::SetFullscreen(false));

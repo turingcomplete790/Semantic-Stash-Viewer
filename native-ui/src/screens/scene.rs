@@ -450,7 +450,7 @@ pub fn panel_layout<'a, M: 'a>(
     .into()
 }
 
-fn stars(rating100: u8) -> String {
+pub(crate) fn stars(rating100: u8) -> String {
     let filled = usize::from(rating100.div_ceil(20)).min(5);
     format!("{}{}", "★".repeat(filled), "☆".repeat(5 - filled))
 }
@@ -475,6 +475,14 @@ pub(crate) fn only(kind: CriterionKind, item: &Named) -> Criterion {
     )
 }
 
+/// Which list a chip filters: Scenes (the scene page, with its hover cards) or Images (an image's
+/// details, 012 FR-018).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ChipTarget {
+    Scenes,
+    Images,
+}
+
 /// A chip on the page: opens Scenes filtered to it (Ctrl+click or middle-click: a new tab), and
 /// its card loads after the pointer rests on it.
 fn chip<'a>(
@@ -483,7 +491,32 @@ fn chip<'a>(
     label: Element<'a, ShellMsg>,
     style: impl Fn(&iced::Theme, button::Status) -> button::Style + 'a,
 ) -> Element<'a, ShellMsg> {
+    chip_for(ChipTarget::Scenes, kind, item, label, style)
+}
+
+/// A chip filtering `target` to it (Ctrl+click or middle-click: a new tab); on the scene page its
+/// card loads after the pointer rests on it.
+pub(crate) fn chip_for<'a>(
+    target: ChipTarget,
+    kind: CriterionKind,
+    item: &Named,
+    label: Element<'a, ShellMsg>,
+    style: impl Fn(&iced::Theme, button::Status) -> button::Style + 'a,
+) -> Element<'a, ShellMsg> {
     let criterion = only(kind, item);
+    if target == ChipTarget::Images {
+        return mouse_area(button(label).padding([3, 10]).style(style).on_press(
+            ShellMsg::FilterImagesTo {
+                criterion: criterion.clone(),
+                new_tab: false,
+            },
+        ))
+        .on_middle_press(ShellMsg::FilterImagesTo {
+            criterion,
+            new_tab: true,
+        })
+        .into();
+    }
     let chip_kind = match kind {
         CriterionKind::Performers => ChipKind::Performer,
         CriterionKind::Studios => ChipKind::Studio,
@@ -512,7 +545,7 @@ fn chip<'a>(
 }
 
 /// Long names are cut in chips (full on the card and in the page's text).
-fn short(name: &str) -> String {
+pub(crate) fn short(name: &str) -> String {
     const MAX: usize = 32;
     match name.char_indices().nth(MAX) {
         Some((cut, _)) => format!("{}…", &name[..cut]),
@@ -521,6 +554,15 @@ fn short(name: &str) -> String {
 }
 
 fn tag_chip<'a>(t: &Named, library: &'a Library) -> Element<'a, ShellMsg> {
+    tag_chip_for(ChipTarget::Scenes, t, library)
+}
+
+/// A tag chip, marked with its semantic type and coloured by the tag colour rules (008 FR-003d).
+pub(crate) fn tag_chip_for<'a>(
+    target: ChipTarget,
+    t: &Named,
+    library: &'a Library,
+) -> Element<'a, ShellMsg> {
     let kind = library.vocabulary.ready().and_then(|v| v.kind_of(&t.id));
     let colour = library.tag_colour(&t.id);
     let mut label = row![text(short(&t.name)).size(13)]
@@ -529,7 +571,8 @@ fn tag_chip<'a>(t: &Named, library: &'a Library) -> Element<'a, ShellMsg> {
     if let Some(k) = kind {
         label = label.push(text(k.label()).size(10));
     }
-    chip(
+    chip_for(
+        target,
         CriterionKind::Tags,
         t,
         label.into(),
@@ -538,6 +581,15 @@ fn tag_chip<'a>(t: &Named, library: &'a Library) -> Element<'a, ShellMsg> {
 }
 
 fn performer_chip<'a>(
+    p: &stash_core::scenes::PerformerChip,
+    thumbs: &'a Thumbs,
+) -> Element<'a, ShellMsg> {
+    performer_chip_for(ChipTarget::Scenes, p, thumbs)
+}
+
+/// A performer chip with their picture, once it's here.
+pub(crate) fn performer_chip_for<'a>(
+    target: ChipTarget,
     p: &stash_core::scenes::PerformerChip,
     thumbs: &'a Thumbs,
 ) -> Element<'a, ShellMsg> {
@@ -563,7 +615,8 @@ fn performer_chip<'a>(
         });
     }
     label = label.push(text(short(&p.name)).size(13));
-    chip(
+    chip_for(
+        target,
         CriterionKind::Performers,
         &named,
         label.into(),
@@ -571,11 +624,11 @@ fn performer_chip<'a>(
     )
 }
 
-fn heading(label: &str) -> Element<'_, ShellMsg> {
+pub(crate) fn heading(label: &str) -> Element<'_, ShellMsg> {
     text(label).size(13).color(theme::FROSTED_BLUE).into()
 }
 
-fn wrap<'a>(items: Vec<Element<'a, ShellMsg>>) -> Element<'a, ShellMsg> {
+pub(crate) fn wrap<'a>(items: Vec<Element<'a, ShellMsg>>) -> Element<'a, ShellMsg> {
     row(items).spacing(6).wrap().vertical_spacing(6).into()
 }
 

@@ -116,6 +116,9 @@ pub(crate) struct Inner {
     pub(crate) last_seek_target: Mutex<Option<f64>>,
     /// Open and seek latency for `stats()` (T031).
     pub(crate) timing: Mutex<Timing>,
+    /// mpv's `width` and `height` as they arrive (separately): the snapshot's `picture` only once
+    /// both are known, so a reader never sees half a size.
+    picture_size: Mutex<(u32, u32)>,
 }
 
 /// One mpv core. At most one scene plays at a time.
@@ -218,6 +221,7 @@ impl Player {
             seek_started: Mutex::new(Instant::now()),
             last_seek_target: Mutex::new(None),
             timing: Mutex::new(Timing::default()),
+            picture_size: Mutex::new((0, 0)),
         });
 
         let for_thread = Arc::clone(&inner);
@@ -272,6 +276,7 @@ impl Player {
             return;
         }
         lock(&inner.timing).opened();
+        *lock(&inner.picture_size) = (0, 0);
         let header = request
             .api_key
             .as_deref()
@@ -576,6 +581,22 @@ impl Inner {
         }
     }
 
+    /// One of the picture's dimensions arrived; the snapshot has the size once both are known.
+    fn picture_dimension(&self, width: Option<i64>, height: Option<i64>) {
+        let size = {
+            let mut size = lock(&self.picture_size);
+            if let Some(w) = width {
+                size.0 = u32::try_from(w).unwrap_or(0);
+            }
+            if let Some(h) = height {
+                size.1 = u32::try_from(h).unwrap_or(0);
+            }
+            *size
+        };
+        let picture = (size.0 > 0 && size.1 > 0).then_some(size);
+        self.update(|s| s.picture = picture);
+    }
+
     fn on_property(&self, id: u64, change: PropertyData<'_>) {
         match (id, change) {
             (P_TIME_POS, PropertyData::Double(pos)) => {
@@ -608,14 +629,8 @@ impl Inner {
                 let hwdec = hwdec.to_owned();
                 self.update(|s| s.hwdec = Some(hwdec));
             }
-            (P_WIDTH, PropertyData::Int64(w)) => self.update(|s| {
-                let h = s.picture.map_or(0, |p| p.1);
-                s.picture = u32::try_from(w).ok().map(|w| (w, h));
-            }),
-            (P_HEIGHT, PropertyData::Int64(h)) => self.update(|s| {
-                let w = s.picture.map_or(0, |p| p.0);
-                s.picture = u32::try_from(h).ok().map(|h| (w, h));
-            }),
+            (P_WIDTH, PropertyData::Int64(w)) => self.picture_dimension(Some(w), None),
+            (P_HEIGHT, PropertyData::Int64(h)) => self.picture_dimension(None, Some(h)),
             (P_TRACKS, PropertyData::Int64(_)) => {
                 let tracks = read_tracks(&self.mpv);
                 self.update(|s| s.tracks = tracks);

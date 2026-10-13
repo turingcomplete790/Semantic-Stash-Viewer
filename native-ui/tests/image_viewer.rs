@@ -528,3 +528,294 @@ fn an_animated_cards_hover_previews_its_own_file() {
     let effects = open_at(&mut s, 3);
     assert!(effects.contains(&Effect::StopPreview));
 }
+
+// ---- 012 US4: details --------------------------------------------------------------------------
+
+use semantic_stash_viewer_native::screens::images::details::{byline, facts, file_line};
+use semantic_stash_viewer_native::screens::images::viewer::{panel_beside, Details};
+use stash_core::images::{ImageDetails, ImageFile};
+use stash_core::scenes::{GalleryChip, Named as NamedItem, PerformerChip};
+
+fn details_loads(effects: &[Effect]) -> Vec<String> {
+    effects
+        .iter()
+        .filter_map(|e| match e {
+            Effect::LoadImageDetails { id, .. } => Some(id.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn full_details(id: &str) -> ImageDetails {
+    ImageDetails {
+        id: id.into(),
+        title: format!("Image {id}"),
+        code: Some("C-1".into()),
+        date: Some("2024-05-01".into()),
+        photographer: Some("A photographer".into()),
+        details: Some("Some words.".into()),
+        rating100: Some(80),
+        organized: true,
+        o_count: 2,
+        urls: vec!["https://example.org/1".into()],
+        studio: Some(NamedItem {
+            id: "4".into(),
+            name: "A studio".into(),
+        }),
+        performers: vec![PerformerChip {
+            id: "2".into(),
+            name: "Performer A".into(),
+            image: Some("1700000000".into()),
+        }],
+        tags: vec![NamedItem {
+            id: "6".into(),
+            name: "A tag".into(),
+        }],
+        galleries: vec![GalleryChip {
+            id: "9".into(),
+            title: "A gallery".into(),
+            image_count: 12,
+        }],
+        file: Some(ImageFile {
+            path: "/library/a.jpg".into(),
+            size: 3_200_000,
+            format: "jpeg".into(),
+            width: 4000,
+            height: 3000,
+            duration: None,
+        }),
+    }
+}
+
+#[test]
+fn i_loads_the_details_once_per_image_and_the_panel_follows_the_arrows() {
+    let mut s = session();
+    open_at(&mut s, 2);
+    let effects = press(&mut s, Key::Character("i".into()));
+    assert_eq!(details_loads(&effects), vec!["2"]);
+    // Closed and opened again on the same image: nothing new.
+    let _ = press(&mut s, Key::Character("i".into()));
+    assert!(details_loads(&press(&mut s, Key::Character("i".into()))).is_empty());
+    let tab = s.shell.active().id;
+    let effects = s
+        .update(Msg::Reply(Reply::ImageDetails {
+            tab,
+            id: "2".into(),
+            result: Box::new(Ok(full_details("2"))),
+        }))
+        .effects;
+    let v = images(&s).viewer.as_ref().expect("viewer");
+    assert!(matches!(
+        v.details.as_ref().map(|d| &d.state),
+        Some(Details::Ready(_))
+    ));
+    assert!(
+        effects
+            .iter()
+            .any(|e| matches!(e, Effect::LoadThumbnails { keys, .. } if keys.len() == 1)),
+        "the performer's picture: {effects:?}"
+    );
+    // The panel follows the next image.
+    let effects = press(&mut s, Key::Named(Named::ArrowRight));
+    assert_eq!(details_loads(&effects), vec!["3"]);
+    // A late answer for the image before doesn't land.
+    let _ = s.update(Msg::Reply(Reply::ImageDetails {
+        tab,
+        id: "2".into(),
+        result: Box::new(Ok(full_details("2"))),
+    }));
+    let v = images(&s).viewer.as_ref().expect("viewer");
+    assert_eq!(v.details.as_ref().map(|d| d.id.as_str()), Some("3"));
+    assert!(matches!(
+        v.details.as_ref().map(|d| &d.state),
+        Some(Details::Loading)
+    ));
+}
+
+#[test]
+fn without_the_panel_no_details_are_read() {
+    let mut s = session();
+    let effects = open_at(&mut s, 2);
+    assert!(details_loads(&effects).is_empty());
+    assert!(details_loads(&press(&mut s, Key::Named(Named::ArrowRight))).is_empty());
+}
+
+#[test]
+fn every_field_shows_and_empty_ones_are_left_out() {
+    let d = full_details("1");
+    assert_eq!(
+        byline(&d).as_deref(),
+        Some("C-1 · 2024-05-01 · by A photographer")
+    );
+    assert_eq!(facts(&d).as_deref(), Some("★★★★☆ · Organized · O-count 2"));
+    assert_eq!(
+        file_line(d.file.as_ref().expect("file")),
+        "JPEG · 4000×3000 · 3.2 MB"
+    );
+    let empty = ImageDetails {
+        code: None,
+        date: None,
+        photographer: None,
+        rating100: None,
+        organized: false,
+        o_count: 0,
+        ..full_details("1")
+    };
+    assert_eq!(byline(&empty), None);
+    assert_eq!(facts(&empty), None);
+}
+
+#[test]
+fn a_tag_chip_filters_images_here_or_in_a_new_tab() {
+    use stash_core::scenes::filter::kinds::CriterionKind;
+    use stash_core::scenes::filter::{Criterion, CriterionValue, Item, Modifier};
+    let tag = Criterion::new(
+        CriterionKind::Tags,
+        Modifier::IncludesAll,
+        CriterionValue::Items {
+            items: vec![Item {
+                id: "6".into(),
+                label: "A tag".into(),
+            }],
+            excluded: vec![],
+            depth: Some(0),
+        },
+    );
+    let mut s = session();
+    open_at(&mut s, 2);
+    let first = s.shell.active().id;
+    // Ctrl: a new tab, the viewer left as it was.
+    let _ = s.update(Msg::Modifiers(Modifiers::CTRL));
+    let effects = s
+        .update(Msg::Shell(ShellMsg::FilterImagesTo {
+            criterion: tag.clone(),
+            new_tab: false,
+        }))
+        .effects;
+    assert_ne!(s.shell.active().id, first);
+    assert_eq!(images(&s).query.criteria, vec![tag.clone()]);
+    assert_eq!(loads(&effects)[0].1, 1);
+    let _ = s.update(Msg::Modifiers(Modifiers::empty()));
+    let _ = s.update(Msg::Shell(ShellMsg::Select(first)));
+    // Here: the image leaves the player and Images opens filtered.
+    let _ = press(&mut s, Key::Named(Named::ArrowRight));
+    let effects = s
+        .update(Msg::Shell(ShellMsg::FilterImagesTo {
+            criterion: tag.clone(),
+            new_tab: false,
+        }))
+        .effects;
+    assert!(effects.contains(&Effect::Player(PlayerAction::Close)));
+    assert_eq!(images(&s).query.criteria, vec![tag]);
+    assert!(images(&s).viewer.is_none());
+    assert!(!s.player_visible());
+    assert!(!s.now_playing(), "no bar while the image closes");
+    // Back returns (even before the player has said it closed) to the viewer on the image it was on, shown again.
+    let effects = s.update(Msg::Shell(ShellMsg::Back)).effects;
+    assert!(images(&s).query.criteria.is_empty());
+    assert_eq!(images(&s).viewer.as_ref().map(|v| v.machine.at), Some(3));
+    assert_eq!(opens(&effects), vec![("3".to_owned(), true)]);
+    assert_eq!(s.playback.image.as_deref(), Some("3"));
+    // Back again (Escape's twin) closes the viewer to its grid.
+    let _ = s.update(Msg::Shell(ShellMsg::Back));
+    assert!(images(&s).viewer.is_none());
+}
+
+#[test]
+fn a_tab_switch_back_to_an_open_viewer_shows_its_image_again() {
+    let mut s = session();
+    open_at(&mut s, 5);
+    let first = s.shell.active().id;
+    let _ = s.update(Msg::Shell(ShellMsg::NewTab));
+    let _ = s.update(Msg::Shell(ShellMsg::Play("77".into())));
+    let effects = s.update(Msg::Shell(ShellMsg::Select(first))).effects;
+    // A scene took the player, so the viewer was closed: nothing to show again.
+    assert!(opens(&effects).is_empty());
+    assert!(images(&s).viewer.is_none());
+}
+
+#[test]
+fn under_900_px_the_panel_overlays_the_picture() {
+    use semantic_stash_viewer_native::screens::scenes::layout::Layout;
+    let wide = Layout::new(1600.0, 1000.0);
+    let narrow = Layout::new(800.0, 1000.0);
+    assert!(panel_beside(&wide));
+    assert!(!panel_beside(&narrow));
+    let mut v = semantic_stash_viewer_native::screens::images::ViewerState::default();
+    v.machine.details = true;
+    assert!(v.area(&wide).0 < 1600.0, "beside: the picture is narrower");
+    assert_eq!(
+        v.area(&narrow).0,
+        800.0,
+        "over: the picture keeps the width"
+    );
+}
+
+/// Back and Forward walk viewer → chip's grid → viewer → grid and back the same way, the image
+/// shown again each time the viewer returns.
+#[test]
+fn forward_undoes_back_through_the_viewer_and_a_chips_grid() {
+    use stash_core::scenes::filter::kinds::CriterionKind;
+    use stash_core::scenes::filter::{Criterion, CriterionValue, Item, Modifier};
+    let tag = Criterion::new(
+        CriterionKind::Tags,
+        Modifier::IncludesAll,
+        CriterionValue::Items {
+            items: vec![Item {
+                id: "6".into(),
+                label: "A tag".into(),
+            }],
+            excluded: vec![],
+            depth: Some(0),
+        },
+    );
+    let mut s = session();
+    open_at(&mut s, 2);
+    let _ = press(&mut s, Key::Named(Named::ArrowRight));
+    let _ = s.update(Msg::Shell(ShellMsg::FilterImagesTo {
+        criterion: tag.clone(),
+        new_tab: false,
+    }));
+    let at = |s: &Session| images(s).viewer.as_ref().map(|v| v.machine.at);
+    let filtered = |s: &Session| !images(s).query.criteria.is_empty();
+
+    // Back: the viewer on image 3; Back again: its grid, 3 focused.
+    let effects = s.update(Msg::Shell(ShellMsg::Back)).effects;
+    assert_eq!((filtered(&s), at(&s)), (false, Some(3)));
+    assert_eq!(opens(&effects), vec![("3".to_owned(), true)]);
+    let effects = s.update(Msg::Shell(ShellMsg::Back)).effects;
+    assert_eq!((filtered(&s), at(&s)), (false, None));
+    assert_eq!(images(&s).focused, Some(3));
+    assert!(effects.contains(&Effect::Player(PlayerAction::Close)));
+    assert!(s.shell.can_go_forward());
+
+    // Forward: the viewer again on 3; Forward again: the chip's grid, the image let go.
+    let effects = s.update(Msg::Shell(ShellMsg::Forward)).effects;
+    assert_eq!((filtered(&s), at(&s)), (false, Some(3)));
+    assert_eq!(opens(&effects), vec![("3".to_owned(), true)]);
+    let effects = s.update(Msg::Shell(ShellMsg::Forward)).effects;
+    assert!(filtered(&s));
+    assert!(effects.contains(&Effect::Player(PlayerAction::Close)));
+    assert!(!s.shell.can_go_forward());
+
+    // And back once more to the viewer.
+    let effects = s.update(Msg::Shell(ShellMsg::Back)).effects;
+    assert_eq!((filtered(&s), at(&s)), (false, Some(3)));
+    assert_eq!(opens(&effects), vec![("3".to_owned(), true)]);
+}
+
+#[test]
+fn opening_a_new_viewer_drops_the_old_way_forward() {
+    let mut s = session();
+    open_at(&mut s, 2);
+    let _ = press(&mut s, Key::Named(Named::Escape));
+    assert!(s.shell.can_go_forward(), "Forward reopens the viewer");
+    open_at(&mut s, 5);
+    let _ = press(&mut s, Key::Named(Named::Escape));
+    let effects = s.update(Msg::Shell(ShellMsg::Forward)).effects;
+    assert_eq!(
+        opens(&effects),
+        vec![("5".to_owned(), false)],
+        "the newer viewer"
+    );
+}

@@ -392,8 +392,11 @@ impl Session {
 
     /// Whether the now-playing bar shows (something plays, out of sight).
     pub fn now_playing(&self) -> bool {
-        // An image never shows the now-playing bar (012).
-        self.playback.active() && self.playback.image.is_none() && !self.player_visible()
+        // An image never shows the now-playing bar, nor while it closes (012).
+        self.playback.active()
+            && self.playback.image.is_none()
+            && !self.playback.releasing
+            && !self.player_visible()
     }
 
     fn back_to_scene(&mut self) -> Step<Up> {
@@ -462,6 +465,12 @@ impl Session {
                 let portrait = self.shell.layout.physical(PORTRAIT);
                 effects.extend(self.thumbs.want([&key], portrait));
             }
+        }
+        // Performer pictures in an image's details (012 US4).
+        if let Some(images) = self.shell.active_viewer() {
+            let keys = images.details_performers();
+            let icon = self.shell.layout.physical(PERFORMER_ICON);
+            effects.extend(self.thumbs.want(&keys, icon));
         }
         // Performer images for the picker's visible rows only (008 FR-003a).
         if let Some(crate::screens::scenes::Panel::Editor(editor)) = self.active_panel() {
@@ -571,6 +580,13 @@ impl Session {
                 criterion,
                 new_tab: true,
             },
+            ShellMsg::FilterImagesTo {
+                criterion,
+                new_tab: false,
+            } if self.modifiers.control() => ShellMsg::FilterImagesTo {
+                criterion,
+                new_tab: true,
+            },
             other => other,
         };
         let before = self.shell.active().id;
@@ -591,6 +607,30 @@ impl Session {
                 generation: self.save_generation,
             });
         }
+        let step = self.shell_up(Step::effects(effects), up);
+        let resumed = self.resume_viewer();
+        step.with_all(resumed.effects)
+    }
+
+    /// An open viewer back on screen (Back from a chip's grid, a switch to its tab) shows its
+    /// image again when the player has something else (012 FR-019: one player).
+    fn resume_viewer(&mut self) -> Step<Up> {
+        let active = self.shell.active().id;
+        let wanted = self
+            .shell
+            .active_viewer()
+            .and_then(|s| s.viewer.as_ref())
+            .filter(|v| v.pending.is_none())
+            .and_then(|v| v.showing.clone());
+        let Some(id) = wanted else {
+            return Step::none();
+        };
+        if self.playback.image.as_deref() == Some(id.as_str())
+            && self.playback.owner == Some(active)
+        {
+            return Step::none();
+        }
+        let Step { effects, up } = self.shell.with_viewer(|s| s.resume_viewer());
         self.shell_up(Step::effects(effects), up)
     }
 
@@ -604,10 +644,8 @@ impl Session {
                 step
             }
             Some(shell_mod::Up::ImageClosed) => {
-                if self.playback.image.is_some()
-                    && self.playback.owner == Some(self.shell.active().id)
-                {
-                    step.with_all(self.playback.update(playback::Msg::Close))
+                if self.playback.owner == Some(self.shell.active().id) {
+                    step.with_all(self.playback.release_image())
                 } else {
                     step
                 }
@@ -824,6 +862,9 @@ impl Session {
                     s.viewer_event(Event::ToggleActual)
                 }
             }),
+            K::Details => self
+                .shell
+                .with_viewer(|s| s.viewer_event(Event::ToggleDetails)),
             K::Slideshow => {
                 let delay_s = self.prefs.slideshow_delay_s;
                 self.shell
@@ -1115,6 +1156,16 @@ impl Session {
             Msg::Reply(Reply::SavedFilters(result)) => {
                 self.library.saved_loaded(result);
                 Step::none()
+            }
+            Msg::Reply(Reply::ImageDetails { tab, id, result }) => {
+                let loaded = result.is_ok();
+                let mut effects = Vec::new();
+                if self.shell.image_details(tab, &id, *result) && loaded {
+                    // Tag chips need the vocabulary for their types and colours (FR-003d).
+                    effects.extend(self.library.want(crate::library::Need::Vocabulary));
+                    effects.extend(self.thumbnails());
+                }
+                Step::effects(effects)
             }
             Msg::Reply(Reply::SlideshowDue {
                 tab,
@@ -1649,8 +1700,15 @@ impl Session {
         } else {
             Space::new().into()
         };
-        crate::screens::images::viewer::view(v, picture, self.prefs.slideshow_delay_s)
-            .map(Msg::Shell)
+        crate::screens::images::viewer::view(
+            v,
+            picture,
+            self.prefs.slideshow_delay_s,
+            &self.shell.layout,
+            &self.library,
+            &self.thumbs,
+        )
+        .map(Msg::Shell)
     }
 
     /// Whether the viewer's controls are showing and will fade (a timer redraws until then).

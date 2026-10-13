@@ -202,6 +202,8 @@ pub enum ViewerKey {
     Rotate,
     /// Start, pause, or resume the slideshow.
     Slideshow,
+    /// Open or close the details panel.
+    Details,
     /// The slideshow's delay, a second less or more (1–60).
     DelayDown,
     DelayUp,
@@ -560,6 +562,7 @@ pub fn bindings() -> Vec<Binding> {
             ViewerKey::DelayUp,
             "Slideshow delay a second longer",
         ),
+        (Chord::plain(Char("i")), ViewerKey::Details, "Details"),
         (Chord::plain(Char("f")), ViewerKey::Fullscreen, "Fullscreen"),
         (
             Chord::plain(N(Named::Escape)),

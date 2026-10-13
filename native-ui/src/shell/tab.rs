@@ -97,6 +97,12 @@ impl Tab {
         self.open(fresh)
     }
 
+    /// Drop the entries after the cursor (something new opened in place, such as the image
+    /// viewer: Forward no longer leads to what was there).
+    pub fn drop_forward(&mut self) {
+        self.history.truncate(self.cursor + 1);
+    }
+
     pub fn back(&mut self) -> Vec<Effect> {
         if !self.can_go_back() {
             return Vec::new();

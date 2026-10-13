@@ -11,7 +11,9 @@ use stash_core::images::{ImageCard, ImagePage, ImageQuery, ImageSort, Media};
 use stash_core::scenes::filter::saved::SavedFilterOf;
 use stash_core::AppError;
 
-use super::viewer::{SlideDue, ViewerMsg, ViewerState, LOOP_CAP, PAN_KEY, ZOOM_WHEEL};
+use super::viewer::{
+    Details, DetailsSlot, SlideDue, ViewerMsg, ViewerState, LOOP_CAP, PAN_KEY, ZOOM_WHEEL,
+};
 use crate::effects::{Effect, PlayerAction};
 use crate::library::Need;
 use crate::machine::Step;
@@ -146,6 +148,10 @@ pub struct ImagesState {
     /// The window's geometry when last asked (closing the viewer scrolls its card into view).
     #[serde(skip)]
     pub window: Layout,
+    /// The viewer Back (or Escape) closed: Forward opens it again on the same image, as a
+    /// browser's Forward undoes its Back. A new viewer replaces it.
+    #[serde(skip)]
+    pub closed_viewer: Option<ViewerState>,
 }
 
 fn default_card_size() -> u8 {
@@ -160,6 +166,7 @@ impl Default for ImagesState {
             viewer: None,
             open_on_arrival: None,
             window: Layout::default(),
+            closed_viewer: None,
         }
     }
 }
@@ -306,6 +313,7 @@ impl ImagesState {
         }
         let count = self.list.count().unwrap_or(0);
         self.viewer = Some(ViewerState::default());
+        self.closed_viewer = None;
         self.event(Event::Open { at, count })
     }
 
@@ -317,7 +325,77 @@ impl ImagesState {
         let (next, command) = machine::step(&v.machine, event);
         v.machine = next;
         let timer = self.slideshow_timer(&command);
-        self.apply(command).with_all(timer)
+        let step = self.apply(command).with_all(timer);
+        let details = self.want_details();
+        step.with_all(details)
+    }
+
+    /// With the details panel open, the image shown's details (once per image; the cache answers
+    /// a second time).
+    fn want_details(&mut self) -> Vec<Effect> {
+        let tab = self.list.tab;
+        let Some(v) = &mut self.viewer else {
+            return Vec::new();
+        };
+        let Some(id) = v.showing.clone().filter(|_| v.machine.details) else {
+            return Vec::new();
+        };
+        if v.details.as_ref().is_some_and(|d| d.id == id) {
+            return Vec::new();
+        }
+        v.details = Some(DetailsSlot {
+            id: id.clone(),
+            state: Details::Loading,
+        });
+        vec![Effect::LoadImageDetails { tab, id }]
+    }
+
+    /// Whether the viewer's panel waits for `id`'s details.
+    pub fn awaits_details(&self, id: &str) -> bool {
+        self.viewer
+            .as_ref()
+            .and_then(|v| v.details.as_ref())
+            .is_some_and(|d| d.id == id && d.state == Details::Loading)
+    }
+
+    /// `id`'s details arrived for the panel.
+    pub fn details_loaded(
+        &mut self,
+        id: &str,
+        result: Result<stash_core::images::ImageDetails, AppError>,
+    ) {
+        let Some(slot) = self.viewer.as_mut().and_then(|v| v.details.as_mut()) else {
+            return;
+        };
+        if slot.id != id {
+            return;
+        }
+        slot.state = match result {
+            Ok(d) => Details::Ready(Box::new(d)),
+            Err(e) => Details::Failed(crate::messages::for_error(&e).title.to_owned()),
+        };
+    }
+
+    /// The details panel's performers with pictures, as thumbnail keys.
+    pub fn details_performers(&self) -> Vec<crate::screens::scenes::thumbs::ThumbKey> {
+        let Some(Details::Ready(d)) = self
+            .viewer
+            .as_ref()
+            .filter(|v| v.machine.details)
+            .and_then(|v| v.details.as_ref())
+            .map(|s| &s.state)
+        else {
+            return Vec::new();
+        };
+        d.performers
+            .iter()
+            .filter_map(|p| {
+                let version = p.image.as_deref()?;
+                Some(crate::screens::scenes::picker::performer_key(
+                    &p.id, version,
+                ))
+            })
+            .collect()
     }
 
     /// A slideshow that runs times each new image (and its start or resume); one that's paused or
@@ -465,6 +543,7 @@ impl ImagesState {
             v.picture = (card.width > 0 && card.height > 0).then_some((card.width, card.height));
         }
         let mut step = self.prefetch(&prefetch);
+        step.effects.extend(self.want_details());
         step.up = Some(ImagesUp::Show {
             looped: looped(&card),
             id: card.id,
@@ -475,7 +554,16 @@ impl ImagesState {
 
     /// Back to the grid on the page of the last image viewed, its card focused and in view.
     fn close(&mut self, at: u32) -> Step<ImagesUp> {
-        self.viewer = None;
+        // Kept for Forward (not when the result emptied: there's nothing to go forward to).
+        self.closed_viewer = self
+            .viewer
+            .take()
+            .filter(|_| self.list.count() != Some(0))
+            .map(|v| ViewerState {
+                drag: None,
+                activity: None,
+                ..v
+            });
         let mut effects = Vec::new();
         if let Some(local) = self.local(at) {
             self.list.focused = Some(local);
@@ -489,6 +577,47 @@ impl ImagesState {
             effects,
             up: Some(ImagesUp::Closed),
         }
+    }
+
+    /// Leave the viewer open in the tab's history while another screen shows (a chip's filtered
+    /// grid): its slideshow pauses and the player lets its image go; Back finds it as it was.
+    pub fn leave_viewer(&mut self) -> Step<ImagesUp> {
+        if self.viewer.is_none() {
+            return Step::none();
+        }
+        let paused = self.pause_slideshow();
+        Step {
+            effects: paused.effects,
+            up: Some(ImagesUp::Closed),
+        }
+    }
+
+    /// The viewer is on screen again but the player shows something else (after Back, or a tab
+    /// switch): show its image again, fitted, as when it was first shown.
+    pub fn resume_viewer(&mut self) -> Step<ImagesUp> {
+        let Some(v) = &mut self.viewer else {
+            return Step::none();
+        };
+        if v.pending.is_some() {
+            return Step::none();
+        }
+        let at = v.machine.at;
+        v.machine.view = machine::View::default();
+        v.machine.failed = None;
+        v.error = None;
+        self.show(at, Vec::new())
+    }
+
+    /// Forward after Back closed the viewer: it opens again on the image it was on.
+    pub fn reopen_viewer(&mut self) -> Step<ImagesUp> {
+        if self.viewer.is_some() {
+            return Step::none();
+        }
+        let Some(v) = self.closed_viewer.take() else {
+            return Step::none();
+        };
+        self.viewer = Some(v);
+        self.resume_viewer()
     }
 
     /// Close the viewer (Escape, Back, the close button), if it's open.

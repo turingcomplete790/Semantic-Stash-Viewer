@@ -131,6 +131,11 @@ pub enum Effect {
     },
     /// Fetch the viewer's neighbours' files to disk (012 R4).
     PrefetchImageFiles(Vec<String>),
+    /// An image's details for tab `tab`'s viewer, through the cache (012 US4).
+    LoadImageDetails {
+        tab: TabId,
+        id: String,
+    },
     /// The image slideshow's timer (012 FR-014): report back after `after`.
     SlideshowDue {
         tab: TabId,
@@ -382,6 +387,13 @@ pub enum Reply {
     },
     UiSettings(Result<stash_core::adapter::filters::UiSettings, AppError>),
     SavedFilters(Result<Vec<stash_core::scenes::filter::saved::SavedFilter>, AppError>),
+    /// An image's details arrived (012).
+    ImageDetails {
+        tab: TabId,
+        id: String,
+        /// Boxed, as scene details.
+        result: Box<Result<stash_core::images::ImageDetails, AppError>>,
+    },
     /// The slideshow's timer came due (012).
     SlideshowDue {
         tab: TabId,
@@ -608,6 +620,33 @@ pub fn run(effect: Effect, services: &Arc<Services>, window: Option<window::Id>)
                     (id, result)
                 },
                 |(id, result)| Message::Reply(Reply::ImageOpened { id, result }),
+            )
+        }
+        Effect::LoadImageDetails { tab, id } => {
+            let services = Arc::clone(services);
+            Task::perform(
+                async move {
+                    let key = stash_core::cache::keys::image_details(&id);
+                    let wanted = id.clone();
+                    let result =
+                        services
+                            .read_cached(&key, RefreshPolicy::Auto, false, move |client| {
+                                let id = wanted.clone();
+                                async move {
+                                    stash_core::adapter::images::image_details(&client, &id).await
+                                }
+                            })
+                            .await
+                            .map(|c| c.data);
+                    (id, result)
+                },
+                move |(id, result)| {
+                    Message::Reply(Reply::ImageDetails {
+                        tab,
+                        id,
+                        result: Box::new(result),
+                    })
+                },
             )
         }
         Effect::SlideshowDue {
