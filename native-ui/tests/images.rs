@@ -140,7 +140,9 @@ fn a_page_reply_lands_on_the_images_screen_that_asked() {
     let (mut shell, _) = Shell::new();
     let step = shell.update(ShellMsg::Section(Section::Images));
     let (generation, ..) = loads(&step.effects)[0].clone();
-    let effects = shell.images_page(TAB, generation, Ok(page_of(1, 40, 300)), false);
+    let effects = shell
+        .images_page(TAB, generation, Ok(page_of(1, 40, 300)), false)
+        .effects;
     let Screen::Images(s) = shell.active().current() else {
         panic!("Images")
     };
@@ -243,7 +245,7 @@ fn the_saved_filters_menu_asks_for_the_image_filters() {
     assert_eq!(
         step.up,
         Some(
-            semantic_stash_viewer_native::screens::browse::state::BrowseUp::Need(
+            semantic_stash_viewer_native::screens::images::ImagesUp::Need(
                 semantic_stash_viewer_native::library::Need::SavedImageFilters
             )
         )
@@ -260,7 +262,9 @@ fn paging_requests_one_page_and_prefetches_its_neighbours() {
     let l = loads(&effects);
     assert_eq!(l.len(), 1);
     assert_eq!(l[0].1, 4);
-    let effects = s.page_loaded(l[0].0, Ok(page_of(4, 40, 300)), false);
+    let effects = s
+        .page_loaded(l[0].0, Ok(page_of(4, 40, 300)), false)
+        .effects;
     let prefetch: Vec<_> = effects
         .iter()
         .filter_map(|e| match e {
@@ -279,8 +283,9 @@ fn an_older_reply_is_ignored() {
     let second = loads(&update(&mut s, BrowseMsg::Page(3)))[0].0;
     assert!(s
         .page_loaded(first, Ok(page_of(2, 40, 300)), false)
+        .effects
         .is_empty());
-    s.page_loaded(second, Ok(page_of(3, 40, 300)), false);
+    let _ = s.page_loaded(second, Ok(page_of(3, 40, 300)), false);
     assert_eq!(s.cards()[0].id, "80");
 }
 
@@ -323,7 +328,7 @@ fn the_folder_criterion_picks_from_the_folders_list() {
     assert_eq!(
         step.up,
         Some(
-            semantic_stash_viewer_native::screens::browse::state::BrowseUp::Need(
+            semantic_stash_viewer_native::screens::images::ImagesUp::Need(
                 semantic_stash_viewer_native::library::Need::Choices(ChoiceKind::Folders)
             )
         )

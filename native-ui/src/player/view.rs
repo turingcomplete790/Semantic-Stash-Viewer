@@ -227,13 +227,7 @@ impl PlayerScreen {
         close: M,
         fullscreen: M,
     ) -> Element<'a, M> {
-        let picture: Element<'a, M> = match video {
-            Some(shared) => shader(Video::new(Arc::clone(shared)))
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into(),
-            None => space::horizontal().into(),
-        };
+        let picture = picture(video);
         let mut layers = stack![container(picture)
             .width(Length::Fill)
             .height(Length::Fill)
@@ -498,7 +492,7 @@ fn bar_style(_: &Theme) -> container::Style {
     container::Style::default().background(Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.6)))
 }
 
-fn sentence(s: &str) -> String {
+pub(crate) fn sentence(s: &str) -> String {
     let mut chars = s.chars();
     match chars.next() {
         Some(c) => format!(
@@ -511,6 +505,17 @@ fn sentence(s: &str) -> String {
 }
 
 /// `m:ss`, or `h:mm:ss` from an hour (as the web player's `formatDuration`).
+/// mpv's picture alone, filling its space (the image viewer draws its own controls, 012).
+pub fn picture<'a, M: 'a>(video: Option<&'a Arc<Shared>>) -> Element<'a, M> {
+    match video {
+        Some(shared) => shader(Video::new(Arc::clone(shared)))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into(),
+        None => space::horizontal().into(),
+    }
+}
+
 pub fn format_time(seconds: f64) -> String {
     let total = seconds.max(0.0).floor() as u64;
     let (h, m, s) = (total / 3600, (total % 3600) / 60, total % 60);

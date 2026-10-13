@@ -19,6 +19,14 @@ pub enum Icon {
     Scenes,
     /// Lucide `image` (012).
     Images,
+    /// The image viewer (012): Lucide `chevron-left`, `chevron-right`, `rotate-cw`, `maximize`,
+    /// `minimize`, `info`.
+    ChevronLeft,
+    ChevronRight,
+    RotateCw,
+    Maximize,
+    Minimize,
+    Info,
     Bell,
     Settings,
     Server,
@@ -48,6 +56,20 @@ impl Icon {
             }
             Icon::Images => {
                 r#"<rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>"#
+            }
+            Icon::ChevronLeft => r#"<path d="m15 18-6-6 6-6"/>"#,
+            Icon::ChevronRight => r#"<path d="m9 18 6-6-6-6"/>"#,
+            Icon::RotateCw => {
+                r#"<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>"#
+            }
+            Icon::Maximize => {
+                r#"<path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>"#
+            }
+            Icon::Minimize => {
+                r#"<path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/>"#
+            }
+            Icon::Info => {
+                r#"<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>"#
             }
             Icon::Bell => {
                 r#"<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>"#

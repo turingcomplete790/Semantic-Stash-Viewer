@@ -19,6 +19,8 @@ pub enum Level {
     Scenes,
     /// The Images grid (012).
     Images,
+    /// The image viewer (012 US2): replaces the player's and the grid's keys while it shows.
+    Viewer,
     Settings,
     Shell,
 }
@@ -30,6 +32,7 @@ impl Level {
             Level::Queue => "Scenes (queue view)",
             Level::Scenes => "Scenes",
             Level::Images => "Images",
+            Level::Viewer => "Image viewer",
             Level::Settings => "Settings → Tag colours",
             Level::Shell => "Everywhere",
         }
@@ -176,6 +179,29 @@ pub enum Action {
     QueueOpen {
         new_tab: bool,
     },
+    /// The image viewer's keys (012 contracts/images-ui.md).
+    Viewer(ViewerKey),
+}
+
+/// What a viewer key does; the arrows pan instead while the picture is zoomed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewerKey {
+    Next,
+    Previous,
+    /// Previous, or close on the first image.
+    Back,
+    First,
+    Last,
+    Up,
+    Down,
+    ZoomIn,
+    ZoomOut,
+    Fit,
+    ActualSize,
+    /// Clockwise; with Shift, anticlockwise (characters ignore Shift when matching).
+    Rotate,
+    Fullscreen,
+    Close,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -458,6 +484,71 @@ pub fn bindings() -> Vec<Binding> {
     ] {
         all.push(b(Level::Images, chord, Action::Images, label));
     }
+    // The image viewer (012 contracts/images-ui.md).
+    for (chord, key, label) in [
+        (
+            Chord::plain(N(Named::ArrowRight)),
+            ViewerKey::Next,
+            "Next image (pans when zoomed)",
+        ),
+        (
+            Chord::plain(N(Named::ArrowLeft)),
+            ViewerKey::Previous,
+            "Previous image (pans when zoomed)",
+        ),
+        (Chord::plain(N(Named::Space)), ViewerKey::Next, "Next image"),
+        (
+            Chord::plain(N(Named::Backspace)),
+            ViewerKey::Back,
+            "Previous image (on the first: close)",
+        ),
+        (
+            Chord::plain(N(Named::Home)),
+            ViewerKey::First,
+            "First image",
+        ),
+        (Chord::plain(N(Named::End)), ViewerKey::Last, "Last image"),
+        (
+            Chord::plain(N(Named::ArrowUp)),
+            ViewerKey::Up,
+            "Pan up or down when zoomed (↑ ↓)",
+        ),
+        (
+            Chord::plain(N(Named::ArrowDown)),
+            ViewerKey::Down,
+            "Pan down",
+        ),
+        (Chord::plain(Char("+")), ViewerKey::ZoomIn, "Zoom in"),
+        (Chord::plain(Char("=")), ViewerKey::ZoomIn, "Zoom in"),
+        (Chord::plain(Char("-")), ViewerKey::ZoomOut, "Zoom out"),
+        (Chord::plain(Char("0")), ViewerKey::Fit, "Fit to the window"),
+        (
+            Chord::plain(Char("1")),
+            ViewerKey::ActualSize,
+            "Actual size",
+        ),
+        (
+            Chord::plain(Char("r")),
+            ViewerKey::Rotate,
+            "Rotate clockwise",
+        ),
+        (
+            Chord {
+                shift: true,
+                ..Chord::plain(Char("r"))
+            },
+            ViewerKey::Rotate,
+            "Rotate anticlockwise",
+        ),
+        (Chord::plain(Char("f")), ViewerKey::Fullscreen, "Fullscreen"),
+        (
+            Chord::plain(N(Named::Escape)),
+            ViewerKey::Close,
+            "Leave fullscreen, or close the viewer",
+        ),
+    ] {
+        all.push(b(Level::Viewer, chord, Action::Viewer(key), label));
+    }
     // Settings → Tag colours (008 FR-003g); the page applies them.
     for (chord, label) in [
         (Chord::plain(N(Named::ArrowUp)), "Move between rules (↑ ↓)"),
@@ -517,6 +608,13 @@ pub fn help_list<'a, M: 'a>() -> Element<'a, M> {
             level = Some(b.level);
             list = list.push(text(b.level.label()).size(15).color(theme::FROSTED_BLUE));
         }
+        // The pan keys are one row ("↑ ↓"), as are the two zoom-in keys.
+        if matches!(b.action, Action::Viewer(ViewerKey::Down))
+            || (matches!(b.action, Action::Viewer(ViewerKey::ZoomIn))
+                && b.chord.key == ChordKey::Char("="))
+        {
+            continue;
+        }
         let keys = match b.action {
             Action::SelectTab(_) => "Ctrl+1…9".to_owned(),
             Action::Scenes | Action::Images
@@ -524,6 +622,7 @@ pub fn help_list<'a, M: 'a>() -> Element<'a, M> {
             {
                 "← ↑ → ↓".to_owned()
             }
+            Action::Viewer(ViewerKey::Up) => "↑ ↓".to_owned(),
             _ => b.chord.describe(),
         };
         let label = match b.action {

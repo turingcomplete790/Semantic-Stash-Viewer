@@ -38,6 +38,27 @@ pub struct Playback {
     /// The scene that just reached its end (not a failure), for the session to take: the queue
     /// view's Play next (010 R4).
     ended: Option<String>,
+    /// The image shown (012): the player is in image mode for the owner tab's viewer. No play
+    /// history, no now-playing bar, no notification on failure (the viewer says so).
+    pub image: Option<String>,
+    /// The image open hasn't been answered yet (shown or failed).
+    image_pending: bool,
+    /// What happened to the image open, for the session to take.
+    image_event: Option<ImageEvent>,
+}
+
+/// What became of an image open (012).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ImageEvent {
+    /// On screen; `picture`: its size, when the player knows it.
+    Shown {
+        id: String,
+        picture: Option<(u32, u32)>,
+    },
+    Failed {
+        id: String,
+        reason: String,
+    },
 }
 
 impl Default for Playback {
@@ -53,6 +74,9 @@ impl Default for Playback {
             minimum_percent: None,
             viewing: None,
             ended: None,
+            image: None,
+            image_pending: false,
+            image_event: None,
         }
     }
 }
@@ -92,6 +116,8 @@ impl Playback {
         // Another scene ends the current viewing.
         let mut effects = self.finish();
         self.owner = Some(owner);
+        self.image = None;
+        self.image_pending = false;
         self.scene_id = Some(scene_id.clone());
         self.failure_posted = false;
         self.screen.chapters.clear();
@@ -107,6 +133,48 @@ impl Playback {
             resume: self.resume && start.is_none(),
         });
         effects
+    }
+
+    /// Show image `id` for tab `owner`'s viewer (012 FR-019): a playing scene's viewing ends
+    /// (its history saved) and the one player shows the image instead.
+    pub fn open_image(
+        &mut self,
+        id: String,
+        title: String,
+        looped: bool,
+        owner: TabId,
+    ) -> Vec<Effect> {
+        let mut effects = self.finish();
+        self.owner = Some(owner);
+        self.scene_id = None;
+        self.image = Some(id.clone());
+        self.image_pending = true;
+        self.image_event = None;
+        self.failure_posted = false;
+        self.ended = None;
+        self.screen.chapters.clear();
+        self.screen.restart_offer = None;
+        self.screen.sprites = None;
+        self.screen.sprites_requested = false;
+        self.screen.direct_failure = None;
+        effects.push(Effect::OpenImage { id, title, looped });
+        effects
+    }
+
+    /// What became of the image open since the last call, once.
+    pub fn take_image_event(&mut self) -> Option<ImageEvent> {
+        self.image_event.take()
+    }
+
+    /// The image open couldn't be handed to the player.
+    pub fn image_open_failed(&mut self, id: &str, reason: String) {
+        if self.image.as_deref() == Some(id) {
+            self.image_pending = false;
+            self.image_event = Some(ImageEvent::Failed {
+                id: id.to_owned(),
+                reason,
+            });
+        }
     }
 
     /// Play the scene again from the beginning as a new viewing (Repeat one, 011 R4): the
@@ -200,7 +268,49 @@ impl Playback {
                     .then(|| (s.title.clone(), s.error.as_ref().map(ToString::to_string)));
                 let state = s.state;
                 let observed = (s.scene_id.clone(), s.position_seconds, s.duration_seconds);
+                let picture = s.picture;
+                // In an image's words (the player's are a video's).
+                let reason = s.error.as_ref().map(|e| match e {
+                    player::PlayerError::UnsupportedFormat => {
+                        "The image's format isn't supported.".to_owned()
+                    }
+                    player::PlayerError::StreamUnreachable => {
+                        "The image file couldn't be read from the server.".to_owned()
+                    }
+                    other => crate::player::view::sentence(&other.to_string()),
+                });
                 self.screen.update(ControlsMsg::Snapshot(s));
+                // An image: the viewer hears it's shown or failed; nothing else applies.
+                if let Some(id) = self.image.clone() {
+                    let mut effects = Vec::new();
+                    match state {
+                        PlayerStateKind::Playing | PlayerStateKind::Paused
+                            if self.image_pending =>
+                        {
+                            self.image_pending = false;
+                            self.image_event = Some(ImageEvent::Shown { id, picture });
+                        }
+                        PlayerStateKind::Error if self.image_pending || !self.failure_posted => {
+                            self.image_pending = false;
+                            self.failure_posted = true;
+                            self.image_event = Some(ImageEvent::Failed {
+                                id,
+                                reason: reason
+                                    .unwrap_or_else(|| "The file couldn't be read.".into()),
+                            });
+                        }
+                        _ => {}
+                    }
+                    if was_active && !self.active() {
+                        self.owner = None;
+                        self.image = None;
+                        self.image_pending = false;
+                        if fullscreen {
+                            effects.push(Effect::SetFullscreen(false));
+                        }
+                    }
+                    return effects;
+                }
                 let mut effects = Vec::new();
                 // The viewing follows the player: a checkpoint each minute of playing.
                 let checkpoint = match self.viewing.as_mut() {

@@ -178,40 +178,42 @@ actual size, close to the card (FR-008–FR-013, FR-019).
 
 **Independent Test**: quickstart V2.
 
-- [ ] T029 [P] [US2] Tests in `crates/stash-core/tests/image_viewer.rs` for every rule in
+- [X] T029 [P] [US2] Tests in `crates/stash-core/tests/image_viewer.rs` for every rule in
       data-model.md's Viewer section: "`Next` at `count - 1` → `Nothing`"; "`Previous` at 0 →
       `Nothing` (no wrap)"; a new image resets `view`; "`Zoom` clamps to 1/8×–8× (log2 −3..=3)";
       "panning without zoom does nothing"; each `Show(i)` with `Prefetch` of `i ± 1`; "`Failed(i)`
       keeps `at = i`"; "`ResultsChanged { count }`: `at` clamps to `count - 1`; `count == 0` →
       `Close`"; `Close { at }`
-- [ ] T030 [US2] The pure machine `step(&Viewer, Event) -> (Viewer, Command)` in
+- [X] T030 [US2] The pure machine `step(&Viewer, Event) -> (Viewer, Command)` in
       `crates/stash-core/src/images/viewer.rs` (research R5)
-- [ ] T031 [P] [US2] Tests in `crates/stash-core/tests/image_neighbours.rs` (wiremock, temp dir):
+- [X] T031 [P] [US2] Tests in `crates/stash-core/tests/image_neighbours.rs` (wiremock, temp dir):
       files fetched with the `ApiKey` header; "at most 8 files or 512 MB, least recently used
       evicted"; a 404 → `Missing`; a ready file is a local path; counted in the cache limit
-- [ ] T032 [US2] `Neighbours` in `crates/stash-core/src/images/neighbours.rs` and its wiring in
+- [X] T032 [US2] `Neighbours` in `crates/stash-core/src/images/neighbours.rs` and its wiring in
       `native-ui/src/services/mod.rs` (`open_image`: a ready local file, else Stash's
       `/image/<id>/image` with the key in a header; the direct-source guard accepts these for
-      `Image` opens only); `Effect::PrefetchImages` in `native-ui/src/effects.rs`
-- [ ] T033 [P] [US2] Tests in `native-ui/tests/image_viewer.rs`: Enter opens the viewer on the
+      `Image` opens only); `Effect::PrefetchImages` in `native-ui/src/effects.rs` (named
+      `PrefetchImageFiles`, since `PrefetchImages` is paging's; `PrefetchPageImageFiles` reads a
+      neighbour on another page through the cache)
+- [X] T033 [P] [US2] Tests in `native-ui/tests/image_viewer.rs`: Enter opens the viewer on the
       focused card (an `Image` open of that id); → past the page's last card loads the next page and
       shows its first; Escape closes to the grid on the last image's page with its card focused;
       a failed open shows the message and → still moves; opening an image while a scene plays stops
       the scene (its history saved)
-- [ ] T034 [US2] The viewer in `ImagesState` (`native-ui/src/screens/images/state.rs`): events from
+- [X] T034 [US2] The viewer in `ImagesState` (`native-ui/src/screens/images/state.rs`): events from
       input, the machine's commands applied (`Show(i)` → the card on this page or the page that
       holds it, then an image open through the session; `SetView` → player commands;
       `Prefetch` → `Effect::PrefetchImages`; `Close` → grid focus)
-- [ ] T035 [US2] The viewer's view in `native-ui/src/screens/images/viewer.rs` per
+- [X] T035 [US2] The viewer's view in `native-ui/src/screens/images/viewer.rs` per
       contracts/images-ui.md: the picture (the session's mpv render), the top bar ("7 of 214" ·
       title, close, rotate, fit/actual, slideshow, details), the edge arrows, controls fading after
       2 s still; Lucide icons (chevrons, rotate, maximize, info) in `native-ui/src/widgets/mod.rs`
-- [ ] T036 [US2] Input: `Level::Viewer` keys in `native-ui/src/shell/keymap.rs` (contract table:
+- [X] T036 [US2] Input: `Level::Viewer` keys in `native-ui/src/shell/keymap.rs` (contract table:
       → ← Space Backspace Home End + - 0 1 R Shift+R arrows-pan P [ ] I F Escape) and mouse (wheel
       steps, Ctrl+wheel zooms about the pointer, drag pans when zoomed, double-click toggles fit) in
       `native-ui/src/screens/images/viewer.rs`; keys routed before the player's in
       `native-ui/src/session/mod.rs`
-- [ ] T037 [US2] The one player in `native-ui/src/session/mod.rs`: the viewer owns the player for
+- [X] T037 [US2] The one player in `native-ui/src/session/mod.rs`: the viewer owns the player for
       its tab; opening an image ends a playing scene's viewing (history saved) and closes it; no
       now-playing bar for images; closing the tab or the viewer closes the image
 
@@ -226,7 +228,9 @@ actual size, close to the card (FR-008–FR-013, FR-019).
 
 **Independent Test**: quickstart V3.
 
-- [ ] T038 [P] [US3] Slideshow tests in `crates/stash-core/tests/image_viewer.rs`: "`Tick` advances
+- [ ] T038 [P] [US3] (the machine's slideshow rules and their tests landed with T029–T030; this
+      task checks them against the clock's wiring) Slideshow tests in
+      `crates/stash-core/tests/image_viewer.rs`: "`Tick` advances
       only when not paused"; a manual `Next`, `Previous`, `Zoom`, or `Pan` pauses; it stops after
       the last image (`slideshow = None`); a looping image waits for `LoopDone` "at most 60 s";
       `Prefetch` of `i + 1, i + 2` while running; `SetDelay` keeps "1..=60"
@@ -234,7 +238,7 @@ actual size, close to the card (FR-008–FR-013, FR-019).
       (`Effect::SlideshowDue`) in `native-ui/src/effects.rs` and `native-ui/src/screens/images/state.rs`;
       `slideshow_delay_s` ("default 5", 1–60) in the playback preferences
       (`native-ui/src/services/settings.rs`)
-- [ ] T040 [US3] Looped opens for `MayAnimate` and `Clip` cards and `LoopDone` from the player's
+- [ ] T040 [US3] Looped opens for `MayAnimate` and `Clip` cards (done in US2) and `LoopDone` from the player's
       restart near 0 in `native-ui/src/session/mod.rs`; test in `native-ui/tests/image_viewer.rs`
 - [ ] T041 [US3] Animated card previews: decode GIF/WebP/APNG originals under 16 MB into frames at
       the card's width in `crates/stash-core/src/previews.rs` (generalised from scene previews), one
@@ -272,7 +276,11 @@ actual size, close to the card (FR-008–FR-013, FR-019).
       first frame from the snapshot): `images-page-change`, `images-page-jump`,
       `images-scroll-1000-grid`/`-wall`, `image-open`, `image-next` (20 steps incl. a page boundary),
       `image-zoom`, `slideshow-drift`, and `gql-images-page`, `gql-image-details`,
-      `gql-image-step-prefetched`; nothing written to Testing
+      `gql-image-step-prefetched`; nothing written to Testing. Also `image-pan-drag` (pointer move
+      → moved frame while dragging a zoomed picture, ≤ 1 frame): the user found dragging a zoomed
+      image a little laggy (2026-10-12). Suspects to check: every pointer move sends all four view
+      properties to mpv (`ActualSize`, `Zoom`, `Pan`, `Rotate`) where only the pan changed, and
+      moves aren't coalesced to one per frame; each move also rebuilds the viewer's widget tree
 - [ ] T047 [P] Budgets in `crates/perf-harness/src/main.rs` and `crates/perf-harness/src/report.rs`:
       ≤ 150 ms p95, ≤ 1 s, ≤ 3% / ≤ 1%, ≤ 500 ms median, ≤ 150 ms p95, ≤ 1 frame, ≤ 0.3 s; requests
       1 / 1 / 0

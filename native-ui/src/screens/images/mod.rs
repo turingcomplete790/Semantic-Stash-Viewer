@@ -3,6 +3,8 @@
 
 pub mod grid;
 pub mod state;
+pub mod viewer;
 
 pub use grid::view;
-pub use state::{shell_msg, ImageKind, ImagesMsg, ImagesState, CARD_SIZES};
+pub use state::{shell_msg, ImageKind, ImagesMsg, ImagesState, ImagesUp, CARD_SIZES};
+pub use viewer::{ViewerMsg, ViewerState};

@@ -81,12 +81,16 @@ galleries (id, title), file (path, size, format, width, height; duration for cli
 | `details` | `bool` | panel open |
 | `failed` | `Option<u32>` | the index that couldn't be shown |
 
-**Events**: `Open(i)`, `Next`, `Previous`, `Shown(i)`, `Failed(i)`, `Zoom { delta, anchor }`,
-`Pan { dx, dy }`, `Rotate`, `ToggleActual`, `Fit`, `ToggleSlideshow`, `SetDelay(s)`, `Tick`,
-`LoopDone`, `ToggleDetails`, `ResultsChanged { count }`, `Close`.
+**Events**: `Open { at, count }`, `Next`, `Previous`, `First`, `Last`, `Shown { at, looping }`,
+`Failed(i)`, `Zoom { delta, anchor }`, `Pan { dx, dy }`, `Rotate { clockwise }`, `ToggleActual`,
+`Fit`, `ToggleSlideshow { delay_s }`, `SetDelay(s)`, `Tick`, `LoopDone`, `ToggleDetails`,
+`ResultsChanged { count }`, `Close`. (`looping` is a field: the image shown animates or is a clip.)
 
-**Commands**: `Show(i)` (the UI maps the index to a page and a file), `SetView(View)`,
-`Prefetch(Vec<u32>)`, `Close { at }` (the grid focuses `at`'s card on its page), `Nothing`.
+**Commands**: `Show { at, prefetch }` (the UI maps the index to a page and a file; every show
+carries its look-ahead), `SetView(View)`, `Prefetch(Vec<u32>)` (a slideshow starting or resuming),
+`Close { at }` (the grid focuses `at`'s card on its page), `Nothing`. The zoom anchor is the
+pointer from the picture's centre in fractions of its zoom-0 size; pan is in fractions of the shown
+picture (mpv's units), so zooming about the pointer moves the pan by `anchor × (2^-z' − 2^-z)`.
 
 ### Validation and transitions
 

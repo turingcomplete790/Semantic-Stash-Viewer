@@ -21,6 +21,7 @@ use stash_core::connection::manager::{
     ConnectRequest, ConnectionManager, ManagerConfig, StashProber, Target,
 };
 use stash_core::connection::snapshot::{ConnectionSnapshot, SessionState};
+use stash_core::images::neighbours::Neighbours;
 use stash_core::jobs::watcher::JobsWatcher;
 use stash_core::playback::history::{flush, FlushOutcome, HistoryQueue, PlayHistoryReport};
 use stash_core::profiles::{service, ProfileDraft, ProfileStore, ServerProfile};
@@ -54,6 +55,8 @@ pub struct Services {
     pub history: Arc<Mutex<HistoryQueue>>,
     /// The card preview generation being decoded (0: none).
     preview_wanted: std::sync::atomic::AtomicU64,
+    /// The image viewer's neighbour files, for the current profile (012 R4).
+    neighbours: Mutex<Option<(Uuid, Arc<Neighbours>)>>,
 }
 
 impl Services {
@@ -111,6 +114,7 @@ impl Services {
             thumbs: Mutex::new(None),
             history,
             preview_wanted: std::sync::atomic::AtomicU64::new(0),
+            neighbours: Mutex::new(None),
         }))
     }
 
@@ -159,9 +163,98 @@ impl Services {
             .or_else(|| lock(&self.profiles).last_used_profile_id())
     }
 
-    /// Clear the profile's view cache (thumbnails included); returns the bytes freed.
+    /// Clear the profile's view cache (thumbnails and the viewer's files included); returns the
+    /// bytes freed.
     pub fn clear_cache(&self, profile: Uuid) -> Result<u64, AppError> {
-        self.caches.clear(profile)
+        let files = match lock(&self.neighbours).as_ref() {
+            Some((id, n)) if *id == profile => n.clear(),
+            _ => 0,
+        };
+        Ok(self.caches.clear(profile)? + files)
+    }
+
+    /// The profile's cache size, the viewer's files included.
+    pub fn cache_size(&self, profile: Uuid) -> u64 {
+        let files = match lock(&self.neighbours).as_ref() {
+            Some((id, n)) if *id == profile => n.size_bytes(),
+            _ => 0,
+        };
+        self.caches.size(profile) + files
+    }
+
+    /// The current profile's neighbour files (in its cache directory, `images/`).
+    pub fn neighbours(&self) -> Option<Arc<Neighbours>> {
+        let profile = self.current_profile()?;
+        let mut current = lock(&self.neighbours);
+        if let Some((id, n)) = current.as_ref() {
+            if *id == profile {
+                return Some(Arc::clone(n));
+            }
+        }
+        let dir = self
+            .paths
+            .cache_root()
+            .join(profile.to_string())
+            .join("images");
+        let n = Arc::new(Neighbours::open(dir));
+        *current = Some((profile, Arc::clone(&n)));
+        Some(n)
+    }
+
+    /// Show an image in the player (012 R3, R4): its file on disk when a neighbour fetch has it,
+    /// otherwise Stash's `/image/<id>/image` with the key in a header (fetched to disk alongside,
+    /// so the way back is local). `looped`: it animates or is a clip.
+    pub async fn open_image(&self, id: &str, title: &str, looped: bool) -> Result<(), AppError> {
+        let player = Arc::clone(self.player()?);
+        let (client, api_key, strict_tls) = self.active_client()?;
+        let neighbours = self.neighbours();
+        let local = neighbours.as_ref().and_then(|n| n.ready(id));
+        let (source, api_key) = match local {
+            Some(path) => (path.to_string_lossy().into_owned(), None),
+            None => {
+                if !matches!(self.manager.snapshot().state, SessionState::Connected) {
+                    return Err(AppError::NotConnected);
+                }
+                let mut url = client.endpoint("image");
+                if let Ok(mut segments) = url.path_segments_mut() {
+                    segments.push(id).push("image");
+                }
+                if let Some(n) = neighbours {
+                    let id = id.to_owned();
+                    self.runtime.spawn(async move {
+                        if let Err(e) = n.fetch(&client, &id).await {
+                            tracing::debug!(error = %e, "image file not kept");
+                        }
+                    });
+                }
+                (url.to_string(), api_key)
+            }
+        };
+        tracing::info!(image = %id, local = api_key.is_none(), "opening image");
+        player.open(OpenRequest {
+            source,
+            scene_id: None,
+            title: Some(title.to_owned()),
+            api_key,
+            strict_tls,
+            cache: None,
+            start_seconds: None,
+            transcoded: false,
+            kind: player::MediaKind::Image { looped },
+        });
+        Ok(())
+    }
+
+    /// Fetch the viewer's neighbours' files to disk, in order (012 R4).
+    pub async fn prefetch_image_files(&self, ids: Vec<String>) {
+        let (Some(n), Ok((client, _, _))) = (self.neighbours(), self.active_client()) else {
+            return;
+        };
+        for id in ids {
+            if let Err(e) = n.fetch(&client, &id).await {
+                tracing::debug!(error = %e, "neighbour file not fetched");
+            }
+        }
     }
 
     /// Test a new server and save it (001 US1, US4). The core checks the address, the key, and

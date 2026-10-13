@@ -419,6 +419,10 @@ impl App {
                         .map(|now| Message::Session(session::Msg::PreviewFrame(now))),
                 );
             }
+            // The image viewer's controls fade after a while still (012).
+            if session.viewer_controls_fading() {
+                subs.push(iced::time::every(Duration::from_millis(250)).map(|_| Message::Tick));
+            }
             if session.playback.active() {
                 subs.push(Subscription::run(video::frames).map(|()| Message::FrameReady));
                 if session.playback.screen.needs_tick() {

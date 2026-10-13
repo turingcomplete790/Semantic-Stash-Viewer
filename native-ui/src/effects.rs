@@ -32,13 +32,18 @@ pub const SAVE_DELAY: std::time::Duration = std::time::Duration::from_millis(500
 pub enum PlayerAction {
     TogglePause,
     SeekRelative(f64),
-    Seek { seconds: f64, exact: bool },
+    Seek {
+        seconds: f64,
+        exact: bool,
+    },
     SetVolume(f64),
     SetMuted(bool),
     SetSpeed(f64),
     FrameStep(Direction),
     Replay,
     Close,
+    /// The image viewer's view (012): zoom, pan, rotation, actual size.
+    View(stash_core::images::viewer::View),
 }
 
 /// A change to the notification centre, asked for by the UI.
@@ -118,6 +123,22 @@ pub enum Effect {
     LoadSavedFilters,
     /// Read the saved image filters through the cache (012).
     LoadSavedImageFilters,
+    /// Show an image in the player (012 US2); `looped`: it animates or is a clip.
+    OpenImage {
+        id: String,
+        title: String,
+        looped: bool,
+    },
+    /// Fetch the viewer's neighbours' files to disk (012 R4).
+    PrefetchImageFiles(Vec<String>),
+    /// The same for neighbours on another page: the cards at `positions` of that page (read
+    /// through the cache, where paging's prefetch put it).
+    PrefetchPageImageFiles {
+        query: stash_core::images::ImageQuery,
+        page: u32,
+        size: u32,
+        positions: Vec<usize>,
+    },
     /// Read a picker's list through the cache.
     LoadChoices(stash_core::adapter::choices::ChoiceKind),
     /// Read the semantic vocabulary (and these colour rules' matches) through the cache.
@@ -354,6 +375,11 @@ pub enum Reply {
     },
     UiSettings(Result<stash_core::adapter::filters::UiSettings, AppError>),
     SavedFilters(Result<Vec<stash_core::scenes::filter::saved::SavedFilter>, AppError>),
+    /// An image open was handed to the player, or couldn't be (012).
+    ImageOpened {
+        id: String,
+        result: Result<(), AppError>,
+    },
     SavedImageFilters(
         Result<
             Vec<stash_core::scenes::filter::saved::SavedFilterOf<stash_core::images::ImageSort>>,
@@ -559,6 +585,45 @@ pub fn run(effect: Effect, services: &Arc<Services>, window: Option<window::Id>)
                         .map(|c| c.data)
                 },
                 |result| Message::Reply(Reply::SavedFilters(result)),
+            )
+        }
+        Effect::OpenImage { id, title, looped } => {
+            let services = Arc::clone(services);
+            Task::perform(
+                async move {
+                    let result = services.open_image(&id, &title, looped).await;
+                    (id, result)
+                },
+                |(id, result)| Message::Reply(Reply::ImageOpened { id, result }),
+            )
+        }
+        Effect::PrefetchImageFiles(ids) => {
+            let services = Arc::clone(services);
+            Task::perform(
+                async move { services.prefetch_image_files(ids).await },
+                |()| Message::Idle,
+            )
+        }
+        Effect::PrefetchPageImageFiles {
+            query,
+            page,
+            size,
+            positions,
+        } => {
+            let services = Arc::clone(services);
+            Task::perform(
+                async move {
+                    let Ok(p) = images_page(&services, query, page, size).await else {
+                        return;
+                    };
+                    let ids = positions
+                        .iter()
+                        .filter_map(|i| p.items.get(*i))
+                        .map(|c| c.id.clone())
+                        .collect();
+                    services.prefetch_image_files(ids).await;
+                },
+                |()| Message::Idle,
             )
         }
         Effect::LoadSavedImageFilters => {
@@ -786,7 +851,7 @@ pub fn run(effect: Effect, services: &Arc<Services>, window: Option<window::Id>)
                 move || {
                     services
                         .current_profile()
-                        .map_or(0, |id| services.caches.size(id))
+                        .map_or(0, |id| services.cache_size(id))
                 },
                 |size| Message::Reply(Reply::CacheSize(size)),
             )
@@ -1307,5 +1372,15 @@ fn player_command(p: &player::Player, action: PlayerAction) {
         PlayerAction::FrameStep(Direction::Back) => p.frame_step_back(),
         PlayerAction::Replay => p.replay(),
         PlayerAction::Close => p.close(),
+        PlayerAction::View(v) => {
+            use player::PlayerCommand as C;
+            p.dispatch(C::ActualSize(v.actual));
+            p.dispatch(C::Zoom(f64::from(v.zoom)));
+            p.dispatch(C::Pan {
+                x: f64::from(v.pan.0),
+                y: f64::from(v.pan.1),
+            });
+            p.dispatch(C::Rotate(v.quarter_turns));
+        }
     }
 }

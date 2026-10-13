@@ -1,6 +1,9 @@
 //! Images (012): their sorts, cards, pages, and details. The list machinery is the browse layer's
 //! (`crate::browse`); this holds what is images' own.
 
+pub mod neighbours;
+pub mod viewer;
+
 use serde::{Deserialize, Serialize};
 
 use crate::browse::query::{ListQuery, Sort};
