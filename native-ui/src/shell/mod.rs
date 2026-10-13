@@ -12,14 +12,19 @@ use stash_core::connection::ServerInfo;
 
 use crate::effects::Effect;
 use crate::machine::Step;
+use crate::screens::browse::state::BrowseUp;
+use crate::screens::images::ImagesMsg;
 use crate::screens::scenes::keyboard::{grid_key, GridKeys};
 use crate::screens::scenes::layout::Layout;
+use crate::screens::scenes::thumbs::{thumb_key, ThumbKey};
 use crate::screens::scenes::{ScenesMsg, ScenesUp};
 use crate::screens::{Context, Screen, Section, SettingsPage};
 use crate::session::snapshot::{SavedSession, SavedTab};
 use crate::widgets::{icon, icon_button, one_line, theme, Icon};
 use iced::keyboard::{key::Named, Key, Modifiers};
-use stash_core::scenes::{SceneCard, ScenePage};
+use stash_core::images::{ImagePage, ImageSort};
+use stash_core::scenes::filter::saved::SavedFilterOf;
+use stash_core::scenes::ScenePage;
 use stash_core::AppError;
 
 pub use tab::{Tab, TabId, MAX_HISTORY};
@@ -47,6 +52,8 @@ pub struct Shell {
     touched: bool,
     /// The server's default scene filter: new Scenes screens start from it (008 FR-004).
     pub default_scenes: Option<stash_core::scenes::filter::saved::SavedFilter>,
+    /// The server's default image filter: new Images screens start from it (012 FR-005).
+    pub default_images: Option<SavedFilterOf<ImageSort>>,
 }
 
 #[derive(Debug, Clone)]
@@ -75,6 +82,8 @@ pub enum ShellMsg {
     Settings(crate::screens::settings::SettingsMsg),
     /// For the active Scenes screen.
     Scenes(ScenesMsg),
+    /// For the active Images screen (012).
+    Images(ImagesMsg),
     /// For the active Scene screen.
     Scene(crate::screens::scene::SceneMsg),
     /// Open Scenes filtered to a performer, tag, or studio (008 FR-006), here or in a new tab.
@@ -116,11 +125,14 @@ pub enum Up {
 }
 
 impl Shell {
-    /// A fresh screen for a section: Scenes starts from the server's default filter.
+    /// A fresh screen for a section: Scenes and Images start from the server's default filters.
     fn fresh(&self, section: Section) -> Screen {
-        match (section, &self.default_scenes) {
-            (Section::Scenes, Some(filter)) => {
+        match (section, &self.default_scenes, &self.default_images) {
+            (Section::Scenes, Some(filter), _) => {
                 Screen::Scenes(Box::new(crate::screens::ScenesState::from_saved(filter)))
+            }
+            (Section::Images, _, Some(filter)) => {
+                Screen::Images(Box::new(crate::screens::ImagesState::from_saved(filter)))
             }
             _ => Screen::for_section(section),
         }
@@ -135,6 +147,7 @@ impl Shell {
             layout: Layout::default(),
             touched: false,
             default_scenes: None,
+            default_images: None,
         };
         let effects = shell.active_mut().enter();
         (shell, effects)
@@ -161,6 +174,7 @@ impl Shell {
             layout: Layout::default(),
             touched: false,
             default_scenes: None,
+            default_images: None,
         };
         let effects = shell.active_mut().enter();
         Some((shell, effects))
@@ -342,6 +356,24 @@ impl Shell {
                 }
                 effects
             }
+            ShellMsg::Images(m) => {
+                let (tab, layout) = (self.active().id, self.layout);
+                let Screen::Images(state) = self.active_mut().current_mut() else {
+                    return Step::none();
+                };
+                let Step { effects, up } = state.update(m, tab, &layout);
+                match up {
+                    Some(BrowseUp::Need(need)) => {
+                        return Step {
+                            effects,
+                            up: Some(Up::Need(need)),
+                        }
+                    }
+                    // The viewer opens here (US2).
+                    Some(BrowseUp::Open { .. }) | None => {}
+                }
+                effects
+            }
             ShellMsg::FilterTo { criterion, new_tab } => self.filter_to(criterion, new_tab),
             ShellMsg::PlaybackChange(change) => return Step::up(Up::PlaybackChange(change)),
             ShellMsg::Scene(m) => {
@@ -387,6 +419,28 @@ impl Shell {
             .unwrap_or_default()
     }
 
+    /// A page of images arrived for a request from tab `tab` (012), as [`Shell::scenes_page`].
+    pub fn images_page(
+        &mut self,
+        tab: TabId,
+        generation: u64,
+        result: Result<ImagePage, AppError>,
+        waiting: bool,
+    ) -> Vec<Effect> {
+        let Some(i) = self.index_of(tab) else {
+            return Vec::new();
+        };
+        self.tabs[i]
+            .history
+            .iter_mut()
+            .find_map(|screen| match screen {
+                Screen::Images(state) if state.awaits(generation) => Some(state),
+                _ => None,
+            })
+            .map(|state| state.page_loaded(generation, result, waiting))
+            .unwrap_or_default()
+    }
+
     /// A search's debounce came due for tab `tab`.
     pub fn search_due(&mut self, tab: TabId, generation: u64) -> Vec<Effect> {
         let Some(i) = self.index_of(tab) else {
@@ -396,10 +450,14 @@ impl Shell {
             .history
             .iter_mut()
             .find_map(|screen| match screen {
-                Screen::Scenes(state) if state.awaits_search(generation) => Some(state),
+                Screen::Scenes(state) if state.awaits_search(generation) => {
+                    Some(state.search_due(generation))
+                }
+                Screen::Images(state) if state.awaits_search(generation) => {
+                    Some(state.search_due(generation))
+                }
                 _ => None,
             })
-            .map(|state| state.search_due(generation))
             .unwrap_or_default()
     }
 
@@ -597,6 +655,7 @@ impl Shell {
         let tab = self.active().id;
         match self.active_mut().current_mut() {
             Screen::Scenes(state) => state.cache_changed(key, tab),
+            Screen::Images(state) => state.cache_changed(key, tab),
             _ => Vec::new(),
         }
     }
@@ -610,30 +669,57 @@ impl Shell {
         }
     }
 
-    /// The cards the active screen shows.
-    pub fn active_cards(&self) -> &[SceneCard] {
+    /// The thumbnails of the cards the active screen shows.
+    pub fn active_thumbs(&self) -> Vec<ThumbKey> {
         match self.active().current() {
-            Screen::Scenes(state) => state.cards(),
-            _ => &[],
+            Screen::Scenes(state) => state.cards().iter().filter_map(thumb_key).collect(),
+            Screen::Images(state) => state
+                .cards()
+                .iter()
+                .filter_map(|c| {
+                    c.thumb
+                        .as_deref()
+                        .and_then(crate::screens::scenes::thumbs::key_of)
+                })
+                .collect(),
+            _ => Vec::new(),
         }
     }
 
-    /// A key for the active screen (the grid's keys on Scenes); `None` when it isn't one.
+    /// The active screen's grid geometry: Images' cards are their own size (012).
+    pub fn active_layout(&self) -> Layout {
+        match self.active().current() {
+            Screen::Images(state) => state.layout(&self.layout),
+            _ => self.layout,
+        }
+    }
+
+    /// A key for the active screen (the grid's keys on Scenes and Images); `None` when it isn't
+    /// one.
     pub fn screen_key(&mut self, key: &Key, mods: Modifiers) -> Option<Step<Up>> {
         if mods.alt() || mods.logo() || (mods.control() && *key != Key::Named(Named::Enter)) {
             return None;
         }
-        let Screen::Scenes(state) = self.active().current() else {
-            return None;
+        let layout = self.active_layout();
+        let (focused, count, mode) = match self.active().current() {
+            Screen::Scenes(s) => (s.focused, s.cards().len(), s.mode),
+            Screen::Images(s) => (s.focused, s.cards().len(), s.mode),
+            _ => return None,
         };
         let keys = GridKeys {
-            index: state.focused,
-            count: state.cards().len(),
-            cols: self.layout.cols(state.mode),
+            index: focused,
+            count,
+            cols: layout.cols(mode),
             ctrl: mods.control(),
         };
         let action = grid_key(key, keys)?;
-        Some(self.update(ShellMsg::Scenes(ScenesMsg::Grid(action))))
+        let msg = match self.active().current() {
+            Screen::Images(_) => ShellMsg::Images(ImagesMsg::List(
+                crate::screens::browse::state::BrowseMsg::Grid(action),
+            )),
+            _ => ShellMsg::Scenes(ScenesMsg::Grid(action)),
+        };
+        Some(self.update(msg))
     }
 
     /// A summary read for tab `tab`'s Home screen.
@@ -698,6 +784,7 @@ impl Shell {
                 ),
                 section(Section::Home, Icon::Home, "Home"),
                 section(Section::Scenes, Icon::Scenes, "Scenes"),
+                section(Section::Images, Icon::Images, "Images"),
                 section(Section::Settings, Icon::Settings, "Settings"),
                 Space::new().width(Length::Fill),
                 right,

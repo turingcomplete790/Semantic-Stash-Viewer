@@ -116,6 +116,8 @@ pub enum Effect {
     LoadUiSettings,
     /// Read the saved scene filters through the cache.
     LoadSavedFilters,
+    /// Read the saved image filters through the cache (012).
+    LoadSavedImageFilters,
     /// Read a picker's list through the cache.
     LoadChoices(stash_core::adapter::choices::ChoiceKind),
     /// Read the semantic vocabulary (and these colour rules' matches) through the cache.
@@ -352,6 +354,12 @@ pub enum Reply {
     },
     UiSettings(Result<stash_core::adapter::filters::UiSettings, AppError>),
     SavedFilters(Result<Vec<stash_core::scenes::filter::saved::SavedFilter>, AppError>),
+    SavedImageFilters(
+        Result<
+            Vec<stash_core::scenes::filter::saved::SavedFilterOf<stash_core::images::ImageSort>>,
+            AppError,
+        >,
+    ),
     Choices {
         kind: stash_core::adapter::choices::ChoiceKind,
         result: Result<stash_core::adapter::choices::ChoiceList, AppError>,
@@ -551,6 +559,25 @@ pub fn run(effect: Effect, services: &Arc<Services>, window: Option<window::Id>)
                         .map(|c| c.data)
                 },
                 |result| Message::Reply(Reply::SavedFilters(result)),
+            )
+        }
+        Effect::LoadSavedImageFilters => {
+            let services = Arc::clone(services);
+            Task::perform(
+                async move {
+                    services
+                        .read_cached(
+                            stash_core::cache::keys::SAVED_IMAGE_FILTERS,
+                            RefreshPolicy::Auto,
+                            false,
+                            |client| async move {
+                                stash_core::adapter::filters::saved_image_filters(&client).await
+                            },
+                        )
+                        .await
+                        .map(|c| c.data)
+                },
+                |result| Message::Reply(Reply::SavedImageFilters(result)),
             )
         }
         Effect::LoadChoices(kind) => {

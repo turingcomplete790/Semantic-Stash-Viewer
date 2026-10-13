@@ -172,3 +172,39 @@ fn the_queue_views_keys_are_listed() {
         None
     );
 }
+
+/// 012 T028: Images has the Scenes grid's keys, listed under "Images".
+#[test]
+fn images_has_the_scenes_grid_keys() {
+    let images = [Level::Images];
+    let none = Modifiers::empty();
+    assert_eq!(resolve(&ch("/"), none, &images), Some(Action::FocusSearch));
+    assert_eq!(resolve(&ch("f"), none, &images), Some(Action::FilterMenu));
+    assert_eq!(resolve(&ch("s"), none, &images), Some(Action::SavedFilters));
+    for (key, mods) in [
+        (Key::Named(Named::ArrowRight), none),
+        (Key::Named(Named::Home), none),
+        (Key::Named(Named::End), none),
+        (ch("]"), none),
+        (ch("["), none),
+        (Key::Named(Named::Enter), none),
+        (Key::Named(Named::Enter), Modifiers::CTRL),
+    ] {
+        assert_eq!(
+            resolve(&key, mods, &images),
+            Some(Action::Images),
+            "{key:?}"
+        );
+    }
+    let scenes: Vec<_> = bindings()
+        .into_iter()
+        .filter(|b| b.level == Level::Scenes)
+        .map(|b| b.chord)
+        .collect();
+    let images: Vec<_> = bindings()
+        .into_iter()
+        .filter(|b| b.level == Level::Images)
+        .map(|b| b.chord)
+        .collect();
+    assert_eq!(images, scenes, "the same chords, in the same order");
+}

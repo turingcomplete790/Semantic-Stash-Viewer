@@ -72,8 +72,12 @@ pub fn pager<K: Kind>(list: &List<K>, msg: Map<K>) -> Element<'_, ShellMsg> {
     .into()
 }
 
-/// The bar above the grid.
-pub fn top<K: Kind>(list: &List<K>, msg: Map<K>) -> Element<'_, ShellMsg> {
+/// The bar above the grid; `extra` sits before the display modes (Images' card size).
+pub fn top<'a, K: Kind>(
+    list: &'a List<K>,
+    msg: Map<K>,
+    extra: Option<Element<'a, ShellMsg>>,
+) -> Element<'a, ShellMsg> {
     let sorts: Vec<SortChoice<K>> = K::sorts().iter().copied().map(SortChoice).collect();
     let sizes: Vec<PerPage> = PAGE_SIZES.iter().copied().map(PerPage).collect();
     let direction = match list.query.direction {
@@ -138,6 +142,9 @@ pub fn top<K: Kind>(list: &List<K>, msg: Map<K>) -> Element<'_, ShellMsg> {
             .text_size(13)
             .padding([4, 8]),
         );
+    if let Some(extra) = extra {
+        bar = bar.push(extra);
+    }
     for (mode, label) in K::modes() {
         bar = bar.push(
             button(text(*label).size(13))

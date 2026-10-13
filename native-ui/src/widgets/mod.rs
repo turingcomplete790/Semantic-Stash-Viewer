@@ -17,6 +17,8 @@ use iced::{Element, Length, Theme};
 pub enum Icon {
     Home,
     Scenes,
+    /// Lucide `image` (012).
+    Images,
     Bell,
     Settings,
     Server,
@@ -43,6 +45,9 @@ impl Icon {
             }
             Icon::Scenes => {
                 r#"<circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/>"#
+            }
+            Icon::Images => {
+                r#"<rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>"#
             }
             Icon::Bell => {
                 r#"<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>"#

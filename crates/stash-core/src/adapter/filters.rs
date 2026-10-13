@@ -70,6 +70,14 @@ pub async fn saved_scene_filters(client: &StashClient) -> Result<Vec<SavedFilter
     saved_filters_for(client, Entity::Scenes).await
 }
 
+/// One saved-filters request for images, decoded with images' criteria and sorts (cached per
+/// server as `saved-filters:images`, 012).
+pub async fn saved_image_filters(
+    client: &StashClient,
+) -> Result<Vec<SavedFilterOf<crate::images::ImageSort>>, AppError> {
+    saved_filters_for(client, Entity::Images).await
+}
+
 /// One saved-filters request for `entity` (mode `SCENES` or `IMAGES`), decoded with its own
 /// criteria and sorts (cached per server as `saved-filters:<entity>`).
 pub async fn saved_filters_for<S: Sort>(

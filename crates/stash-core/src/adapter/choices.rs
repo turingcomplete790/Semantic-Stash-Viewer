@@ -21,15 +21,18 @@ pub enum ChoiceKind {
     Studios,
     Groups,
     Galleries,
+    /// Folders by path, for Images' folder criterion (012).
+    Folders,
 }
 
 impl ChoiceKind {
-    pub const ALL: [ChoiceKind; 5] = [
+    pub const ALL: [ChoiceKind; 6] = [
         ChoiceKind::Performers,
         ChoiceKind::Tags,
         ChoiceKind::Studios,
         ChoiceKind::Groups,
         ChoiceKind::Galleries,
+        ChoiceKind::Folders,
     ];
 
     /// The cache key's kind (`choices:<key>`).
@@ -40,6 +43,7 @@ impl ChoiceKind {
             ChoiceKind::Studios => "studios",
             ChoiceKind::Groups => "groups",
             ChoiceKind::Galleries => "galleries",
+            ChoiceKind::Folders => "folders",
         }
     }
 }
@@ -201,6 +205,26 @@ pub(crate) struct ChoiceListGalleries {
     find_galleries: GalleryChoices,
 }
 
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(graphql_type = "Folder")]
+struct FolderChoice {
+    id: cynic::Id,
+    path: String,
+}
+
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(graphql_type = "FindFoldersResultType")]
+struct FolderChoices {
+    folders: Vec<FolderChoice>,
+}
+
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(graphql_type = "Query", variables = "ChoiceVariables")]
+pub(crate) struct ChoiceListFolders {
+    #[arguments(filter: $filter)]
+    find_folders: FolderChoices,
+}
+
 /// Every entry, sorted by name (`per_page: -1`).
 pub(crate) fn all_by_name() -> FindFilterType {
     FindFilterType {
@@ -305,6 +329,20 @@ pub async fn choice_list(client: &StashClient, kind: ChoiceKind) -> Result<Choic
                     .unwrap_or_else(|| format!("Gallery {}", g.id.inner()));
                 choice(g.id, name, Vec::new())
             })
+            .collect(),
+        // A folder's name is its whole path: the picker searches it.
+        ChoiceKind::Folders => client
+            .graphql(&ChoiceListFolders::build(ChoiceVariables {
+                filter: FindFilterType {
+                    sort: Some("path".into()),
+                    ..filter
+                },
+            }))
+            .await?
+            .find_folders
+            .folders
+            .into_iter()
+            .map(|f| choice(f.id, f.path, Vec::new()))
             .collect(),
     };
     Ok(ChoiceList { kind, entries })

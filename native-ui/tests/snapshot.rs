@@ -219,3 +219,88 @@ fn queue_fields_are_additive() {
     assert_eq!((back.repeat, back.shuffle), (Repeat::One, true));
     assert_eq!(VERSION, 2, "no version bump");
 }
+
+/// 012 T026: an Images tab's query, page, page size, card size, mode, scroll, focus, and applied
+/// filter round-trip in version 2 and restore without a request until it's shown.
+#[test]
+fn an_images_tab_round_trips() {
+    use semantic_stash_viewer_native::screens::browse::state::Applied;
+    use semantic_stash_viewer_native::screens::ImagesState;
+    use stash_core::browse::query::SortDirection;
+    use stash_core::images::ImageSort;
+    use stash_core::scenes::filter::kinds::CriterionKind;
+    use stash_core::scenes::filter::{Criterion, CriterionValue, Item, Modifier};
+
+    let mut state = ImagesState::default();
+    state.query.search = "shore".into();
+    state.query.sort = ImageSort::Date;
+    state.query.direction = SortDirection::Desc;
+    state.query.criteria = vec![Criterion::new(
+        CriterionKind::Folder,
+        Modifier::Includes,
+        CriterionValue::Items {
+            items: vec![Item {
+                id: "6".into(),
+                label: "ssv-prod".into(),
+            }],
+            excluded: vec![],
+            depth: Some(-1),
+        },
+    )];
+    state.page = 3;
+    state.page_size = 60;
+    state.card_size = 3;
+    state.mode = Mode::Wall;
+    state.scroll = 512.0;
+    state.focused = Some(7);
+    state.applied = Some(Applied {
+        id: "4".into(),
+        name: "SSV images performer A".into(),
+    });
+
+    let (mut shell, _) = Shell::new();
+    let _ = shell.update(ShellMsg::Open(Screen::Images(Box::new(state.clone()))));
+    let saved = snapshot::capture(&shell);
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("session.json");
+    let profile = Uuid::new_v4();
+    snapshot::save(&path, profile, &saved).expect("save");
+    let loaded = snapshot::load(&path, profile).expect("load");
+    assert_eq!(loaded, saved);
+
+    let (restored, _) = Shell::restore(loaded).expect("restore");
+    let Screen::Images(back) = restored.active().current() else {
+        panic!("Images restored")
+    };
+    assert_eq!(back.query, state.query);
+    assert_eq!(
+        (back.page, back.page_size, back.card_size, back.mode),
+        (3, 60, 3, Mode::Wall)
+    );
+    assert_eq!((back.scroll, back.focused), (512.0, Some(7)));
+    assert_eq!(back.applied, state.applied);
+    assert_eq!(restored.capture(), shell.capture());
+    assert_eq!(VERSION, 2, "Images tabs are additive");
+}
+
+/// 012 T026: a version 2 session saved before Images (no Images screens, no card size) loads as
+/// it was, and an Images tab without a card size gets the default.
+#[test]
+fn sessions_from_before_images_load_unchanged() {
+    use semantic_stash_viewer_native::screens::ImagesState;
+    let shell = busy_shell();
+    let saved = snapshot::capture(&shell);
+    let json = serde_json::to_string(&saved).expect("serialise");
+    assert!(!json.contains("Images") && !json.contains("card_size"));
+    let back: SavedSession = serde_json::from_str(&json).expect("parse");
+    assert_eq!(back, saved);
+
+    let mut value = serde_json::to_value(ImagesState::default()).expect("serialise");
+    assert!(value
+        .as_object_mut()
+        .expect("an object")
+        .remove("card_size")
+        .is_some());
+    let old: ImagesState = serde_json::from_value(value).expect("loads");
+    assert_eq!(old.card_size, ImagesState::default().card_size);
+}

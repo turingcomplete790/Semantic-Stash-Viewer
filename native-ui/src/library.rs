@@ -12,7 +12,8 @@ use std::sync::Arc;
 use stash_core::adapter::chips::{ChipDetails, ChipKind};
 use stash_core::adapter::choices::{ChoiceKind, ChoiceList};
 use stash_core::adapter::filters::UiSettings;
-use stash_core::scenes::filter::saved::SavedFilter;
+use stash_core::images::ImageSort;
+use stash_core::scenes::filter::saved::{SavedFilter, SavedFilterOf};
 use stash_core::scenes::filter::search::Folded;
 use stash_core::semantic::{default_colour_rules, ColourRule, Rgb, SemanticVocabulary};
 use stash_core::AppError;
@@ -55,12 +56,16 @@ pub enum Need {
     Choices(ChoiceKind),
     Vocabulary,
     SavedFilters,
+    /// The saved image filters (012).
+    SavedImageFilters,
 }
 
 #[derive(Debug, Default)]
 pub struct Library {
     pub ui: Loadable<UiSettings>,
     pub saved: Loadable<Vec<SavedFilter>>,
+    /// The saved image filters (012).
+    pub saved_images: Loadable<Vec<SavedFilterOf<ImageSort>>>,
     pub choices: HashMap<ChoiceKind, Loadable<Arc<Choices>>>,
     pub vocabulary: Loadable<Arc<SemanticVocabulary>>,
     /// Chip cards fetched this session (performer, tag, studio), once each.
@@ -120,6 +125,13 @@ impl Library {
                 }
                 self.saved = Loadable::Loading;
                 vec![Effect::LoadSavedFilters]
+            }
+            Need::SavedImageFilters => {
+                if !self.saved_images.wanted() {
+                    return Vec::new();
+                }
+                self.saved_images = Loadable::Loading;
+                vec![Effect::LoadSavedImageFilters]
             }
         }
     }
@@ -187,6 +199,13 @@ impl Library {
         };
     }
 
+    pub fn saved_images_loaded(&mut self, result: Result<Vec<SavedFilterOf<ImageSort>>, AppError>) {
+        self.saved_images = match result {
+            Ok(list) => Loadable::Ready(list),
+            Err(_) => Loadable::Failed,
+        };
+    }
+
     pub fn choices_loaded(&mut self, kind: ChoiceKind, result: Result<ChoiceList, AppError>) {
         let value = match result {
             Ok(list) => {
@@ -222,6 +241,12 @@ impl Library {
         {
             self.saved = Loadable::NotLoaded;
             effects.extend(self.want(Need::SavedFilters));
+        }
+        if (key == "*" || key == stash_core::cache::keys::SAVED_IMAGE_FILTERS)
+            && self.saved_images.ready().is_some()
+        {
+            self.saved_images = Loadable::NotLoaded;
+            effects.extend(self.want(Need::SavedImageFilters));
         }
         if (key == "*" || key.starts_with(stash_core::cache::keys::SEMANTIC_VOCABULARY))
             && self.vocabulary.ready().is_some()

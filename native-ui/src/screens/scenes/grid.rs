@@ -157,20 +157,28 @@ pub fn view_with<'a>(
         .filter(|_| state.list.mode == Mode::Queue);
     let layout = ctx.layout;
     let (library, thumbs) = (ctx.library, ctx.thumbs);
-    grid::view(&state.list, ctx, tab, marked, shell_msg, move |list| {
-        if state.list.mode == Mode::Queue {
-            super::queue::view(
-                &state.queue,
-                state.list.cards(),
-                super::queue::strip(state.shuffle, state.repeat, state.autoplay),
-                list,
-                player,
-                &layout,
-                library,
-                thumbs,
-            )
-        } else {
-            list
-        }
-    })
+    grid::view(
+        &state.list,
+        ctx,
+        tab,
+        marked,
+        shell_msg,
+        None,
+        move |list| {
+            if state.list.mode == Mode::Queue {
+                super::queue::view(
+                    &state.queue,
+                    state.list.cards(),
+                    super::queue::strip(state.shuffle, state.repeat, state.autoplay),
+                    list,
+                    player,
+                    &layout,
+                    library,
+                    thumbs,
+                )
+            } else {
+                list
+            }
+        },
+    )
 }

@@ -15,5 +15,5 @@ pub fn pager(state: &ScenesState) -> Element<'_, ShellMsg> {
 
 /// The bar above the grid.
 pub fn top(state: &ScenesState) -> Element<'_, ShellMsg> {
-    controls::top(&state.list, shell_msg)
+    controls::top(&state.list, shell_msg, None)
 }

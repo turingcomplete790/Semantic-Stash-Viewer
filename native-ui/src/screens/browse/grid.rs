@@ -197,6 +197,7 @@ fn cached_cards<'a, K: Kind>(
         marked.map(hash_of),
         layout.width.to_bits(),
         layout.height.to_bits(),
+        (layout.min_card.to_bits(), layout.aspect.to_bits()),
         ctx.thumbs.revision(),
         window,
         preview,
@@ -209,13 +210,15 @@ fn cached_cards<'a, K: Kind>(
 
 /// The list's screen: the bar, the filter chips, and the paged cards with the pager below them;
 /// `wrap` places the scrolled list in the section's layout (Scenes' queue panel), and `marked`
-/// is the card with a mark (the scene playing).
+/// is the card with a mark (the scene playing); `extra` goes in the top bar (Images' card size).
+#[allow(clippy::too_many_arguments)]
 pub fn view<'a, K: Kind>(
     list: &'a List<K>,
     ctx: &Context<'a>,
     tab: TabId,
     marked: Option<&'a str>,
     msg: Map<K>,
+    extra: Option<Element<'a, ShellMsg>>,
     wrap: impl FnOnce(Element<'a, ShellMsg>) -> Element<'a, ShellMsg>,
 ) -> Element<'a, ShellMsg> {
     let body: Element<'a, ShellMsg> = match &list.data {
@@ -277,7 +280,7 @@ pub fn view<'a, K: Kind>(
             wrap(scrolled)
         }
     };
-    let mut page = column![controls::top(list, msg)];
+    let mut page = column![controls::top(list, msg, extra)];
     if let Some(bar) = filters::bar(list, ctx.library, msg) {
         page = page.push(bar);
     }

@@ -9,8 +9,8 @@ use cynic::{MutationBuilder, QueryBuilder};
 use super::activity::{AddPlay, AddPlayVariables, SaveActivity, SaveActivityVariables};
 use super::chips::{ChipVariables, PerformerCard, StudioCard, TagCard};
 use super::choices::{
-    all_by_name, ordinary_tags_filter, ChoiceListGalleries, ChoiceListGroups, ChoiceListPerformers,
-    ChoiceListStudios, ChoiceListTags, ChoiceVariables, TagChoiceVariables,
+    all_by_name, ordinary_tags_filter, ChoiceListFolders, ChoiceListGalleries, ChoiceListGroups,
+    ChoiceListPerformers, ChoiceListStudios, ChoiceListTags, ChoiceVariables, TagChoiceVariables,
 };
 use super::filters::{
     SaveTagColours, SaveTagColoursVariables, SavedFiltersVariables, SavedSceneFilters, UiConfig,
@@ -128,6 +128,11 @@ pub fn documents() -> Vec<OperationDocument> {
             name: "ChoiceListGalleries",
             tier: Tier::Card,
             query: ChoiceListGalleries::build(choice()).query,
+        },
+        OperationDocument {
+            name: "ChoiceListFolders",
+            tier: Tier::Card,
+            query: ChoiceListFolders::build(choice()).query,
         },
         OperationDocument {
             name: "SemanticVocabulary",

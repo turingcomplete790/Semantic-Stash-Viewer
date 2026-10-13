@@ -75,6 +75,7 @@ pub fn choice_kind(kind: CriterionKind) -> Option<ChoiceKind> {
         CriterionKind::Studios => Some(ChoiceKind::Studios),
         CriterionKind::Groups => Some(ChoiceKind::Groups),
         CriterionKind::Galleries => Some(ChoiceKind::Galleries),
+        CriterionKind::Folder => Some(ChoiceKind::Folders),
         _ => None,
     }
 }

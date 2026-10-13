@@ -143,27 +143,28 @@ paging, and tab saving (FR-001–FR-007).
 
 **Independent Test**: quickstart V1.
 
-- [ ] T022 [P] [US1] Tests in `native-ui/tests/images.rs`: opening Images requests page 1 in the
+- [X] T022 [P] [US1] Tests in `native-ui/tests/images.rs`: opening Images requests page 1 in the
       default image filter; search, a criterion, the sort, and the direction requery from page 1;
       a saved image filter applies its query, page size, and mode; paging requests one page and
       prefetches neighbours; a scene-only criterion isn't offered
-- [ ] T023 [US1] `Section::Images` and `Screen::Images(Box<ImagesState>)` in
+- [X] T023 [US1] `Section::Images` and `Screen::Images(Box<ImagesState>)` in
       `native-ui/src/screens/mod.rs`; `ImagesState` (the browse state with `Entity::Images`, plus
       `viewer: Option<Viewer>` for US2) in `native-ui/src/screens/images/state.rs`; the navigation
       bar entry in the Stash web UI's order in `native-ui/src/shell/mod.rs`; page replies routed in
       `native-ui/src/session/mod.rs`
-- [ ] T024 [US1] Image cards in `native-ui/src/screens/images/grid.rs`: the thumbnail at the card's
+- [X] T024 [US1] Image cards in `native-ui/src/screens/images/grid.rs`: the thumbnail at the card's
       size, title and date (none in the wall), badges for animated (loop) and clip images; Grid |
       Wall and the card-size control in the top bar
-- [ ] T025 [US1] Images' sort menu (`ImageSort::all()`, random with reshuffle) and criteria in the
+- [X] T025 [US1] Images' sort menu (`ImageSort::all()`, random with reshuffle) and criteria in the
       filter menu from `Entity::Images` in `native-ui/src/screens/browse/filters.rs`; a galleries
       choice list for the galleries criterion in `crates/stash-core/src/adapter/choices.rs` and
-      `native-ui/src/library.rs`
-- [ ] T026 [P] [US1] Snapshot test in `native-ui/tests/snapshot.rs`: an Images tab's query, page,
+      `native-ui/src/library.rs` (galleries existed since 008; added a folders choice list,
+      `ChoiceListFolders`, for the folder criterion, and the saved image filters in the library)
+- [X] T026 [P] [US1] Snapshot test in `native-ui/tests/snapshot.rs`: an Images tab's query, page,
       page size, card size, mode, scroll, focus, and applied filter round-trip; a session without
       Images tabs loads unchanged; `VERSION` stays 2
-- [ ] T027 [US1] Tab saving and restore for Images in `native-ui/src/shell/mod.rs` (capture/restore)
-- [ ] T028 [US1] Keys: `Level::Images` in `native-ui/src/shell/keymap.rs` (the Scenes grid's keys:
+- [X] T027 [US1] Tab saving and restore for Images in `native-ui/src/shell/mod.rs` (capture/restore)
+- [X] T028 [US1] Keys: `Level::Images` in `native-ui/src/shell/keymap.rs` (the Scenes grid's keys:
       arrows, Home/End, `[` `]`, Enter, Ctrl+Enter, `/`, F, S) listed under "Images" in keyboard help
 
 **Checkpoint**: quickstart V1; T022 and T026 pass.
