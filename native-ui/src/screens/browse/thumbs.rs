@@ -24,10 +24,22 @@ pub type ThumbKey = (String, String);
 
 /// The key in a card's `ssv-thumb://localhost/scene/<id>?v=<version>`.
 pub fn thumb_key(card: &SceneCard) -> Option<ThumbKey> {
-    let thumb = card.thumb.as_deref()?;
-    let rest = thumb.strip_prefix("ssv-thumb://localhost/scene/")?;
+    key_of(card.thumb.as_deref()?)
+}
+
+/// The key in any card's thumbnail URL: a scene's `ssv-thumb://localhost/scene/<id>?v=<version>`
+/// is keyed by its id; an image's `…/image/<id>?v=<version>` by `image:<id>` (012), so the two
+/// never collide.
+pub fn key_of(thumb: &str) -> Option<ThumbKey> {
+    let rest = thumb.strip_prefix("ssv-thumb://localhost/")?;
+    let (kind, rest) = rest.split_once('/')?;
     let (id, version) = rest.split_once("?v=")?;
-    Some((id.to_owned(), version.to_owned()))
+    let id = match kind {
+        "scene" => id.to_owned(),
+        "image" => format!("image:{id}"),
+        _ => return None,
+    };
+    Some((id, version.to_owned()))
 }
 
 /// The one handle for cards without a thumbnail (yet).

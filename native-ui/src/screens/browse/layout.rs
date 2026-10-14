@@ -51,6 +51,11 @@ pub struct Layout {
     /// Physical pixels per logical pixel (2 on a high-density display): images are decoded at
     /// their drawn size times this, so they stay sharp.
     pub scale: f32,
+    /// Grid cards are at least this wide (Images' card size, 012 FR-004); the wall's tiles scale
+    /// with it.
+    pub min_card: f32,
+    /// A card's picture height over its width: 16:9 for scenes, square for images.
+    pub aspect: f32,
 }
 
 impl Default for Layout {
@@ -65,7 +70,22 @@ impl Layout {
             width,
             height,
             scale: 1.0,
+            min_card: MIN_CARD,
+            aspect: 9.0 / 16.0,
         }
+    }
+
+    /// The same window with cards at least `min_card` wide and pictures `aspect` high.
+    pub fn with_cards(self, min_card: f32, aspect: f32) -> Self {
+        Self {
+            min_card,
+            aspect,
+            ..self
+        }
+    }
+
+    fn min_wall(&self) -> f32 {
+        MIN_WALL * self.min_card / MIN_CARD
     }
 
     /// The same window at this display scale.
@@ -86,7 +106,7 @@ impl Layout {
     }
 
     fn content_width(&self) -> f32 {
-        (self.width - 2.0 * PAD - SCROLLBAR).max(MIN_CARD)
+        (self.width - 2.0 * PAD - SCROLLBAR).max(self.min_card)
     }
 
     /// How much of the queue view fits.
@@ -119,10 +139,10 @@ impl Layout {
         match mode {
             Mode::List | Mode::Queue => 1,
             Mode::Grid => {
-                (((self.content_width() + GAP) / (MIN_CARD + GAP)).floor() as usize).max(1)
+                (((self.content_width() + GAP) / (self.min_card + GAP)).floor() as usize).max(1)
             }
-            Mode::Wall => (((self.content_width() + WALL_GAP) / (MIN_WALL + WALL_GAP)).floor()
-                as usize)
+            Mode::Wall => (((self.content_width() + WALL_GAP) / (self.min_wall() + WALL_GAP))
+                .floor() as usize)
                 .max(1),
         }
     }
@@ -141,9 +161,9 @@ impl Layout {
         (self.content_width() - WALL_GAP * (cols - 1.0)) / cols
     }
 
-    /// A wall tile's 16:9 height.
+    /// A wall tile's height (16:9 for scenes).
     pub fn wall_height(&self) -> f32 {
-        (self.wall_width() * 9.0 / 16.0).floor()
+        (self.wall_width() * self.aspect).floor()
     }
 
     /// A card's width in the grid.
@@ -152,9 +172,9 @@ impl Layout {
         (self.content_width() - GAP * (cols - 1.0)) / cols
     }
 
-    /// A 16:9 thumbnail on a card.
+    /// A card's thumbnail height (16:9 for scenes).
     pub fn thumb_height(&self) -> f32 {
-        (self.card_width() * 9.0 / 16.0).floor()
+        (self.card_width() * self.aspect).floor()
     }
 
     /// A row's height including the gap below it.

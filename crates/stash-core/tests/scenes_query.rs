@@ -135,3 +135,20 @@ fn the_query_round_trips_as_camel_case_json() {
     let back: SceneQuery = serde_json::from_value(json).expect("back");
     assert_eq!(back, q);
 }
+
+/// 012 T006: the browse layer's generic query keeps Scenes' saved form and cache keys, so an 011
+/// session and its cache entries stay valid.
+#[test]
+fn a_saved_scene_query_survives_the_generic_query() {
+    let saved = r#"{"search":"beach","sort":"random","direction":"asc","seed":42,"criteria":[{"kind":"Organized","modifier":"EQUALS","value":{"Bool":true}}]}"#;
+    let q: SceneQuery = serde_json::from_str(saved).expect("an 011 query loads");
+    assert_eq!(q.sort, SceneSort::Random);
+    assert_eq!(serde_json::to_string(&q).expect("serialise"), saved);
+    assert_eq!(q.stash_sort().expect("seeded"), "random_42");
+    let plain = SceneQuery::default();
+    assert_eq!(plain.cache_hash(), PLAIN_HASH, "007's cache key unchanged");
+    assert_eq!(q.cache_hash(), FILTERED_HASH, "008's cache key unchanged");
+}
+
+const PLAIN_HASH: &str = "fbc6ef0ec2a4b00f";
+const FILTERED_HASH: &str = "07bd2594083908c9";

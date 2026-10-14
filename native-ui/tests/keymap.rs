@@ -172,3 +172,97 @@ fn the_queue_views_keys_are_listed() {
         None
     );
 }
+
+/// 012 T028: Images has the Scenes grid's keys, listed under "Images".
+#[test]
+fn images_has_the_scenes_grid_keys() {
+    let images = [Level::Images];
+    let none = Modifiers::empty();
+    assert_eq!(resolve(&ch("/"), none, &images), Some(Action::FocusSearch));
+    assert_eq!(resolve(&ch("f"), none, &images), Some(Action::FilterMenu));
+    assert_eq!(resolve(&ch("s"), none, &images), Some(Action::SavedFilters));
+    for (key, mods) in [
+        (Key::Named(Named::ArrowRight), none),
+        (Key::Named(Named::Home), none),
+        (Key::Named(Named::End), none),
+        (ch("]"), none),
+        (ch("["), none),
+        (Key::Named(Named::Enter), none),
+        (Key::Named(Named::Enter), Modifiers::CTRL),
+    ] {
+        assert_eq!(
+            resolve(&key, mods, &images),
+            Some(Action::Images),
+            "{key:?}"
+        );
+    }
+    let scenes: Vec<_> = bindings()
+        .into_iter()
+        .filter(|b| b.level == Level::Scenes)
+        .map(|b| b.chord)
+        .collect();
+    let images: Vec<_> = bindings()
+        .into_iter()
+        .filter(|b| b.level == Level::Images)
+        .map(|b| b.chord)
+        .collect();
+    assert_eq!(images, scenes, "the same chords, in the same order");
+}
+
+/// 012 T045: the viewer's keys are listed under "Image viewer", and no chord means two things
+/// within Shell, Images, or Viewer, nor does a viewer or Images key take a shell shortcut.
+#[test]
+fn the_image_levels_are_listed_and_never_clash() {
+    use semantic_stash_viewer_native::shell::keymap::ViewerKey;
+    let all = bindings();
+    for level in [Level::Shell, Level::Images, Level::Viewer] {
+        let mut seen = std::collections::HashMap::new();
+        for b in all.iter().filter(|b| b.level == level) {
+            if let Some(other) = seen.insert(b.chord.clone(), b.action) {
+                // One action may have two chords; one chord never two actions.
+                assert_eq!(other, b.action, "{:?} clashes at {level:?}", b.chord);
+            }
+        }
+    }
+    let shell: Vec<_> = all
+        .iter()
+        .filter(|b| b.level == Level::Shell)
+        .map(|b| b.chord.clone())
+        .collect();
+    for b in all
+        .iter()
+        .filter(|b| matches!(b.level, Level::Images | Level::Viewer))
+    {
+        assert!(
+            !shell.contains(&b.chord),
+            "{:?} takes a shell shortcut",
+            b.chord
+        );
+    }
+    let viewer: Vec<_> = all.iter().filter(|b| b.level == Level::Viewer).collect();
+    for key in [
+        ViewerKey::Next,
+        ViewerKey::Previous,
+        ViewerKey::Back,
+        ViewerKey::First,
+        ViewerKey::Last,
+        ViewerKey::Up,
+        ViewerKey::Down,
+        ViewerKey::ZoomIn,
+        ViewerKey::ZoomOut,
+        ViewerKey::Fit,
+        ViewerKey::ActualSize,
+        ViewerKey::Rotate,
+        ViewerKey::Slideshow,
+        ViewerKey::DelayDown,
+        ViewerKey::DelayUp,
+        ViewerKey::Details,
+        ViewerKey::Fullscreen,
+        ViewerKey::Close,
+    ] {
+        assert!(
+            viewer.iter().any(|b| b.action == Action::Viewer(key)),
+            "{key:?} has a key"
+        );
+    }
+}

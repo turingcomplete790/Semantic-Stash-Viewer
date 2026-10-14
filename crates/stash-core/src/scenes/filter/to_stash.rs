@@ -1,12 +1,13 @@
-//! Criteria to Stash's `SceneFilterType` (research R3): the same input the web UI sends for the
-//! same criteria (`toCriterionInput`), typed and checked against the pinned schema at build time.
-//! Semantic placeholders and invalid criteria are never sent.
+//! Criteria to Stash's `SceneFilterType` (research R3) and `ImageFilterType` (012): the same input
+//! the web UI sends for the same criteria (`toCriterionInput`), typed and checked against the
+//! pinned schema at build time. Semantic placeholders, invalid criteria, and kinds the entity
+//! doesn't offer are never sent.
 
 use super::{Criterion, CriterionKind, CriterionValue, Modifier, Orientation, Resolution};
 use crate::adapter::gql::{
     CriterionModifier, CustomFieldCriterionInput, DateCriterionInput, DuplicationCriterionInput,
-    HierarchicalMultiCriterionInput, IntCriterionInput, JsonAny, MultiCriterionInput,
-    OrientationCriterionInput, OrientationEnum, PhashDistanceCriterionInput,
+    FileFilterType, HierarchicalMultiCriterionInput, ImageFilterType, IntCriterionInput, JsonAny,
+    MultiCriterionInput, OrientationCriterionInput, OrientationEnum, PhashDistanceCriterionInput,
     ResolutionCriterionInput, ResolutionEnum, SceneFilterType, StashIdCriterionInput,
     StringCriterionInput, TimestampCriterionInput,
 };
@@ -22,6 +23,30 @@ pub fn scene_filter(criteria: &[Criterion]) -> Option<SceneFilterType> {
         any |= apply(&mut filter, c);
     }
     any.then_some(filter)
+}
+
+/// The `ImageFilterType` for `criteria`, or `None` when none can be sent.
+pub fn image_filter(criteria: &[Criterion]) -> Option<ImageFilterType> {
+    use crate::browse::entity::Entity;
+    let mut filter = ImageFilterType::default();
+    let mut any = false;
+    for c in criteria {
+        if c.info().is_placeholder()
+            || !c.kind.applies_to(Entity::Images)
+            || c.validate_for(Entity::Images).is_err()
+        {
+            continue;
+        }
+        any |= apply_image(&mut filter, c);
+    }
+    any.then_some(filter)
+}
+
+/// The image filter as JSON, as it goes in the request's variables (for tests and logs).
+pub fn image_filter_json(criteria: &[Criterion]) -> serde_json::Value {
+    image_filter(criteria).map_or(serde_json::Value::Null, |f| {
+        serde_json::to_value(f).unwrap_or(serde_json::Value::Null)
+    })
 }
 
 /// The filter as JSON, as it goes in the request's variables (for tests and logs).
@@ -302,7 +327,107 @@ fn apply(f: &mut SceneFilterType, c: &Criterion) -> bool {
                     });
             }
         }
-        K::Semantic(_) => return false,
+        // Images only (012).
+        K::Photographer | K::Folder | K::Semantic(_) => return false,
+    }
+    true
+}
+
+fn resolution_input(c: &Criterion) -> Option<ResolutionCriterionInput> {
+    match c.value {
+        CriterionValue::Resolution(r) => Some(ResolutionCriterionInput {
+            value: resolution(r),
+            modifier: modifier(c.modifier),
+        }),
+        _ => None,
+    }
+}
+
+fn orientation_input(c: &Criterion) -> Option<OrientationCriterionInput> {
+    match &c.value {
+        CriterionValue::Orientation(o) => Some(OrientationCriterionInput {
+            value: o
+                .iter()
+                .map(|o| match o {
+                    Orientation::Landscape => OrientationEnum::Landscape,
+                    Orientation::Portrait => OrientationEnum::Portrait,
+                    Orientation::Square => OrientationEnum::Square,
+                })
+                .collect(),
+        }),
+        _ => None,
+    }
+}
+
+fn phash_input(c: &Criterion) -> PhashDistanceCriterionInput {
+    let (hash, distance) = match &c.value {
+        CriterionValue::Phash { hash, distance } => (hash.trim().to_owned(), *distance),
+        _ => (String::new(), None),
+    };
+    PhashDistanceCriterionInput {
+        value: hash,
+        modifier: modifier(c.modifier),
+        distance,
+    }
+}
+
+fn custom_field_input(c: &Criterion) -> Option<CustomFieldCriterionInput> {
+    match &c.value {
+        CriterionValue::CustomField { field, values } => Some(CustomFieldCriterionInput {
+            field: field.clone(),
+            value: (!c.modifier.is_null_check())
+                .then(|| values.iter().cloned().map(JsonAny).collect()),
+            modifier: modifier(c.modifier),
+        }),
+        _ => None,
+    }
+}
+
+/// Set `c`'s field on an image filter; whether anything was set. Only kinds Images offer reach
+/// here ([`image_filter`] checks).
+fn apply_image(f: &mut ImageFilterType, c: &Criterion) -> bool {
+    use CriterionKind as K;
+    match c.kind {
+        K::Title => f.title = Some(text(c)),
+        K::Code => f.code = Some(text(c)),
+        K::Details => f.details = Some(text(c)),
+        K::Photographer => f.photographer = Some(text(c)),
+        K::Url => f.url = Some(text(c)),
+        K::Path => f.path = Some(text(c)),
+        K::Checksum => f.checksum = Some(text(c)),
+        K::FileCount => f.file_count = Some(int(c)),
+        K::Rating => f.rating100 = Some(int(c)),
+        K::OCounter => f.o_counter = Some(int(c)),
+        K::TagCount => f.tag_count = Some(int(c)),
+        K::PerformerCount => f.performer_count = Some(int(c)),
+        K::PerformerAge => f.performer_age = Some(int(c)),
+        K::Date => f.date = Some(date(c)),
+        K::CreatedAt => f.created_at = Some(timestamp(c)),
+        K::UpdatedAt => f.updated_at = Some(timestamp(c)),
+        K::Organized => f.organized = Some(bool_value(c)),
+        K::PerformerFavorite => f.performer_favorite = Some(bool_value(c)),
+        K::IsMissing => match &c.value {
+            CriterionValue::Text(t) => f.is_missing = Some(t.clone()),
+            _ => return false,
+        },
+        K::Resolution => f.resolution = resolution_input(c),
+        K::Orientation => f.orientation = orientation_input(c),
+        K::Performers => f.performers = Some(multi(c)),
+        K::Galleries => f.galleries = Some(multi(c)),
+        K::Tags => f.tags = Some(hierarchical(c)),
+        K::PerformerTags => f.performer_tags = Some(hierarchical(c)),
+        K::Studios => f.studios = Some(hierarchical(c)),
+        K::Folder => {
+            f.files_filter = Some(FileFilterType {
+                parent_folder: Some(hierarchical(c)),
+            });
+        }
+        K::PhashDistance => f.phash_distance = Some(phash_input(c)),
+        K::CustomField => match custom_field_input(c) {
+            Some(input) => f.custom_fields.get_or_insert_with(Vec::new).push(input),
+            None => return false,
+        },
+        _ => return false,
     }
     true
 }

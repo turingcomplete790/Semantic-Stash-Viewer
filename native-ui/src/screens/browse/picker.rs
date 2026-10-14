@@ -12,7 +12,7 @@ use stash_core::scenes::filter::{Item, Modifier};
 use stash_core::semantic::{Rgb, SemanticKind};
 
 use super::editor::{Editor, EditorMsg};
-use super::state::{ScenesMsg, PICKER_ID};
+use super::state::PICKER_ID;
 use super::thumbs::{ThumbKey, Thumbs};
 use crate::library::{Library, Loadable};
 use crate::shell::ShellMsg;
@@ -25,9 +25,10 @@ pub const LIST_H: f32 = 300.0;
 /// The list's scrollable id.
 pub const LIST_ID: &str = "scenes-picker-list";
 
-fn msg(m: EditorMsg) -> ShellMsg {
-    ShellMsg::Scenes(ScenesMsg::Editor(m))
-}
+/// How the picker's editor messages reach the shell (the list's message mapper, 012).
+pub trait Edit: Fn(EditorMsg) -> ShellMsg + Copy + 'static {}
+
+impl<F: Fn(EditorMsg) -> ShellMsg + Copy + 'static> Edit for F {}
 
 /// One row of the list.
 #[derive(Debug, Clone, PartialEq)]
@@ -239,12 +240,13 @@ pub fn view<'a>(
     library: &'a Library,
     editor: &'a Editor,
     thumbs: &'a Thumbs,
+    msg: impl Edit,
 ) -> Element<'a, ShellMsg> {
     let kind = editor.picker();
     let highlighted_item = highlighted(library, editor);
     let search = iced::widget::text_input("Type to narrow the list", &editor.picker_query)
         .id(PICKER_ID)
-        .on_input(|t| msg(EditorMsg::PickerQuery(t)))
+        .on_input(move |t| msg(EditorMsg::PickerQuery(t)))
         .on_submit_maybe(highlighted_item.clone().map(|i| msg(EditorMsg::Toggle(i))))
         .size(14)
         .padding([6, 10]);
@@ -257,9 +259,9 @@ pub fn view<'a>(
             .padding(10)
             .height(Length::Fixed(LIST_H))
             .into(),
-        Some(rows) => window(rows, editor, highlighted_item.as_ref(), kind, thumbs),
+        Some(rows) => window(rows, editor, highlighted_item.as_ref(), kind, thumbs, msg),
     };
-    column![search, list, chosen(editor)].spacing(8).into()
+    column![search, list, chosen(editor, msg)].spacing(8).into()
 }
 
 fn window<'a>(
@@ -268,6 +270,7 @@ fn window<'a>(
     highlighted: Option<&Item>,
     kind: Option<ChoiceKind>,
     thumbs: &'a Thumbs,
+    msg: impl Edit,
 ) -> Element<'a, ShellMsg> {
     let total = rows.len();
     let first = ((editor.picker_scroll / ROW_H).floor() as usize).min(total.saturating_sub(1));
@@ -347,12 +350,12 @@ fn window<'a>(
     scrollable(col)
         .id(LIST_ID)
         .height(Length::Fixed(LIST_H))
-        .on_scroll(|v| msg(EditorMsg::PickerScrolled(v.absolute_offset().y)))
+        .on_scroll(move |v| msg(EditorMsg::PickerScrolled(v.absolute_offset().y)))
         .into()
 }
 
 /// What's chosen, each removable; excluded ones marked.
-fn chosen(editor: &Editor) -> Element<'_, ShellMsg> {
+fn chosen(editor: &Editor, msg: impl Edit) -> Element<'_, ShellMsg> {
     if editor.items.is_empty() && editor.excluded.is_empty() {
         return text("Click to include, right-click (or Ctrl+E) to exclude.")
             .size(12)

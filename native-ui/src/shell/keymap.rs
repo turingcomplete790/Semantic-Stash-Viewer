@@ -17,6 +17,10 @@ pub enum Level {
     /// Scenes in the queue view (010): inside Scenes, outside the player.
     Queue,
     Scenes,
+    /// The Images grid (012).
+    Images,
+    /// The image viewer (012 US2): replaces the player's and the grid's keys while it shows.
+    Viewer,
     Settings,
     Shell,
 }
@@ -27,6 +31,8 @@ impl Level {
             Level::Player => "Player",
             Level::Queue => "Scenes (queue view)",
             Level::Scenes => "Scenes",
+            Level::Images => "Images",
+            Level::Viewer => "Image viewer",
             Level::Settings => "Settings → Tag colours",
             Level::Shell => "Everywhere",
         }
@@ -148,6 +154,8 @@ pub enum Action {
     Player,
     /// Handled by the Scenes grid (`screens::scenes::keyboard`; 005 FR-006).
     Scenes,
+    /// Handled by the Images grid (the same keys, 012).
+    Images,
     /// Put the cursor in the Scenes search box (008 FR-003f).
     FocusSearch,
     /// Open the filter menu.
@@ -171,6 +179,36 @@ pub enum Action {
     QueueOpen {
         new_tab: bool,
     },
+    /// The image viewer's keys (012 contracts/images-ui.md).
+    Viewer(ViewerKey),
+}
+
+/// What a viewer key does; the arrows pan instead while the picture is zoomed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewerKey {
+    Next,
+    Previous,
+    /// Previous, or close on the first image.
+    Back,
+    First,
+    Last,
+    Up,
+    Down,
+    ZoomIn,
+    ZoomOut,
+    Fit,
+    ActualSize,
+    /// Clockwise; with Shift, anticlockwise (characters ignore Shift when matching).
+    Rotate,
+    /// Start, pause, or resume the slideshow.
+    Slideshow,
+    /// Open or close the details panel.
+    Details,
+    /// The slideshow's delay, a second less or more (1–60).
+    DelayDown,
+    DelayUp,
+    Fullscreen,
+    Close,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -407,6 +445,133 @@ pub fn bindings() -> Vec<Binding> {
     ] {
         all.push(b(Level::Queue, chord, action, label));
     }
+    // The Images grid (012 contracts/images-ui.md): the Scenes grid's keys.
+    for (chord, label) in [
+        (
+            Chord::plain(N(Named::ArrowRight)),
+            "Move between images (arrows)",
+        ),
+        (Chord::plain(N(Named::Home)), "First image on the page"),
+        (Chord::plain(N(Named::End)), "Last image on the page"),
+        (Chord::plain(Char("]")), "Next page"),
+        (Chord::plain(Char("[")), "Previous page"),
+        (
+            Chord::plain(N(Named::Enter)),
+            "Open the image (in a filter menu or list: choose)",
+        ),
+        (Chord::ctrl(N(Named::Enter)), "Open in a new tab"),
+    ] {
+        all.push(b(Level::Images, chord, Action::Images, label));
+    }
+    for (chord, action, label) in [
+        (Chord::plain(Char("/")), Action::FocusSearch, "Search"),
+        (Chord::plain(Char("f")), Action::FilterMenu, "Filter menu"),
+        (
+            Chord::plain(Char("s")),
+            Action::SavedFilters,
+            "Saved filters",
+        ),
+    ] {
+        all.push(b(Level::Images, chord, action, label));
+    }
+    for (chord, label) in [
+        (
+            Chord::plain(N(Named::ArrowDown)),
+            "In a filter menu or list: move (↑ ↓)",
+        ),
+        (
+            Chord::plain(N(Named::Delete)),
+            "In the filter menu: remove the filter",
+        ),
+        (Chord::ctrl(Char("e")), "In a list: exclude"),
+        (
+            Chord::plain(N(Named::Escape)),
+            "Close the filter menu or list",
+        ),
+    ] {
+        all.push(b(Level::Images, chord, Action::Images, label));
+    }
+    // The image viewer (012 contracts/images-ui.md).
+    for (chord, key, label) in [
+        (
+            Chord::plain(N(Named::ArrowRight)),
+            ViewerKey::Next,
+            "Next image (pans when zoomed)",
+        ),
+        (
+            Chord::plain(N(Named::ArrowLeft)),
+            ViewerKey::Previous,
+            "Previous image (pans when zoomed)",
+        ),
+        (Chord::plain(N(Named::Space)), ViewerKey::Next, "Next image"),
+        (
+            Chord::plain(N(Named::Backspace)),
+            ViewerKey::Back,
+            "Previous image (on the first: close)",
+        ),
+        (
+            Chord::plain(N(Named::Home)),
+            ViewerKey::First,
+            "First image",
+        ),
+        (Chord::plain(N(Named::End)), ViewerKey::Last, "Last image"),
+        (
+            Chord::plain(N(Named::ArrowUp)),
+            ViewerKey::Up,
+            "Pan up or down when zoomed (↑ ↓)",
+        ),
+        (
+            Chord::plain(N(Named::ArrowDown)),
+            ViewerKey::Down,
+            "Pan down",
+        ),
+        (Chord::plain(Char("+")), ViewerKey::ZoomIn, "Zoom in"),
+        (Chord::plain(Char("=")), ViewerKey::ZoomIn, "Zoom in"),
+        (Chord::plain(Char("-")), ViewerKey::ZoomOut, "Zoom out"),
+        (Chord::plain(Char("0")), ViewerKey::Fit, "Fit to the window"),
+        (
+            Chord::plain(Char("1")),
+            ViewerKey::ActualSize,
+            "Actual size",
+        ),
+        (
+            Chord::plain(Char("r")),
+            ViewerKey::Rotate,
+            "Rotate clockwise",
+        ),
+        (
+            Chord {
+                shift: true,
+                ..Chord::plain(Char("r"))
+            },
+            ViewerKey::Rotate,
+            "Rotate anticlockwise",
+        ),
+        (
+            Chord::plain(Char("p")),
+            ViewerKey::Slideshow,
+            "Start or pause the slideshow",
+        ),
+        (
+            Chord::plain(Char("[")),
+            ViewerKey::DelayDown,
+            "Slideshow delay a second shorter",
+        ),
+        (
+            Chord::plain(Char("]")),
+            ViewerKey::DelayUp,
+            "Slideshow delay a second longer",
+        ),
+        (Chord::plain(Char("i")), ViewerKey::Details, "Details"),
+        (Chord::plain(Char("f")), ViewerKey::Fullscreen, "Fullscreen"),
+        (
+            Chord::plain(N(Named::Escape)),
+            ViewerKey::Close,
+            "Leave fullscreen, or close the viewer",
+        ),
+    ] {
+        all.push(b(Level::Viewer, chord, Action::Viewer(key), label));
+    }
     // Settings → Tag colours (008 FR-003g); the page applies them.
     for (chord, label) in [
         (Chord::plain(N(Named::ArrowUp)), "Move between rules (↑ ↓)"),
@@ -466,11 +631,21 @@ pub fn help_list<'a, M: 'a>() -> Element<'a, M> {
             level = Some(b.level);
             list = list.push(text(b.level.label()).size(15).color(theme::FROSTED_BLUE));
         }
+        // The pan keys are one row ("↑ ↓"), as are the two zoom-in keys.
+        if matches!(b.action, Action::Viewer(ViewerKey::Down))
+            || (matches!(b.action, Action::Viewer(ViewerKey::ZoomIn))
+                && b.chord.key == ChordKey::Char("="))
+        {
+            continue;
+        }
         let keys = match b.action {
             Action::SelectTab(_) => "Ctrl+1…9".to_owned(),
-            Action::Scenes if b.chord.key == ChordKey::Named(Named::ArrowRight) => {
+            Action::Scenes | Action::Images
+                if b.chord.key == ChordKey::Named(Named::ArrowRight) =>
+            {
                 "← ↑ → ↓".to_owned()
             }
+            Action::Viewer(ViewerKey::Up) => "↑ ↓".to_owned(),
             _ => b.chord.describe(),
         };
         let label = match b.action {

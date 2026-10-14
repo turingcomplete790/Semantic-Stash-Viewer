@@ -1,0 +1,8 @@
+query ChoiceListFolders($filter: FindFilterType!) {
+  findFolders(filter: $filter) {
+    folders {
+      id
+      path
+    }
+  }
+}

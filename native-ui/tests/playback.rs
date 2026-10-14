@@ -321,6 +321,7 @@ fn with_history_off_nothing_is_reported() {
         semantic_stash_viewer_native::services::settings::PlaybackPreferences {
             resume: true,
             save_history: false,
+            ..Default::default()
         },
     )));
     let _ = s.update(Msg::Shell(ShellMsg::Play("7".into())));

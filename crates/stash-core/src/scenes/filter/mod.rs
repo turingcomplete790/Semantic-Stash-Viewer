@@ -309,7 +309,12 @@ impl Criterion {
     /// `IsNull`/`NotNull` carry no value; `Items` are non-empty unless the modifier is a null
     /// check.
     pub fn validate(&self) -> Result<(), Invalid> {
-        let info = self.kind.info();
+        self.validate_for(crate::browse::entity::Entity::Scenes)
+    }
+
+    /// As [`Self::validate`], for `entity`'s list (images have their own is-missing choices).
+    pub fn validate_for(&self, entity: crate::browse::entity::Entity) -> Result<(), Invalid> {
+        let info = self.kind.info_for(entity);
         let modifiers = info.modifiers();
         if modifiers.is_empty() {
             // Kinds without modifiers (booleans, choices) always use `Equals`.

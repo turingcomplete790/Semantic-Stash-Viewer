@@ -20,11 +20,12 @@ pub mod snapshot;
 mod timing;
 pub mod tracks;
 
-pub use commands::{FrameDirection, PlayerCommand};
+pub use commands::{source_allowed_for, FrameDirection, PlayerCommand};
 pub use error::PlayerError;
 pub use render::{GetProcAddress, RenderOwner, Renderer};
 pub use session::{
-    start_position, CacheLimits, OpenRequest, Player, PlayerConfig, MAX_SPEED, MIN_SPEED,
+    start_position, CacheLimits, MediaKind, OpenRequest, Player, PlayerConfig, ViewHook, MAX_SPEED,
+    MIN_SPEED,
 };
 pub use snapshot::{PlayerSnapshot, PlayerStateKind, PlayerStats};
 pub use tracks::{Track, TrackKind};

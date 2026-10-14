@@ -145,8 +145,12 @@ async fn unknown_kinds_are_refused() {
     let (_dir, cache) = cache();
     let service = ThumbService::new(cache, fetcher(None, Arc::default()));
     assert!(
-        service.get("image", "1", "0").await.is_none(),
+        service.get("gallery", "1", "0").await.is_none(),
         "reserved for the galleries spec"
+    );
+    assert!(
+        service.get("image", "1", "0").await.is_some(),
+        "image thumbnails are served (012's Images cards)"
     );
     assert!(service.get("nonsense", "1", "0").await.is_none());
     assert!(

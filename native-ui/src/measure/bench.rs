@@ -12,6 +12,8 @@ use std::time::{Duration, Instant};
 
 use crate::effects::Effect;
 use crate::machine::Step;
+use crate::screens::browse::state::BrowseMsg;
+use crate::screens::images::{ImagesMsg, ViewerMsg};
 use crate::screens::scenes::keyboard::{GridAction, PageDirection};
 use crate::screens::scenes::thumbs::thumb_key;
 use crate::screens::scenes::{ScenesMsg, Thumbs};
@@ -79,6 +81,17 @@ enum Act {
     SeekBeforeEnd(f64),
     /// Play the queue page's last card (011 `queue-repeat`).
     QueuePlayLast,
+    /// A key press through the session (as from the keyboard).
+    Key(iced::keyboard::Key),
+    /// Open card `i` of the active Images page in the viewer (012).
+    ImagesOpen(usize),
+    /// Open the viewer on the first card of the active Images page followed by this many stills
+    /// (no animated or clip image: the slideshow measures its delay alone).
+    OpenStillRun(usize),
+    /// Note the image the viewer shows (for `ImageMoved`).
+    RememberImage,
+    /// The slideshow's delay for the bench (`None`: back to the preference it had); not saved.
+    SlideshowDelay(Option<u32>),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -123,6 +136,22 @@ enum Cond {
     EndReached,
     /// The noted scene is playing again from its start (Repeat one, 011).
     Replayed,
+    /// The active Images page is showing (012).
+    ImagesReady,
+    /// A different Images page is showing, and its visible thumbnails are here.
+    ImagesPageShown,
+    /// A different Images page's cards are showing.
+    ImagesCardsShown,
+    /// At least this many image cards are showing.
+    ImagesCards(usize),
+    /// Every image card on the page has its thumbnail.
+    ImagesAllThumbs,
+    /// The viewer's image is on screen (its first frame, from the player's snapshot).
+    ImageShown,
+    /// Another image than the noted one is on screen.
+    ImageMoved,
+    /// The viewer's details panel has its image's details.
+    DetailsReady,
 }
 
 #[derive(Debug, Clone)]
@@ -138,6 +167,9 @@ enum Op {
     Sample(&'static str),
     /// As `Sample`, less a fixed delay in ms (the preview's 200 ms rest).
     SampleAfter(&'static str, u64),
+    /// As `Sample`, into the second set when the image shown is over 12 MP (mpv's decode grows
+    /// with the pixels: 012 research R3).
+    SampleImage(&'static str, &'static str),
     /// Print a sample set's summary.
     Report(&'static str),
     /// Scroll the active Scenes page at [`SCROLL_SPEED`] for this long (inside the scrollable:
@@ -160,6 +192,9 @@ enum Op {
     VideoMark,
     /// If the playing tab is showing, wait (a few frames) for a new video frame on screen.
     VideoCheck,
+    /// Wait (up to this long) for a new frame of mpv's picture on screen since `VideoMark`: the
+    /// picture itself moved, not only the UI (012 `image-pan-drag-shown`).
+    VideoShown(Duration),
     Done,
 }
 
@@ -180,6 +215,8 @@ enum Wait {
     /// Idle until this time: no frame clock (the app redraws only if something changes), so
     /// memory and CPU samples see the app at rest. A timer wakes the bench.
     Idle(Instant),
+    /// A new video frame shown since the mark, until the deadline.
+    VideoUntil(Instant),
 }
 
 pub struct Bench {
@@ -209,6 +246,12 @@ pub struct Bench {
     skipped: Option<String>,
     /// A skip happened during this sample's wait: it timed the skip, so it isn't recorded.
     void: bool,
+    /// The image `RememberImage` noted.
+    image_mark: Option<String>,
+    /// The slideshow delay preference before the bench changed it.
+    saved_delay: Option<u32>,
+    /// The median time to the next frame with nothing to do (the `frame` baseline, ms).
+    frame_ms: Option<f64>,
 }
 
 fn script() -> Vec<Op> {
@@ -316,6 +359,13 @@ fn script() -> Vec<Op> {
     if only_scroll {
         ops.clear();
         ops.push(Frames(10));
+    }
+    // `SSV_BENCH_ONLY=images`: only the 012 rows (for profiling the viewer).
+    if super::var("SSV_BENCH_ONLY").as_deref() == Some("images") {
+        let mut ops = vec![Frames(10)];
+        images_rows(&mut ops);
+        ops.push(Done);
+        return ops;
     }
 
     // Scenes: a fresh tab at 50 per page (gql-page-50: the page and its neighbour's prefetch).
@@ -725,6 +775,7 @@ fn script() -> Vec<Op> {
         shell(ShellMsg::Scenes(ScenesMsg::PageSize(50))),
         Until(Cond::Ready, ms(15_000)),
     ]);
+    images_rows(&mut ops);
     ops.extend([
         // At rest on a 50-card page: memory and CPU (007 T057).
         Sleep(ms(5000)),
@@ -734,6 +785,233 @@ fn script() -> Vec<Op> {
         Done,
     ]);
     ops
+}
+
+/// 012 (research R9): Images paging and scrolling, the viewer (open, next across a page edge,
+/// zoom, a drag, the slideshow's timing), and its requests. Read-only: nothing is written.
+fn images_rows(ops: &mut Vec<Op>) {
+    use iced::keyboard::key::Named;
+    use iced::keyboard::Key;
+    use Op::*;
+    let shell = |m: ShellMsg| Op::Act(A::Shell(Box::new(m)));
+    let list =
+        |m: BrowseMsg<stash_core::images::ImageSort>| shell(ShellMsg::Images(ImagesMsg::List(m)));
+    let viewer = |m: ViewerMsg| shell(ShellMsg::Images(ImagesMsg::Viewer(m)));
+    let key = |k: Key| Op::Act(A::Key(k));
+    let ch = |c: &str| Key::Character(c.into());
+    let ms = Duration::from_millis;
+    // A fresh Images tab (gql-images-page: the page and its neighbour's prefetch), then the
+    // whole library.
+    ops.extend([
+        Sleep(ms(1000)),
+        GqlReset,
+        shell(ShellMsg::NewTab),
+        shell(ShellMsg::Section(Section::Images)),
+        Until(Cond::ImagesReady, ms(15_000)),
+        Sleep(ms(500)),
+        Gql("gql-images-page"),
+        list(BrowseMsg::ClearFilters),
+        Until(Cond::ImagesReady, ms(15_000)),
+        Frames(2),
+    ]);
+    for i in 0..20 {
+        let target = if i < 10 { i + 2 } else { 20 - i };
+        ops.extend([
+            Sleep(ms(1000)),
+            Remember,
+            Start,
+            list(BrowseMsg::Page(target)),
+            Until(Cond::ImagesPageShown, ms(5000)),
+            Frames(2),
+            Sample("images-page-change"),
+        ]);
+    }
+    ops.push(Report("images-page-change"));
+    for _ in 0..5 {
+        ops.extend([
+            Remember,
+            Start,
+            Op::Act(A::Jump),
+            Until(Cond::ImagesCardsShown, ms(5000)),
+            Frames(2),
+            Sample("images-page-jump"),
+        ]);
+    }
+    ops.push(Report("images-page-jump"));
+    // A 1000-card page in the grid and the wall: cold, then cached.
+    ops.extend([
+        list(BrowseMsg::Page(1)),
+        Until(Cond::ImagesReady, ms(15_000)),
+        list(BrowseMsg::PageSize(1000)),
+        Until(Cond::ImagesCards(1000), ms(15_000)),
+    ]);
+    for (mode, cold, warm) in [
+        (
+            Mode::Grid,
+            "images-scroll-1000-grid-cold",
+            "images-scroll-1000-grid",
+        ),
+        (
+            Mode::Wall,
+            "images-scroll-1000-wall-cold",
+            "images-scroll-1000-wall",
+        ),
+    ] {
+        ops.extend([
+            list(BrowseMsg::Mode(mode)),
+            Op::Act(A::ClearThumbs),
+            list(BrowseMsg::Scrolled { y: 0.0 }),
+            Frames(2),
+            Scroll(ms(5000)),
+            ScrollReport(cold),
+            Start,
+            Until(Cond::ImagesAllThumbs, ms(60_000)),
+            ReportThumbs,
+            Scroll(ms(5000)),
+            ScrollReport(warm),
+        ]);
+    }
+    ops.extend([
+        list(BrowseMsg::Mode(Mode::Grid)),
+        list(BrowseMsg::PageSize(50)),
+        Until(Cond::ImagesReady, ms(15_000)),
+        Frames(2),
+    ]);
+    // Opening from the grid to the picture's first frame (SC-004).
+    for i in [3, 11, 17, 24, 30] {
+        ops.extend([
+            Start,
+            Op::Act(A::ImagesOpen(i)),
+            Until(Cond::ImageShown, ms(10_000)),
+            Sample("image-open"),
+            key(Key::Named(Named::Escape)),
+            Frames(2),
+            Sleep(ms(300)),
+        ]);
+    }
+    ops.push(Report("image-open"));
+    // Next with the neighbour prefetched (SC-003): 20 steps from card 40, across the page edge.
+    ops.extend([
+        Op::Act(A::ImagesOpen(40)),
+        Until(Cond::ImageShown, ms(10_000)),
+        Sleep(ms(1000)),
+    ]);
+    for _ in 0..20 {
+        ops.extend([
+            // A glance at each image, as a person would; meanwhile its neighbour is fetched.
+            Sleep(ms(600)),
+            Op::Act(A::RememberImage),
+            Start,
+            key(Key::Named(Named::ArrowRight)),
+            Until(Cond::ImageMoved, ms(10_000)),
+            SampleImage("image-next", "image-next-large"),
+        ]);
+    }
+    ops.extend([
+        Report("image-next"),
+        Report("image-next-large"),
+        // One step with its neighbour on disk: no GraphQL (the next neighbours' downloads are
+        // GETs).
+        Sleep(ms(1500)),
+        GqlReset,
+        Op::Act(A::RememberImage),
+        key(Key::Named(Named::ArrowRight)),
+        Until(Cond::ImageMoved, ms(10_000)),
+        Gql("gql-image-step-prefetched"),
+        // The details panel: one request (0 when cached).
+        Sleep(ms(1000)),
+        GqlReset,
+        key(ch("i")),
+        Until(Cond::DetailsReady, ms(15_000)),
+        Sleep(ms(500)),
+        Gql("gql-image-details"),
+        key(ch("i")),
+        Frames(2),
+    ]);
+    // Input to the next frame (≤ 1 frame): the baseline with nothing to do, then zoom steps
+    // and a drag across a zoomed picture (the pan the user found laggy, 2026-10-12).
+    for _ in 0..20 {
+        ops.extend([Start, Frames(1), Sample("frame")]);
+    }
+    ops.push(Report("frame"));
+    for i in 0..20 {
+        let k = if i % 2 == 0 { ch("+") } else { ch("-") };
+        ops.extend([Start, key(k), Frames(1), Sample("image-zoom")]);
+    }
+    // The same, to mpv's picture moving on screen (what a person sees).
+    for i in 0..20 {
+        let k = if i % 2 == 0 { ch("+") } else { ch("-") };
+        ops.extend([
+            Frames(2),
+            VideoMark,
+            Start,
+            key(k),
+            VideoShown(ms(500)),
+            Sample("image-zoom-shown"),
+        ]);
+    }
+    ops.extend([
+        Report("image-zoom"),
+        Report("image-zoom-shown"),
+        key(ch("+")),
+        key(ch("+")),
+        viewer(ViewerMsg::Pointer(iced::Point::new(600.0, 400.0))),
+        viewer(ViewerMsg::Press),
+        Frames(2),
+    ]);
+    for i in 0..30 {
+        let x = 600.0 + if i % 2 == 0 { 12.0 } else { -12.0 };
+        ops.extend([
+            Start,
+            viewer(ViewerMsg::Pointer(iced::Point::new(x, 400.0))),
+            Frames(1),
+            Sample("image-pan-drag"),
+        ]);
+    }
+    for i in 0..30 {
+        let x = 600.0 + if i % 2 == 0 { 12.0 } else { -12.0 };
+        ops.extend([
+            Frames(2),
+            VideoMark,
+            Start,
+            viewer(ViewerMsg::Pointer(iced::Point::new(x, 400.0))),
+            VideoShown(ms(500)),
+            Sample("image-pan-drag-shown"),
+        ]);
+    }
+    ops.extend([
+        Report("image-pan-drag"),
+        Report("image-pan-drag-shown"),
+        viewer(ViewerMsg::Release),
+        key(ch("0")),
+        key(Key::Named(Named::Escape)),
+        Frames(2),
+        // The slideshow at 1 s over stills: each interval less the delay is its drift.
+        Op::Act(A::SlideshowDelay(Some(1))),
+        Op::Act(A::OpenStillRun(7)),
+        Until(Cond::ImageShown, ms(10_000)),
+        Op::Act(A::RememberImage),
+        Start,
+        key(ch("p")),
+    ]);
+    for _ in 0..5 {
+        ops.extend([
+            Until(Cond::ImageMoved, ms(5000)),
+            SampleAfter("slideshow-drift", 1000),
+            Op::Act(A::RememberImage),
+            Start,
+        ]);
+    }
+    ops.extend([
+        Report("slideshow-drift"),
+        key(ch("p")),
+        Op::Act(A::SlideshowDelay(None)),
+        key(Key::Named(Named::Escape)),
+        Op::Act(A::StopPlayback),
+        Frames(2),
+        shell(ShellMsg::CloseActive),
+        Frames(2),
+    ]);
 }
 
 fn round(x: f64, digits: i32) -> f64 {
@@ -769,6 +1047,9 @@ impl Bench {
             near_end: std::cell::Cell::new(false),
             skipped: None,
             void: false,
+            image_mark: None,
+            saved_delay: None,
+            frame_ms: None,
         }
     }
 
@@ -779,10 +1060,72 @@ impl Bench {
         }
     }
 
+    fn images(session: &Session) -> Option<&crate::screens::ImagesState> {
+        match session.shell.active().current() {
+            Screen::Images(s) => Some(s),
+            _ => None,
+        }
+    }
+
     fn first_card(session: &Session) -> Option<String> {
+        if let Some(i) = Self::images(session) {
+            return i
+                .ready()
+                .then(|| i.cards().first().map(|c| c.id.clone()))
+                .flatten();
+        }
         Self::scenes(session)
             .filter(|s| s.ready())
             .and_then(|s| s.cards().first().map(|c| c.id.clone()))
+    }
+
+    /// The Images conditions (012).
+    fn images_hold(&self, cond: Cond, session: &Session) -> bool {
+        let Some(s) = Self::images(session) else {
+            return false;
+        };
+        let thumbs = |cards: &[stash_core::images::ImageCard], n: usize| {
+            cards
+                .iter()
+                .take(n)
+                .filter_map(|c| {
+                    c.thumb
+                        .as_deref()
+                        .and_then(crate::screens::scenes::thumbs::key_of)
+                })
+                .all(|k| session.thumbs.get(&k).is_some())
+        };
+        let shown = || {
+            let showing = s.viewer.as_ref().and_then(|v| v.showing.as_deref());
+            showing.is_some() && session.playback.image_on_screen() == showing
+        };
+        match cond {
+            Cond::ImagesReady => s.ready(),
+            Cond::ImagesCards(n) => {
+                s.ready() && s.cards().len() >= n.min(s.count().unwrap_or(0) as usize)
+            }
+            Cond::ImagesCardsShown => s.ready() && Self::first_card(session) != self.remembered,
+            Cond::ImagesPageShown => {
+                let layout = s.layout(&session.shell.layout);
+                let rows = (layout.viewport() / layout.row_height(s.mode)).ceil() as usize + 1;
+                s.ready()
+                    && Self::first_card(session) != self.remembered
+                    && thumbs(s.cards(), rows * layout.cols(s.mode))
+            }
+            Cond::ImagesAllThumbs => s.ready() && thumbs(s.cards(), usize::MAX),
+            Cond::ImageShown => shown(),
+            Cond::ImageMoved => {
+                shown()
+                    && s.viewer.as_ref().and_then(|v| v.showing.as_deref())
+                        != self.image_mark.as_deref()
+            }
+            Cond::DetailsReady => s
+                .viewer
+                .as_ref()
+                .and_then(|v| v.details.as_ref())
+                .is_some_and(|d| d.state != crate::screens::images::viewer::Details::Loading),
+            _ => false,
+        }
     }
 
     fn holds(&self, cond: Cond, session: &Session) -> bool {
@@ -842,6 +1185,17 @@ impl Bench {
         }
         if let Cond::PreviewPlaying = cond {
             return session.previews.playing();
+        }
+        if let Cond::ImagesReady
+        | Cond::ImagesPageShown
+        | Cond::ImagesCardsShown
+        | Cond::ImagesCards(_)
+        | Cond::ImagesAllThumbs
+        | Cond::ImageShown
+        | Cond::ImageMoved
+        | Cond::DetailsReady = cond
+        {
+            return self.images_hold(cond, session);
         }
         if let Cond::VocabularyReady = cond {
             return session.library.vocabulary.ready().is_some();
@@ -923,7 +1277,15 @@ impl Bench {
             | Cond::PlaybackMoved
             | Cond::PlayingMoved
             | Cond::EndReached
-            | Cond::Replayed => unreachable!("checked above"),
+            | Cond::Replayed
+            | Cond::ImagesReady
+            | Cond::ImagesPageShown
+            | Cond::ImagesCardsShown
+            | Cond::ImagesCards(_)
+            | Cond::ImagesAllThumbs
+            | Cond::ImageShown
+            | Cond::ImageMoved
+            | Cond::DetailsReady => unreachable!("checked above"),
             Cond::Cards(n) => s.cards().len() >= n.min(s.count().unwrap_or(0) as usize),
             Cond::CardsShown => changed(),
             Cond::AllThumbs => s
@@ -1103,14 +1465,68 @@ impl Bench {
                 _ => Step::none(),
             },
             Act::Jump => {
-                let last = Self::scenes(session)
-                    .and_then(|s| s.last_page())
-                    .unwrap_or(1);
+                let last = match Self::images(session) {
+                    Some(i) => i.last_page(),
+                    None => Self::scenes(session).and_then(|s| s.last_page()),
+                }
+                .unwrap_or(1);
                 self.seed = (self.seed * 7919 + 13) % 10007;
                 let target = 1 + self.seed % last.max(1);
-                session.update(session::Msg::Shell(ShellMsg::Scenes(ScenesMsg::Page(
-                    target,
-                ))))
+                let msg = if Self::images(session).is_some() {
+                    ShellMsg::Images(ImagesMsg::List(BrowseMsg::Page(target)))
+                } else {
+                    ShellMsg::Scenes(ScenesMsg::Page(target))
+                };
+                session.update(session::Msg::Shell(msg))
+            }
+            Act::Key(key) => {
+                session.update(session::Msg::Key(key, iced::keyboard::Modifiers::empty()))
+            }
+            Act::ImagesOpen(index) => session.update(session::Msg::Shell(ShellMsg::Images(
+                ImagesMsg::List(BrowseMsg::Open {
+                    index,
+                    new_tab: false,
+                }),
+            ))),
+            Act::OpenStillRun(n) => {
+                let start = Self::images(session).and_then(|s| {
+                    let cards = s.cards();
+                    (0..cards.len().saturating_sub(n)).find(|&i| {
+                        cards[i..=i + n]
+                            .iter()
+                            .all(|c| c.media == stash_core::images::Media::Still)
+                    })
+                });
+                match start {
+                    Some(i) => session.update(session::Msg::Shell(ShellMsg::Images(
+                        ImagesMsg::List(BrowseMsg::Open {
+                            index: i,
+                            new_tab: false,
+                        }),
+                    ))),
+                    None => Step::none(),
+                }
+            }
+            Act::RememberImage => {
+                self.image_mark = Self::images(session)
+                    .and_then(|s| s.viewer_image())
+                    .map(str::to_owned);
+                Step::none()
+            }
+            Act::SlideshowDelay(delay) => {
+                match delay {
+                    Some(d) => {
+                        self.saved_delay
+                            .get_or_insert(session.prefs.slideshow_delay_s);
+                        session.prefs.slideshow_delay_s = d;
+                    }
+                    None => {
+                        if let Some(d) = self.saved_delay.take() {
+                            session.prefs.slideshow_delay_s = d;
+                        }
+                    }
+                }
+                Step::none()
             }
             Act::PlayFirst => {
                 // One long enough to keep playing through the tab rows.
@@ -1258,6 +1674,17 @@ impl Bench {
                 }
                 self.wait = Wait::None;
             }
+            Wait::VideoUntil(deadline) => {
+                if crate::player::video::frame_counts().1 > self.video_mark {
+                    self.last_ok = true;
+                    self.wait = Wait::None;
+                } else if now >= deadline {
+                    self.last_ok = false;
+                    self.wait = Wait::None;
+                } else {
+                    return (effects, false);
+                }
+            }
         }
 
         // Run steps until one waits.
@@ -1298,6 +1725,18 @@ impl Bench {
                         self.samples.entry(name).or_default().push(ms);
                     }
                 }
+                Op::SampleImage(name, large) => {
+                    if std::mem::take(&mut self.void) || !self.last_ok {
+                        continue;
+                    }
+                    let pixels = Self::images(session)
+                        .and_then(|s| s.viewer.as_ref())
+                        .and_then(|v| v.picture)
+                        .map_or(0, |(w, h)| u64::from(w) * u64::from(h));
+                    let set = if pixels > 12_000_000 { large } else { name };
+                    let ms = self.started.elapsed().as_secs_f64() * 1000.0;
+                    self.samples.entry(set).or_default().push(ms);
+                }
                 Op::SampleAfter(name, delay) => {
                     if self.last_ok {
                         let ms = self.started.elapsed().as_secs_f64() * 1000.0 - delay as f64;
@@ -1316,7 +1755,36 @@ impl Bench {
                         other => other,
                     };
                     let samples = self.samples.remove(name).unwrap_or_default();
-                    let mut value = super::summary(&samples, 0);
+                    // Frame-sized rows keep a decimal; the rest are whole milliseconds as before.
+                    let digits = i32::from(matches!(
+                        name,
+                        "frame"
+                            | "image-zoom"
+                            | "image-pan-drag"
+                            | "image-zoom-shown"
+                            | "image-pan-drag-shown"
+                    ));
+                    let mut value = super::summary(&samples, digits);
+                    // 012: input-to-frame rows are judged against one frame of this display.
+                    if name == "frame" {
+                        let mut sorted = samples.clone();
+                        sorted.sort_by(f64::total_cmp);
+                        self.frame_ms = sorted.get(sorted.len() / 2).copied();
+                    }
+                    if matches!(
+                        name,
+                        "image-zoom"
+                            | "image-pan-drag"
+                            | "image-zoom-shown"
+                            | "image-pan-drag-shown"
+                    ) {
+                        value["frameMs"] = self.frame_ms.map(|f| round(f, 2)).into();
+                        // The image measured (a still, or a looping file).
+                        value["image"] = Self::images(session)
+                            .and_then(|s| s.viewer.as_ref())
+                            .and_then(|v| v.showing.clone())
+                            .into();
+                    }
                     let playing = session.playback.active();
                     match name {
                         "tabs" => {
@@ -1337,13 +1805,12 @@ impl Bench {
                         px_per_second: SCROLL_SPEED,
                         duration,
                     };
-                    effects.extend(
-                        session
-                            .update(session::Msg::Shell(ShellMsg::Scenes(
-                                ScenesMsg::AutoScroll(Some(auto)),
-                            )))
-                            .effects,
-                    );
+                    let msg = if Self::images(session).is_some() {
+                        ShellMsg::Images(ImagesMsg::List(BrowseMsg::AutoScroll(Some(auto))))
+                    } else {
+                        ShellMsg::Scenes(ScenesMsg::AutoScroll(Some(auto)))
+                    };
+                    effects.extend(session.update(session::Msg::Shell(msg)).effects);
                     self.wait = Wait::Scrolling;
                     return (effects, false);
                 }
@@ -1352,14 +1819,19 @@ impl Bench {
                     report(name, line);
                 }
                 Op::ReportThumbs => {
-                    let mode = Self::scenes(session).map_or("grid", |s| match s.mode {
+                    let images = Self::images(session);
+                    let list_mode = images
+                        .map(|i| i.mode)
+                        .or(Self::scenes(session).map(|s| s.mode));
+                    let mode = list_mode.map_or("grid", |m| match m {
                         Mode::Grid => "grid",
                         Mode::List => "list",
                         Mode::Wall => "wall",
                         Mode::Queue => "queue",
                     });
+                    let section = if images.is_some() { "images" } else { "scenes" };
                     report(
-                        &format!("scenes-thumbs-1000-{mode}"),
+                        &format!("{section}-thumbs-1000-{mode}"),
                         serde_json::json!({
                             "loaded": self.last_ok,
                             "ms": (self.started.elapsed().as_secs_f64() * 1000.0).round(),
@@ -1382,6 +1854,13 @@ impl Bench {
                         self.wait = Wait::Video(12);
                         return (effects, false);
                     }
+                }
+                Op::VideoShown(timeout) => {
+                    if crate::player::video::frame_counts().1 <= self.video_mark {
+                        self.wait = Wait::VideoUntil(now + timeout);
+                        return (effects, false);
+                    }
+                    self.last_ok = true;
                 }
                 Op::ProcSample(name, secs) => {
                     super::emit(&serde_json::json!({"sample": name, "secs": secs}));

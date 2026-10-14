@@ -7,6 +7,7 @@ pub mod choices;
 pub mod filters;
 pub mod gql;
 pub mod health;
+pub mod images;
 pub mod jobs;
 pub mod operations;
 pub mod probe;

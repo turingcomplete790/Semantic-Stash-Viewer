@@ -1,6 +1,6 @@
 //! Page sizes and page maths for paged library views (constitution IV; 005 research R1).
 //!
-//! Scenes are shown a page at a time. A page is fetched by number at one of Stash's page sizes
+//! Scenes and images are shown a page at a time. A page is fetched by number at one of Stash's page sizes
 //! plus our default of 50 (Stash paginates with `LIMIT/OFFSET`, and deep pages cost the same as the
 //! first).
 

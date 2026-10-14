@@ -1,0 +1,52 @@
+query ImageDetailsQuery($id: ID!) {
+  findImage(id: $id) {
+    id
+    title
+    code
+    date
+    photographer
+    details
+    rating100
+    organized
+    o_counter
+    urls
+    studio {
+      id
+      name
+    }
+    performers {
+      id
+      name
+      image_path
+    }
+    tags {
+      id
+      name
+    }
+    galleries {
+      id
+      title
+      image_count
+    }
+    visual_files {
+      __typename
+      ... on ImageFile {
+        basename
+        path
+        size
+        format
+        width
+        height
+      }
+      ... on VideoFile {
+        basename
+        path
+        size
+        format
+        width
+        height
+        duration
+      }
+    }
+  }
+}

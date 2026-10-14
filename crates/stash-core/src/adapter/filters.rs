@@ -6,8 +6,10 @@ use serde::{Deserialize, Serialize};
 
 use super::gql::{schema, JsonMap};
 use super::StashClient;
+use crate::browse::entity::Entity;
+use crate::browse::query::Sort;
 use crate::error::AppError;
-use crate::scenes::filter::saved::{decode_saved_filter, SavedFilter};
+use crate::scenes::filter::saved::{decode_saved_filter_for, SavedFilter, SavedFilterOf};
 use crate::semantic::{parse_colour_rules, ColourRule, TAG_COLOURS_KEY};
 
 // ---- SavedSceneFilters ------------------------------------------------------------------------
@@ -65,9 +67,30 @@ pub(crate) struct SavedSceneFilters {
 /// One `SavedSceneFilters` request: every saved scene filter, decoded (cached per server as
 /// `saved-filters:scenes`).
 pub async fn saved_scene_filters(client: &StashClient) -> Result<Vec<SavedFilter>, AppError> {
+    saved_filters_for(client, Entity::Scenes).await
+}
+
+/// One saved-filters request for images, decoded with images' criteria and sorts (cached per
+/// server as `saved-filters:images`, 012).
+pub async fn saved_image_filters(
+    client: &StashClient,
+) -> Result<Vec<SavedFilterOf<crate::images::ImageSort>>, AppError> {
+    saved_filters_for(client, Entity::Images).await
+}
+
+/// One saved-filters request for `entity` (mode `SCENES` or `IMAGES`), decoded with its own
+/// criteria and sorts (cached per server as `saved-filters:<entity>`).
+pub async fn saved_filters_for<S: Sort>(
+    client: &StashClient,
+    entity: Entity,
+) -> Result<Vec<SavedFilterOf<S>>, AppError> {
+    let mode = match entity {
+        Entity::Scenes => FilterMode::Scenes,
+        Entity::Images => FilterMode::Images,
+    };
     let data = client
         .graphql(&SavedSceneFilters::build(SavedFiltersVariables {
-            mode: Some(FilterMode::Scenes),
+            mode: Some(mode),
         }))
         .await?;
     Ok(data
@@ -78,7 +101,8 @@ pub async fn saved_scene_filters(client: &StashClient) -> Result<Vec<SavedFilter
                 .find_filter
                 .as_ref()
                 .and_then(|find| serde_json::to_value(find).ok());
-            decode_saved_filter(
+            decode_saved_filter_for(
+                entity,
                 f.id.inner(),
                 &f.name,
                 find.as_ref(),
@@ -154,6 +178,9 @@ pub struct UiSettings {
     /// The web UI's default scene filter (`defaultFilters.scenes`), in Stash's saved-filter
     /// format, decoded by the filter model.
     pub default_scene_filter: Option<serde_json::Value>,
+    /// The web UI's default image filter (`defaultFilters.images`), the same format (012).
+    #[serde(default)]
+    pub default_image_filter: Option<serde_json::Value>,
     /// The share watched at which a viewing counts as a play (`minimumPlayPercent`; 0 when unset).
     pub minimum_play_percent: f64,
     /// The web UI's own "track activity" setting (`trackActivity`); read, not used for history.
@@ -175,6 +202,11 @@ pub fn parse_ui_settings(ui: &serde_json::Value) -> UiSettings {
         default_scene_filter: ui
             .get("defaultFilters")
             .and_then(|f| f.get("scenes"))
+            .filter(|v| v.is_object())
+            .cloned(),
+        default_image_filter: ui
+            .get("defaultFilters")
+            .and_then(|f| f.get("images"))
             .filter(|v| v.is_object())
             .cloned(),
         minimum_play_percent: ui

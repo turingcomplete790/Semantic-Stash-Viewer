@@ -110,6 +110,11 @@ pub fn for_error(error: &AppError) -> FailureMessage {
             format!("The server has no scene with ID {id}."),
             None,
         ),
+        AppError::ImageNotFound { id } => msg(
+            "That image doesn't exist",
+            format!("The server has no image with ID {id}."),
+            None,
+        ),
         AppError::NoPlayableFile { id } => msg(
             "This scene has no video file",
             format!("Scene {id} has no file the player can open."),

@@ -129,7 +129,8 @@ async fn saved_filters_are_one_request() {
 async fn each_choice_list_is_one_request() {
     use stash_core::adapter::choices::{choice_list, ChoiceKind};
     let body = r#"{"data":{"findPerformers":{"performers":[]},"findTags":{"tags":[]},
-        "findStudios":{"studios":[]},"findGroups":{"groups":[]},"findGalleries":{"galleries":[]}}}"#;
+        "findStudios":{"studios":[]},"findGroups":{"groups":[]},"findGalleries":{"galleries":[]},
+        "findFolders":{"folders":[]}}}"#;
     let (_server, client, log) = recorded(body).await;
     for kind in ChoiceKind::ALL {
         choice_list(&client, kind).await.expect("list");
@@ -142,6 +143,7 @@ async fn each_choice_list_is_one_request() {
             ("ChoiceListStudios", 1),
             ("ChoiceListGroups", 1),
             ("ChoiceListGalleries", 1),
+            ("ChoiceListFolders", 1),
         ],
     );
 }

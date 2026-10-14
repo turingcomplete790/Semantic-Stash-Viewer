@@ -28,9 +28,9 @@ const CONCURRENCY: usize = 6;
 /// Shown when there's nothing to show (no screenshot, a failed fetch, an undecodable image).
 pub const PLACEHOLDER: &[u8] = include_bytes!("../assets/thumb-placeholder.jpg");
 
-/// The kinds of thumbnail served: scene screenshots and performer images (008 picker rows and
-/// chips).
-pub const KINDS: [&str; 2] = ["scene", "performer"];
+/// The kinds of thumbnail served: scene screenshots, performer images (008 picker rows and
+/// chips), and image thumbnails (012).
+pub const KINDS: [&str; 3] = ["scene", "performer", "image"];
 
 /// Fetches the source image (bytes and content type) for a kind and id, or `None` if it has none.
 pub type SourceFetch = Arc<
@@ -59,8 +59,8 @@ impl ThumbService {
     }
 
     /// The thumbnail for `kind`/`id` at `version`: cached, or fetched and prepared now. `None`
-    /// for a kind this build doesn't serve (`image` and `gallery` arrive with the galleries
-    /// spec); the placeholder when there's nothing to show.
+    /// for a kind this build doesn't serve (`gallery` arrives with the galleries spec); the
+    /// placeholder when there's nothing to show.
     pub async fn get(&self, kind: &str, id: &str, version: &str) -> Option<Vec<u8>> {
         let kind: &'static str = KINDS.iter().copied().find(|k| *k == kind)?;
         let key = format!("thumb:{kind}:{id}:{version}");

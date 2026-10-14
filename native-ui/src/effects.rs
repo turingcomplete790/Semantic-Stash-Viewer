@@ -19,7 +19,7 @@ use uuid::Uuid;
 use crate::app::Message;
 use crate::player::controls::Direction;
 use crate::screens::scenes::page_key;
-use crate::screens::scenes::thumbs::{thumb_key, ThumbKey, WARM_LIMIT};
+use crate::screens::scenes::thumbs::{key_of, thumb_key, ThumbKey, WARM_LIMIT};
 use crate::services::Services;
 use crate::session::snapshot::{self, SavedSession};
 use crate::shell::TabId;
@@ -32,13 +32,22 @@ pub const SAVE_DELAY: std::time::Duration = std::time::Duration::from_millis(500
 pub enum PlayerAction {
     TogglePause,
     SeekRelative(f64),
-    Seek { seconds: f64, exact: bool },
+    Seek {
+        seconds: f64,
+        exact: bool,
+    },
     SetVolume(f64),
     SetMuted(bool),
     SetSpeed(f64),
     FrameStep(Direction),
     Replay,
     Close,
+    /// The image viewer's view (012): zoom, pan, rotation, actual size; only what differs from
+    /// `from` goes to mpv (a drag changes the pan alone).
+    View {
+        from: stash_core::images::viewer::View,
+        to: stash_core::images::viewer::View,
+    },
 }
 
 /// A change to the notification centre, asked for by the UI.
@@ -90,6 +99,21 @@ pub enum Effect {
         size: u32,
         warm: Option<u32>,
     },
+    /// Read a page of images through the cache, for the screen in `tab` that asked (012).
+    LoadImagesPage {
+        tab: TabId,
+        generation: u64,
+        query: stash_core::images::ImageQuery,
+        page: u32,
+        size: u32,
+    },
+    /// Read neighbouring pages of images into the cache; warm the thumbnails of page `warm`.
+    PrefetchImages {
+        query: stash_core::images::ImageQuery,
+        pages: Vec<u32>,
+        size: u32,
+        warm: Option<u32>,
+    },
     /// Scenes' thumbnails (the core's, through its disk cache), delivered in batches so arriving
     /// thumbnails don't rebuild the view on every frame.
     LoadThumbnails {
@@ -101,6 +125,36 @@ pub enum Effect {
     LoadUiSettings,
     /// Read the saved scene filters through the cache.
     LoadSavedFilters,
+    /// Read the saved image filters through the cache (012).
+    LoadSavedImageFilters,
+    /// Show an image in the player (012 US2); `looped`: it animates or is a clip.
+    OpenImage {
+        id: String,
+        title: String,
+        looped: bool,
+    },
+    /// Fetch the viewer's neighbours' files to disk (012 R4).
+    PrefetchImageFiles(Vec<String>),
+    /// An image's details for tab `tab`'s viewer, through the cache (012 US4).
+    LoadImageDetails {
+        tab: TabId,
+        id: String,
+    },
+    /// The image slideshow's timer (012 FR-014): report back after `after`.
+    SlideshowDue {
+        tab: TabId,
+        generation: u64,
+        due: crate::screens::images::viewer::SlideDue,
+        after: std::time::Duration,
+    },
+    /// The same for neighbours on another page: the cards at `positions` of that page (read
+    /// through the cache, where paging's prefetch put it).
+    PrefetchPageImageFiles {
+        query: stash_core::images::ImageQuery,
+        page: u32,
+        size: u32,
+        positions: Vec<usize>,
+    },
     /// Read a picker's list through the cache.
     LoadChoices(stash_core::adapter::choices::ChoiceKind),
     /// Read the semantic vocabulary (and these colour rules' matches) through the cache.
@@ -304,6 +358,11 @@ pub enum Reply {
         generation: u64,
         result: Result<ScenePage, AppError>,
     },
+    ImagesPage {
+        tab: TabId,
+        generation: u64,
+        result: Result<stash_core::images::ImagePage, AppError>,
+    },
     /// Thumbnails that arrived, decoded (`None`: the core had nothing for that scene).
     Thumbnails(Vec<(ThumbKey, Option<iced::widget::image::Handle>)>),
     SceneDetails {
@@ -332,6 +391,30 @@ pub enum Reply {
     },
     UiSettings(Result<stash_core::adapter::filters::UiSettings, AppError>),
     SavedFilters(Result<Vec<stash_core::scenes::filter::saved::SavedFilter>, AppError>),
+    /// An image's details arrived (012).
+    ImageDetails {
+        tab: TabId,
+        id: String,
+        /// Boxed, as scene details.
+        result: Box<Result<stash_core::images::ImageDetails, AppError>>,
+    },
+    /// The slideshow's timer came due (012).
+    SlideshowDue {
+        tab: TabId,
+        generation: u64,
+        due: crate::screens::images::viewer::SlideDue,
+    },
+    /// An image open was handed to the player, or couldn't be (012).
+    ImageOpened {
+        id: String,
+        result: Result<(), AppError>,
+    },
+    SavedImageFilters(
+        Result<
+            Vec<stash_core::scenes::filter::saved::SavedFilterOf<stash_core::images::ImageSort>>,
+            AppError,
+        >,
+    ),
     Choices {
         kind: stash_core::adapter::choices::ChoiceKind,
         result: Result<stash_core::adapter::choices::ChoiceList, AppError>,
@@ -448,6 +531,47 @@ pub fn run(effect: Effect, services: &Arc<Services>, window: Option<window::Id>)
                 },
             )
         })),
+        Effect::LoadImagesPage {
+            tab,
+            generation,
+            query,
+            page,
+            size,
+        } => {
+            let services = Arc::clone(services);
+            Task::perform(
+                async move { images_page(&services, query, page, size).await },
+                move |result| {
+                    Message::Reply(Reply::ImagesPage {
+                        tab,
+                        generation,
+                        result,
+                    })
+                },
+            )
+        }
+        Effect::PrefetchImages {
+            query,
+            pages,
+            size,
+            warm,
+        } => Task::batch(pages.into_iter().map(|page| {
+            let services = Arc::clone(services);
+            let query = query.clone();
+            Task::perform(
+                async move { images_page(&services, query, page, size).await },
+                move |result| match result {
+                    Ok(p) if Some(page) == warm => Message::Reply(Reply::Warm(
+                        p.items
+                            .iter()
+                            .take(WARM_LIMIT)
+                            .filter_map(|c| c.thumb.as_deref().and_then(key_of))
+                            .collect(),
+                    )),
+                    _ => Message::Idle,
+                },
+            )
+        })),
         Effect::LoadThumbnails { keys, width } => {
             let services = Arc::clone(services);
             Task::run(thumbnail_batches(services, keys, width), |batch| {
@@ -490,6 +614,103 @@ pub fn run(effect: Effect, services: &Arc<Services>, window: Option<window::Id>)
                         .map(|c| c.data)
                 },
                 |result| Message::Reply(Reply::SavedFilters(result)),
+            )
+        }
+        Effect::OpenImage { id, title, looped } => {
+            let services = Arc::clone(services);
+            Task::perform(
+                async move {
+                    let result = services.open_image(&id, &title, looped).await;
+                    (id, result)
+                },
+                |(id, result)| Message::Reply(Reply::ImageOpened { id, result }),
+            )
+        }
+        Effect::LoadImageDetails { tab, id } => {
+            let services = Arc::clone(services);
+            Task::perform(
+                async move {
+                    let key = stash_core::cache::keys::image_details(&id);
+                    let wanted = id.clone();
+                    let result =
+                        services
+                            .read_cached(&key, RefreshPolicy::Auto, false, move |client| {
+                                let id = wanted.clone();
+                                async move {
+                                    stash_core::adapter::images::image_details(&client, &id).await
+                                }
+                            })
+                            .await
+                            .map(|c| c.data);
+                    (id, result)
+                },
+                move |(id, result)| {
+                    Message::Reply(Reply::ImageDetails {
+                        tab,
+                        id,
+                        result: Box::new(result),
+                    })
+                },
+            )
+        }
+        Effect::SlideshowDue {
+            tab,
+            generation,
+            due,
+            after,
+        } => Task::perform(tokio::time::sleep(after), move |()| {
+            Message::Reply(Reply::SlideshowDue {
+                tab,
+                generation,
+                due,
+            })
+        }),
+        Effect::PrefetchImageFiles(ids) => {
+            let services = Arc::clone(services);
+            Task::perform(
+                async move { services.prefetch_image_files(ids).await },
+                |()| Message::Idle,
+            )
+        }
+        Effect::PrefetchPageImageFiles {
+            query,
+            page,
+            size,
+            positions,
+        } => {
+            let services = Arc::clone(services);
+            Task::perform(
+                async move {
+                    let Ok(p) = images_page(&services, query, page, size).await else {
+                        return;
+                    };
+                    let ids = positions
+                        .iter()
+                        .filter_map(|i| p.items.get(*i))
+                        .map(|c| c.id.clone())
+                        .collect();
+                    services.prefetch_image_files(ids).await;
+                },
+                |()| Message::Idle,
+            )
+        }
+        Effect::LoadSavedImageFilters => {
+            let services = Arc::clone(services);
+            Task::perform(
+                async move {
+                    services
+                        .read_cached(
+                            stash_core::cache::keys::SAVED_IMAGE_FILTERS,
+                            RefreshPolicy::Auto,
+                            false,
+                            |client| async move {
+                                stash_core::adapter::filters::saved_image_filters(&client).await
+                            },
+                        )
+                        .await
+                        .map(|c| c.data)
+                },
+                |result| Message::Reply(Reply::SavedImageFilters(result)),
             )
         }
         Effect::LoadChoices(kind) => {
@@ -698,7 +919,7 @@ pub fn run(effect: Effect, services: &Arc<Services>, window: Option<window::Id>)
                 move || {
                     services
                         .current_profile()
-                        .map_or(0, |id| services.caches.size(id))
+                        .map_or(0, |id| services.cache_size(id))
                 },
                 |size| Message::Reply(Reply::CacheSize(size)),
             )
@@ -979,7 +1200,12 @@ fn preview_frames(
 ) -> impl iced::futures::Stream<Item = (crate::screens::scenes::preview::Frames, bool)> {
     iced::stream::channel(8, async move |mut out| {
         use iced::futures::SinkExt;
-        let bytes = match services.preview_file(&scene_id).await {
+        // An animated image's preview is its own file (012); a scene's is Stash's WebP.
+        let file = match scene_id.strip_prefix("image:") {
+            Some(image) => services.image_animation_file(image).await,
+            None => services.preview_file(&scene_id).await,
+        };
+        let bytes = match file {
             Ok(Some(bytes)) => bytes,
             Ok(None) => {
                 let _ = out.send((Vec::new(), true)).await;
@@ -994,7 +1220,7 @@ fn preview_frames(
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let wanted = Arc::clone(&services);
         let decode = tokio::task::spawn_blocking(move || {
-            stash_core::previews::decode_preview_each(&bytes, width, |frame| {
+            stash_core::previews::decode_animation_each(&bytes, width, |frame| {
                 wanted.preview_wanted(generation) && tx.send(frame).is_ok()
             })
         });
@@ -1044,8 +1270,12 @@ const THUMB_IN_FLIGHT: usize = 12;
 
 /// Which cached image a thumbnail key draws on, as the core's `ThumbService` names it. Performer
 /// images are keyed `performer:<id>`, and their portraits `portrait:<id>`: the same cached image,
-/// decoded larger, so a portrait never downloads again. Scene thumbnails are keyed by scene id.
+/// decoded larger, so a portrait never downloads again. Image thumbnails are keyed `image:<id>`
+/// (012). Scene thumbnails are keyed by scene id.
 pub fn thumb_source(key: &ThumbKey) -> (&'static str, &str) {
+    if let Some(id) = key.0.strip_prefix("image:") {
+        return ("image", id);
+    }
     match key
         .0
         .strip_prefix("performer:")
@@ -1156,6 +1386,30 @@ async fn scenes_page(
         .map(|cached| cached.data)
 }
 
+/// One page of images through the cache (`images:q:<hash>:s:<size>:p:<page>`, 012).
+async fn images_page(
+    services: &Services,
+    query: stash_core::images::ImageQuery,
+    page: u32,
+    size: u32,
+) -> Result<stash_core::images::ImagePage, AppError> {
+    let key = crate::screens::browse::state::page_key(
+        stash_core::browse::entity::Entity::Images,
+        &query,
+        page,
+        size,
+    );
+    services
+        .read_cached(&key, RefreshPolicy::Auto, false, move |client| {
+            let query = query.clone();
+            async move {
+                stash_core::adapter::images::find_images_page(&client, &query, page, size).await
+            }
+        })
+        .await
+        .map(|cached| cached.data)
+}
+
 fn save_session(path: &std::path::Path, profile: Uuid, session: &SavedSession) {
     if let Err(e) = snapshot::save(path, profile, session) {
         tracing::warn!(error = %e, "couldn't save the session");
@@ -1191,5 +1445,23 @@ fn player_command(p: &player::Player, action: PlayerAction) {
         PlayerAction::FrameStep(Direction::Back) => p.frame_step_back(),
         PlayerAction::Replay => p.replay(),
         PlayerAction::Close => p.close(),
+        PlayerAction::View { from, to } => {
+            use player::PlayerCommand as C;
+            if to.actual != from.actual {
+                p.dispatch(C::ActualSize(to.actual));
+            }
+            if to.zoom != from.zoom {
+                p.dispatch(C::Zoom(f64::from(to.zoom)));
+            }
+            if to.pan != from.pan {
+                p.dispatch(C::Pan {
+                    x: f64::from(to.pan.0),
+                    y: f64::from(to.pan.1),
+                });
+            }
+            if to.quarter_turns != from.quarter_turns {
+                p.dispatch(C::Rotate(to.quarter_turns));
+            }
+        }
     }
 }

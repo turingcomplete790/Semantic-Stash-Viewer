@@ -41,6 +41,9 @@ pub struct PlayerSnapshot {
     pub error: Option<PlayerError>,
     /// Playing Stash's transcode, not the file itself (008 R10): the player says so.
     pub transcoded: bool,
+    /// The picture's size in pixels (mpv's `width`, `height`), once known (012: the viewer's
+    /// actual size and panning limits).
+    pub picture: Option<(u32, u32)>,
 }
 
 impl Default for PlayerSnapshot {
@@ -60,6 +63,7 @@ impl Default for PlayerSnapshot {
             tracks: Vec::new(),
             error: None,
             transcoded: false,
+            picture: None,
         }
     }
 }

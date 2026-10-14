@@ -1,0 +1,28 @@
+query ImagesPage($filter: FindFilterType!, $imageFilter: ImageFilterType) {
+  findImages(filter: $filter, image_filter: $imageFilter) {
+    count
+    images {
+      id
+      title
+      date
+      paths {
+        thumbnail
+      }
+      visual_files {
+        __typename
+        ... on ImageFile {
+          basename
+          width
+          height
+          format
+        }
+        ... on VideoFile {
+          basename
+          width
+          height
+          duration
+        }
+      }
+    }
+  }
+}

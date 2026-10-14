@@ -27,9 +27,17 @@ pub const UI_SETTINGS: &str = "ui:settings";
 /// The saved scene filters.
 pub const SAVED_SCENE_FILTERS: &str = "saved-filters:scenes";
 
+/// The saved image filters (012).
+pub const SAVED_IMAGE_FILTERS: &str = "saved-filters:images";
+
 /// A scene page's default request.
 pub fn scene_details(id: &str) -> String {
     format!("scene:details:{id}")
+}
+
+/// An image's details panel (012 US4).
+pub fn image_details(id: &str) -> String {
+    format!("image:details:{id}")
 }
 
 /// A scene's "All files" section.
@@ -71,9 +79,11 @@ mod tests {
             SEMANTIC_VOCABULARY.to_owned(),
             UI_SETTINGS.to_owned(),
             SAVED_SCENE_FILTERS.to_owned(),
+            SAVED_IMAGE_FILTERS.to_owned(),
             scene_details(id),
             scene_files(id),
             scene_galleries(id),
+            image_details(id),
             chip("performer", id),
             chip("tag", id),
             chip("studio", id),

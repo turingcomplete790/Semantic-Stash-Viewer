@@ -437,3 +437,21 @@ fn a_changed_picture_is_a_new_key_and_one_load() {
         (thumb_source(&portrait), &portrait.1)
     );
 }
+
+/// 012 T015: an image's card thumbnail is keyed apart from a scene with the same id, and comes from
+/// the core's `image` thumbnails.
+#[test]
+fn image_thumbnails_never_collide_with_scene_thumbnails() {
+    use semantic_stash_viewer_native::effects::thumb_source;
+    use semantic_stash_viewer_native::screens::scenes::thumbs::key_of;
+    let scene = key_of("ssv-thumb://localhost/scene/5?v=1").expect("a scene key");
+    let image = key_of("ssv-thumb://localhost/image/5?v=1").expect("an image key");
+    assert_ne!(scene, image);
+    assert_eq!(thumb_source(&scene), ("scene", "5"));
+    assert_eq!(thumb_source(&image), ("image", "5"));
+    assert_eq!(
+        key_of("ssv-thumb://localhost/gallery/5?v=1"),
+        None,
+        "not served yet"
+    );
+}

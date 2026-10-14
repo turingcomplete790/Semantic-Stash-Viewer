@@ -17,6 +17,13 @@ use crate::session::{lock, Inner, MAX_SPEED, MIN_SPEED};
 /// must be Stash's direct stream (`…/scene/<id>/stream`, no query), or, only with the explicit
 /// `transcoded` flag, its MP4 transcode (`…/scene/<id>/stream.mp4`). Local paths (tests) pass.
 pub fn source_allowed(source: &str, transcoded: bool) -> bool {
+    source_allowed_for(source, transcoded, false)
+}
+
+/// As [`source_allowed`], for an open of an image (`image`, 012) or a scene: an image may only be
+/// Stash's full image file (`…/image/<id>/image`, no query) or a local file (the neighbour cache);
+/// a scene only its direct stream (or the explicit transcode).
+pub fn source_allowed_for(source: &str, transcoded: bool, image: bool) -> bool {
     let Ok(url) = url::Url::parse(source) else {
         // Not a URL: a local path.
         return true;
@@ -34,8 +41,9 @@ pub fn source_allowed(source: &str, transcoded: bool) -> bool {
         .map(Iterator::collect)
         .unwrap_or_default();
     match segments.as_slice() {
-        [.., "scene", id, "stream"] if !id.is_empty() => !transcoded,
-        [.., "scene", id, "stream.mp4"] if !id.is_empty() => transcoded,
+        [.., "image", id, "image"] if !id.is_empty() => image && !transcoded,
+        [.., "scene", id, "stream"] if !id.is_empty() => !image && !transcoded,
+        [.., "scene", id, "stream.mp4"] if !id.is_empty() => !image && transcoded,
         _ => false,
     }
 }
@@ -70,6 +78,19 @@ pub enum PlayerCommand {
     FrameStep(FrameDirection),
     /// Back to the start and play (FR-015).
     Replay,
+    /// Zoom as a power of two (`video-zoom`), clamped to −3..=3 (1/8× to 8×; 012).
+    Zoom(f64),
+    /// Pan the picture by fractions of its size (`video-pan-x/y`), clamped to −1..=1.
+    Pan {
+        x: f64,
+        y: f64,
+    },
+    /// Rotate by quarter turns clockwise (`video-rotate`), 0..=3.
+    Rotate(u8),
+    /// One image pixel per screen pixel (`video-unscaled`).
+    ActualSize(bool),
+    /// Fitted, centred, upright.
+    ResetView,
 }
 
 impl Inner {
@@ -125,6 +146,22 @@ impl Inner {
                 FrameDirection::Forward => "frame-step",
                 FrameDirection::Back => "frame-back-step",
             }),
+            PlayerCommand::Zoom(z) => {
+                let _ = mpv.set_property("video-zoom", z.clamp(-3.0, 3.0));
+            }
+            PlayerCommand::Pan { x, y } => {
+                let _ = mpv.set_property("video-pan-x", x.clamp(-1.0, 1.0));
+                let _ = mpv.set_property("video-pan-y", y.clamp(-1.0, 1.0));
+            }
+            PlayerCommand::Rotate(quarters) => {
+                let _ = mpv.set_property("video-rotate", i64::from(quarters % 4) * 90);
+            }
+            PlayerCommand::ActualSize(on) => {
+                let _ = mpv.set_property("video-unscaled", if on { "yes" } else { "no" });
+            }
+            PlayerCommand::ResetView => {
+                let _ = crate::session::reset_view(mpv);
+            }
             PlayerCommand::Replay => {
                 lock(&self.last_seek_target).take();
                 // Unpause now, and again once the seek settles: at end of file with
@@ -140,6 +177,45 @@ impl Inner {
 }
 
 /// Start the `mpv-commands` worker. It exits when the returned sender is dropped.
+/// The batch with each absolute view setting (zoom, pan, rotation, actual size) only at its last
+/// occurrence: each replaces the one before, so the picture ends the same with fewer property
+/// writes. Everything else stays, in order.
+pub fn coalesce(batch: Vec<PlayerCommand>) -> Vec<PlayerCommand> {
+    fn kind(c: &PlayerCommand) -> Option<u8> {
+        match c {
+            PlayerCommand::Zoom(_) => Some(0),
+            PlayerCommand::Pan { .. } => Some(1),
+            PlayerCommand::Rotate(_) => Some(2),
+            PlayerCommand::ActualSize(_) => Some(3),
+            _ => None,
+        }
+    }
+    let mut last = [None; 4];
+    for (i, c) in batch.iter().enumerate() {
+        if let Some(k) = kind(c) {
+            last[usize::from(k)] = Some(i);
+        }
+    }
+    batch
+        .into_iter()
+        .enumerate()
+        .filter(|(i, c)| kind(c).is_none_or(|k| last[usize::from(k)] == Some(*i)))
+        .map(|(_, c)| c)
+        .collect()
+}
+
+/// A view setting (zoom, pan, rotation, actual size).
+fn is_view(c: &PlayerCommand) -> bool {
+    matches!(
+        c,
+        PlayerCommand::Zoom(_)
+            | PlayerCommand::Pan { .. }
+            | PlayerCommand::Rotate(_)
+            | PlayerCommand::ActualSize(_)
+            | PlayerCommand::ResetView
+    )
+}
+
 pub(crate) fn spawn_worker(
     inner: Arc<Inner>,
 ) -> std::io::Result<(mpsc::Sender<PlayerCommand>, JoinHandle<()>)> {
@@ -147,8 +223,19 @@ pub(crate) fn spawn_worker(
     let handle = std::thread::Builder::new()
         .name("mpv-commands".into())
         .spawn(move || {
-            for command in rx {
-                inner.apply(command);
+            // Whatever queued up meanwhile goes as one batch, its view settings coalesced (a
+            // drag sends a pan per pointer move; only the last one matters, 012).
+            while let Ok(first) = rx.recv() {
+                let mut batch = vec![first];
+                batch.extend(rx.try_iter());
+                let batch = coalesce(batch);
+                let view = batch.iter().any(is_view);
+                for command in batch {
+                    inner.apply(command);
+                }
+                if view {
+                    inner.view_changed();
+                }
             }
         })?;
     Ok((tx, handle))
@@ -156,6 +243,27 @@ pub(crate) fn spawn_worker(
 
 #[cfg(test)]
 mod tests {
+    use super::{coalesce, PlayerCommand as C};
+
+    #[test]
+    fn a_drags_pans_coalesce_to_the_last_and_nothing_else_moves() {
+        let batch = vec![
+            C::Pan { x: 0.1, y: 0.0 },
+            C::TogglePause,
+            C::Pan { x: 0.2, y: 0.0 },
+            C::Zoom(1.0),
+            C::Pan { x: 0.3, y: 0.1 },
+        ];
+        let out = coalesce(batch);
+        assert_eq!(out.len(), 3);
+        assert!(matches!(out[0], C::TogglePause));
+        assert!(matches!(out[1], C::Zoom(z) if z == 1.0));
+        assert!(matches!(out[2], C::Pan { x, y } if x == 0.3 && y == 0.1));
+    }
+}
+
+#[cfg(test)]
+mod guard_tests {
     use super::source_allowed;
     use crate::error::PlayerError;
 

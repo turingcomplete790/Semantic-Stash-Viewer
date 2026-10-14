@@ -7,7 +7,8 @@
 //! authentication is on).
 
 pub mod filter;
-pub mod paging;
+/// Moved to the browse layer (012); kept here for existing paths.
+pub use crate::browse::paging;
 pub mod query;
 
 use serde::{Deserialize, Serialize};

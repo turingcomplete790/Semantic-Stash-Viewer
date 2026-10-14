@@ -309,6 +309,78 @@ pub struct SceneFilterType {
     pub custom_fields: Option<Vec<CustomFieldCriterionInput>>,
 }
 
+/// `FileFilterType`: only the parent folder, for Images' folder criterion (012).
+#[derive(cynic::InputObject, Clone, Debug, Default)]
+#[cynic(graphql_type = "FileFilterType", rename_all = "None")]
+pub struct FileFilterType {
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub parent_folder: Option<HierarchicalMultiCriterionInput>,
+}
+
+/// `ImageFilterType`: every criterion the web UI offers for images (012 data model).
+#[derive(cynic::InputObject, Clone, Debug, Default)]
+#[cynic(graphql_type = "ImageFilterType", rename_all = "None")]
+pub struct ImageFilterType {
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub title: Option<StringCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub code: Option<StringCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub details: Option<StringCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub photographer: Option<StringCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub url: Option<StringCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub path: Option<StringCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub checksum: Option<StringCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub phash_distance: Option<PhashDistanceCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub file_count: Option<IntCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub rating100: Option<IntCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub o_counter: Option<IntCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub tag_count: Option<IntCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub performer_count: Option<IntCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub performer_age: Option<IntCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub date: Option<DateCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<TimestampCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<TimestampCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub organized: Option<bool>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub performer_favorite: Option<bool>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub is_missing: Option<String>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<ResolutionCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub orientation: Option<OrientationCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub studios: Option<HierarchicalMultiCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub tags: Option<HierarchicalMultiCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub performer_tags: Option<HierarchicalMultiCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub performers: Option<MultiCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub galleries: Option<MultiCriterionInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub files_filter: Option<FileFilterType>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub custom_fields: Option<Vec<CustomFieldCriterionInput>>,
+}
+
 // ---- Fragments per view tier ------------------------------------------------------------------
 
 /// The primary file as a list row or card needs it.

@@ -20,6 +20,8 @@ use crate::effects::{Effect, Reply};
 use crate::machine::Step;
 use crate::onboarding;
 use crate::player::video::Shared;
+use crate::screens::browse::state::{BrowseMsg, Kind, List};
+use crate::screens::images::ImagesMsg;
 use crate::screens::scenes::layout::Layout;
 use crate::screens::scenes::{ScenesMsg, Thumbs};
 use crate::screens::{Context, Mode};
@@ -202,8 +204,39 @@ impl Session {
                 crate::screens::Screen::Scenes(s) if s.mode == Mode::Queue => {
                     s.queue.panel.as_deref().map(|p| p.scene_id.as_str()) == playing
                 }
+                // The image viewer shows its image (012).
+                crate::screens::Screen::Images(s) => {
+                    self.playback.image.is_some()
+                        && s.viewer_image() == self.playback.image.as_deref()
+                }
                 _ => false,
             }
+    }
+
+    /// What became of the image shown goes to the viewer that asked (012); a loop may move its
+    /// slideshow on.
+    fn image_events(&mut self) -> Step<Up> {
+        let events = self.playback.take_image_events();
+        let Some(owner) = self.playback.owner else {
+            return Step::none();
+        };
+        let mut out = Step::none();
+        for event in events {
+            match event {
+                playback::ImageEvent::Shown { id, picture } => {
+                    self.shell.image_shown(owner, &id, picture);
+                }
+                playback::ImageEvent::Failed { id, reason } => {
+                    self.shell.image_failed(owner, &id, reason);
+                }
+                playback::ImageEvent::Looped { id } => {
+                    let Step { effects, up } = self.shell.image_looped(owner, &id);
+                    let step = self.shell_up(Step::effects(effects), up);
+                    out = out.with_all(step.effects);
+                }
+            }
+        }
+        out
     }
 
     /// Tab `tab`'s Scenes screen, if it shows the queue view.
@@ -359,7 +392,11 @@ impl Session {
 
     /// Whether the now-playing bar shows (something plays, out of sight).
     pub fn now_playing(&self) -> bool {
-        self.playback.active() && !self.player_visible()
+        // An image never shows the now-playing bar, nor while it closes (012).
+        self.playback.active()
+            && self.playback.image.is_none()
+            && !self.playback.releasing
+            && !self.player_visible()
     }
 
     fn back_to_scene(&mut self) -> Step<Up> {
@@ -405,7 +442,7 @@ impl Session {
     pub(crate) fn thumbnails(&mut self) -> Vec<Effect> {
         use crate::screens::scene::{PERFORMER_ICON, PORTRAIT};
         let width = self.thumb_width();
-        let mut effects = self.thumbs.want_cards(self.shell.active_cards(), width);
+        let mut effects = self.thumbs.want(&self.shell.active_thumbs(), width);
         // Performer images on the scene page (008 FR-011a), only those Stash has, decoded at
         // their drawn size on this display; and the open performer card's portrait (FR-011b)
         // from the same cached image.
@@ -429,10 +466,14 @@ impl Session {
                 effects.extend(self.thumbs.want([&key], portrait));
             }
         }
+        // Performer pictures in an image's details (012 US4).
+        if let Some(images) = self.shell.active_viewer() {
+            let keys = images.details_performers();
+            let icon = self.shell.layout.physical(PERFORMER_ICON);
+            effects.extend(self.thumbs.want(&keys, icon));
+        }
         // Performer images for the picker's visible rows only (008 FR-003a).
-        if let Some(crate::screens::scenes::Panel::Editor(editor)) =
-            self.active_scenes().map(|s| &s.panel)
-        {
+        if let Some(crate::screens::scenes::Panel::Editor(editor)) = self.active_panel() {
             let keys = crate::screens::scenes::picker::visible_performers(&self.library, editor);
             effects.extend(self.thumbs.want(&keys, 64));
         }
@@ -442,7 +483,7 @@ impl Session {
     /// The width thumbnails are decoded at: a grid card's (list rows draw them smaller), in steps
     /// of 32 px so small window changes reuse them.
     fn thumb_width(&self) -> u32 {
-        let w = self.shell.layout.card_width().ceil() as u32;
+        let w = self.shell.active_layout().card_width().ceil() as u32;
         w.div_ceil(32) * 32
     }
 
@@ -471,7 +512,47 @@ impl Session {
                 self.previews.left(&scene)
             });
         }
-        let scrolled = if matches!(msg, ShellMsg::Scenes(ScenesMsg::Scrolled { .. })) {
+        // The viewer's input (pointer movement among it) skips the grid's work below; a wheel
+        // turn zooms with Ctrl held (012).
+        if let ShellMsg::Images(ImagesMsg::Viewer(m)) = msg {
+            use crate::screens::images::ViewerMsg as V;
+            let m = match m {
+                V::Wheel { y, .. } => V::Wheel {
+                    y,
+                    ctrl: self.modifiers.control(),
+                },
+                // The slideshow starts at the preference's delay.
+                V::Event(stash_core::images::viewer::Event::ToggleSlideshow { .. }) => {
+                    V::Event(stash_core::images::viewer::Event::ToggleSlideshow {
+                        delay_s: self.prefs.slideshow_delay_s,
+                    })
+                }
+                other => other,
+            };
+            let Step { effects, up } = self.shell.update(ShellMsg::Images(ImagesMsg::Viewer(m)));
+            return self.shell_up(Step::effects(effects), up);
+        }
+        // An animated image's card previews its own file (012 FR-016); stills and clips keep
+        // theirs.
+        if let ShellMsg::Images(ImagesMsg::List(
+            BrowseMsg::Hover(index) | BrowseMsg::HoverEnd(index),
+        )) = msg
+        {
+            let on = matches!(msg, ShellMsg::Images(ImagesMsg::List(BrowseMsg::Hover(_))));
+            let Some(key) = self.image_preview_key(index) else {
+                return Step::none();
+            };
+            return Step::effects(if on {
+                self.previews.enter(key, true)
+            } else {
+                self.previews.left(&key)
+            });
+        }
+        let scrolled = if matches!(
+            msg,
+            ShellMsg::Scenes(ScenesMsg::Scrolled { .. })
+                | ShellMsg::Images(ImagesMsg::List(BrowseMsg::Scrolled { .. }))
+        ) {
             self.previews.scrolled(std::time::Instant::now())
         } else {
             Vec::new()
@@ -485,10 +566,24 @@ impl Session {
                 index,
                 new_tab: true,
             }),
+            ShellMsg::Images(ImagesMsg::List(BrowseMsg::Open {
+                index,
+                new_tab: false,
+            })) if self.modifiers.control() => ShellMsg::Images(ImagesMsg::List(BrowseMsg::Open {
+                index,
+                new_tab: true,
+            })),
             ShellMsg::FilterTo {
                 criterion,
                 new_tab: false,
             } if self.modifiers.control() => ShellMsg::FilterTo {
+                criterion,
+                new_tab: true,
+            },
+            ShellMsg::FilterImagesTo {
+                criterion,
+                new_tab: false,
+            } if self.modifiers.control() => ShellMsg::FilterImagesTo {
                 criterion,
                 new_tab: true,
             },
@@ -502,8 +597,8 @@ impl Session {
         effects.extend(scrolled);
         effects.extend(self.thumbnails());
         effects.extend(self.sync_tag_colours());
-        // Another screen: no cards, so no preview.
-        if self.active_scenes().is_none() {
+        // Another screen (or the image viewer): no cards, so no preview.
+        if !self.cards_showing() {
             effects.extend(self.previews.clear());
         }
         if self.restored {
@@ -512,14 +607,52 @@ impl Session {
                 generation: self.save_generation,
             });
         }
+        let step = self.shell_up(Step::effects(effects), up);
+        let resumed = self.resume_viewer();
+        step.with_all(resumed.effects)
+    }
+
+    /// An open viewer back on screen (Back from a chip's grid, a switch to its tab) shows its
+    /// image again when the player has something else (012 FR-019: one player).
+    fn resume_viewer(&mut self) -> Step<Up> {
+        let active = self.shell.active().id;
+        let wanted = self
+            .shell
+            .active_viewer()
+            .and_then(|s| s.viewer.as_ref())
+            .filter(|v| v.pending.is_none())
+            .and_then(|v| v.showing.clone());
+        let Some(id) = wanted else {
+            return Step::none();
+        };
+        if self.playback.image.as_deref() == Some(id.as_str())
+            && self.playback.owner == Some(active)
+        {
+            return Step::none();
+        }
+        let Step { effects, up } = self.shell.with_viewer(|s| s.resume_viewer());
         self.shell_up(Step::effects(effects), up)
     }
 
     fn shell_up(&mut self, step: Step<Up>, up: Option<shell_mod::Up>) -> Step<Up> {
         match up {
             None => step,
+            Some(shell_mod::Up::ShowImage { id, title, looped }) => {
+                let owner = self.shell.active().id;
+                let step = step.with_all(self.playback.open_image(id, title, looped, owner));
+                self.sync_queue_playing();
+                step
+            }
+            Some(shell_mod::Up::ImageClosed) => {
+                if self.playback.owner == Some(self.shell.active().id) {
+                    step.with_all(self.playback.release_image())
+                } else {
+                    step
+                }
+            }
             Some(shell_mod::Up::Play(id)) => {
                 let owner = self.shell.active().id;
+                let step = step.with_all(self.shell.close_viewers());
                 let step = step.with_all(self.playback.open(id, owner));
                 self.sync_chapters();
                 self.sync_queue_playing();
@@ -552,6 +685,7 @@ impl Session {
             Some(shell_mod::Up::Need(need)) => step.with_all(self.library.want(need)),
             Some(shell_mod::Up::PlayAt { id, seconds }) => {
                 let owner = self.shell.active().id;
+                let step = step.with_all(self.shell.close_viewers());
                 let step = step.with_all(self.playback.open_at(id, owner, Some(seconds)));
                 self.sync_chapters();
                 self.sync_queue_playing();
@@ -574,6 +708,14 @@ impl Session {
             }
             return Step::none();
         }
+        // The image viewer replaces the player's and the grid's keys while it shows (012); the
+        // shell's still work.
+        if self.shell.active_viewer().is_some() {
+            return self
+                .viewer_key(key, mods)
+                .or_else(|| self.shell_key(key, mods))
+                .unwrap_or_else(Step::none);
+        }
         if let Some(step) = self.queue_key(key, mods) {
             return step;
         }
@@ -590,7 +732,7 @@ impl Session {
                 return Step::none();
             }
         }
-        if let Some(step) = self.scenes_panel_key(key, mods) {
+        if let Some(step) = self.list_panel_key(key, mods) {
             return step;
         }
         if let Some(step) = self.tag_colours_key(key, mods) {
@@ -610,7 +752,7 @@ impl Session {
                 && s.queue.focus == crate::screens::scenes::queue::QueueFocus::Panel
         });
         if panel_focused {
-            return self.scenes_key(key, mods).unwrap_or_else(Step::none);
+            return self.list_key(key, mods).unwrap_or_else(Step::none);
         }
         if let Some(Step { mut effects, up }) = self.shell.screen_key(key, mods) {
             effects.extend(self.thumbnails());
@@ -638,6 +780,7 @@ impl Session {
             Some(
                 Action::Player
                 | Action::Scenes
+                | Action::Images
                 | Action::QueueList
                 | Action::QueueFocus
                 | Action::QueueNext
@@ -645,14 +788,111 @@ impl Session {
                 | Action::QueueAutoplay
                 | Action::QueueShuffle
                 | Action::QueueRepeat
-                | Action::QueueOpen { .. },
+                | Action::QueueOpen { .. }
+                | Action::Viewer(_),
             )
-            | None => return self.scenes_key(key, mods).unwrap_or_else(Step::none),
+            | None => return self.list_key(key, mods).unwrap_or_else(Step::none),
             Some(
                 Action::FocusSearch | Action::FilterMenu | Action::SavedFilters | Action::Settings,
             ) => return Step::none(),
         };
         self.shell(msg)
+    }
+
+    /// The shell's own keys alone (tabs, history, help, focus); `None` for any other key.
+    fn shell_key(&mut self, key: &Key, mods: Modifiers) -> Option<Step<Up>> {
+        let msg = match keymap::resolve(key, mods, &[Level::Shell])? {
+            Action::NewTab => ShellMsg::NewTab,
+            Action::CloseTab => ShellMsg::CloseActive,
+            Action::NextTab => ShellMsg::NextTab,
+            Action::PrevTab => ShellMsg::PrevTab,
+            Action::SelectTab(i) => ShellMsg::SelectIndex(i),
+            Action::MoveTabLeft => ShellMsg::MoveLeft,
+            Action::MoveTabRight => ShellMsg::MoveRight,
+            Action::Back => ShellMsg::Back,
+            Action::Forward => ShellMsg::Forward,
+            Action::KeyboardHelp => ShellMsg::KeyboardHelp,
+            Action::FocusNext => return Some(Step::effect(Effect::FocusNext)),
+            Action::FocusPrevious => return Some(Step::effect(Effect::FocusPrevious)),
+            _ => return None,
+        };
+        Some(self.shell(msg))
+    }
+
+    /// The image viewer's keys (012 contracts/images-ui.md); `None` for a key it doesn't bind.
+    fn viewer_key(&mut self, key: &Key, mods: Modifiers) -> Option<Step<Up>> {
+        use crate::screens::images::viewer::ZOOM_KEY;
+        use crate::shell::keymap::ViewerKey as K;
+        use stash_core::images::viewer::Event;
+        let Some(Action::Viewer(k)) = keymap::resolve(key, mods, &[Level::Viewer]) else {
+            return None;
+        };
+        let fullscreen = self.playback.active() && self.playback.snapshot().fullscreen;
+        let at_first = self
+            .shell
+            .active_viewer()
+            .and_then(|s| s.viewer.as_ref())
+            .is_some_and(|v| v.machine.at == 0);
+        let zoom = |delta: f32| Event::Zoom {
+            delta,
+            anchor: (0.0, 0.0),
+        };
+        let step = match k {
+            K::Fullscreen => return Some(Step::effect(Effect::SetFullscreen(!fullscreen))),
+            K::Close if fullscreen => return Some(Step::effect(Effect::SetFullscreen(false))),
+            K::Close => self.shell.with_viewer(|s| s.close_viewer()),
+            K::Back if at_first => self.shell.with_viewer(|s| s.close_viewer()),
+            K::Next if *key == Key::Named(iced::keyboard::key::Named::Space) => {
+                self.shell.with_viewer(|s| s.viewer_event(Event::Next))
+            }
+            K::Next => self.shell.with_viewer(|s| s.arrow(1, 0)),
+            K::Previous => self.shell.with_viewer(|s| s.arrow(-1, 0)),
+            K::Back => self.shell.with_viewer(|s| s.viewer_event(Event::Previous)),
+            K::Up => self.shell.with_viewer(|s| s.arrow(0, -1)),
+            K::Down => self.shell.with_viewer(|s| s.arrow(0, 1)),
+            K::First => self.shell.with_viewer(|s| s.viewer_event(Event::First)),
+            K::Last => self.shell.with_viewer(|s| s.viewer_event(Event::Last)),
+            K::ZoomIn => self.shell.with_viewer(|s| s.viewer_event(zoom(ZOOM_KEY))),
+            K::ZoomOut => self.shell.with_viewer(|s| s.viewer_event(zoom(-ZOOM_KEY))),
+            K::Fit => self.shell.with_viewer(|s| s.viewer_event(Event::Fit)),
+            K::ActualSize => self.shell.with_viewer(|s| {
+                if s.viewer.as_ref().is_some_and(|v| v.machine.view.actual) {
+                    Step::none()
+                } else {
+                    s.viewer_event(Event::ToggleActual)
+                }
+            }),
+            K::Details => self
+                .shell
+                .with_viewer(|s| s.viewer_event(Event::ToggleDetails)),
+            K::Slideshow => {
+                let delay_s = self.prefs.slideshow_delay_s;
+                self.shell
+                    .with_viewer(|s| s.viewer_event(Event::ToggleSlideshow { delay_s }))
+            }
+            K::DelayDown | K::DelayUp => {
+                let step: i64 = if k == K::DelayUp { 1 } else { -1 };
+                let (lo, hi) = (
+                    *stash_core::images::viewer::DELAYS.start(),
+                    *stash_core::images::viewer::DELAYS.end(),
+                );
+                let delay = (i64::from(self.prefs.slideshow_delay_s) + step)
+                    .clamp(i64::from(lo), i64::from(hi)) as u32;
+                let mut prefs = self.prefs;
+                prefs.slideshow_delay_s = delay;
+                self.apply_prefs(prefs);
+                self.shell
+                    .with_viewer(|s| s.viewer_event(Event::SetDelay(delay)))
+                    .with(Effect::SavePlaybackPreferences(prefs))
+            }
+            K::Rotate => {
+                let clockwise = !mods.shift();
+                self.shell
+                    .with_viewer(|s| s.viewer_event(Event::Rotate { clockwise }))
+            }
+        };
+        let Step { effects, up } = step;
+        Some(self.shell_up(Step::effects(effects), up))
     }
 
     /// The queue view's keys (010 contracts/queue-ui.md), before the player's: the list's keys
@@ -716,6 +956,27 @@ impl Session {
         }
     }
 
+    /// Whether the active screen shows cards (Scenes, or Images without its viewer).
+    fn cards_showing(&self) -> bool {
+        match self.shell.active().current() {
+            crate::screens::Screen::Scenes(_) => true,
+            crate::screens::Screen::Images(s) => s.viewer.is_none(),
+            _ => false,
+        }
+    }
+
+    /// Card `index`'s preview key on the active Images screen, if it animates.
+    fn image_preview_key(&self, index: usize) -> Option<String> {
+        use crate::screens::browse::state::Kind;
+        match self.shell.active().current() {
+            crate::screens::Screen::Images(s) if s.viewer.is_none() => s
+                .cards()
+                .get(index)
+                .and_then(crate::screens::images::ImageKind::preview_key),
+            _ => None,
+        }
+    }
+
     /// The active Scenes screen, if that's what shows.
     fn active_scenes(&self) -> Option<&crate::screens::ScenesState> {
         match self.shell.active().current() {
@@ -724,64 +985,42 @@ impl Session {
         }
     }
 
-    /// Keys for an open filter panel on Scenes (008 FR-003f): move, choose, remove, exclude,
-    /// close. Keys a focused field takes (typing, Enter in a field) never get here.
-    fn scenes_panel_key(&mut self, key: &Key, mods: Modifiers) -> Option<Step<Up>> {
-        use crate::screens::scenes::editor::EditorMsg;
-        use crate::screens::scenes::filters::{menu_target, MenuRow};
-        use crate::screens::scenes::{picker, Panel};
-        use iced::keyboard::key::Named;
-        let state = self.active_scenes()?;
-        let scenes = |m: ScenesMsg| ShellMsg::Scenes(m);
-        let named = match key {
-            Key::Named(n) => Some(*n),
+    /// The active list's open panel (Scenes or Images), if any.
+    fn active_panel(&self) -> Option<&crate::screens::browse::state::Panel> {
+        match self.shell.active().current() {
+            crate::screens::Screen::Scenes(s) => Some(&s.panel),
+            crate::screens::Screen::Images(s) => Some(&s.panel),
             _ => None,
-        };
-        let msg = match (&state.panel, named) {
-            (Panel::None, _) => return None,
-            (Panel::Editor(_), Some(Named::Escape)) => scenes(ScenesMsg::Editor(EditorMsg::Cancel)),
-            (Panel::Menu { .. }, Some(Named::Escape)) => scenes(ScenesMsg::FilterMenu(false)),
-            (Panel::Saved { .. }, Some(Named::Escape)) => scenes(ScenesMsg::SavedMenu(false)),
-            (_, Some(Named::ArrowDown)) => scenes(ScenesMsg::MenuMove(1)),
-            (_, Some(Named::ArrowUp)) => scenes(ScenesMsg::MenuMove(-1)),
-            (Panel::Menu { highlight }, Some(Named::Enter)) => {
-                match menu_target(state, *highlight)? {
-                    MenuRow::Active { key, .. } => scenes(ScenesMsg::Edit(key)),
-                    MenuRow::Kind(kind) => scenes(ScenesMsg::Add(kind)),
-                    _ => return Some(Step::none()),
-                }
-            }
-            (Panel::Menu { highlight }, Some(Named::Delete | Named::Backspace)) => {
-                match menu_target(state, *highlight)? {
-                    MenuRow::Active { key, .. } => scenes(ScenesMsg::Remove(key)),
-                    _ => return Some(Step::none()),
-                }
-            }
-            (Panel::Saved { highlight }, Some(Named::Enter)) => {
-                let list = self.library.saved.ready()?;
-                let filter = list.get((*highlight).min(list.len().checked_sub(1)?))?;
-                scenes(ScenesMsg::ApplySaved(Box::new(filter.clone())))
-            }
-            (Panel::Editor(editor), Some(Named::Enter)) => {
-                match picker::highlighted(&self.library, editor) {
-                    Some(item) if editor.picker().is_some() && !mods.control() => {
-                        scenes(ScenesMsg::Editor(EditorMsg::Toggle(item)))
-                    }
-                    _ => scenes(ScenesMsg::Editor(EditorMsg::Apply)),
-                }
-            }
-            (Panel::Editor(editor), None)
-                if mods.control()
-                    && matches!(key, Key::Character(c) if c.eq_ignore_ascii_case("e")) =>
-            {
-                let item = picker::highlighted(&self.library, editor)?;
-                scenes(ScenesMsg::Editor(EditorMsg::Exclude(item)))
-            }
+        }
+    }
+
+    /// Keys for an open filter panel on Scenes or Images (008 FR-003f): move, choose, remove,
+    /// exclude, close. Keys a focused field takes (typing, Enter in a field) never get here.
+    fn list_panel_key(&mut self, key: &Key, mods: Modifiers) -> Option<Step<Up>> {
+        use crate::screens::scenes::picker;
+        let msg = match self.shell.active().current() {
+            crate::screens::Screen::Scenes(s) => panel_key(
+                &s.list,
+                &self.library,
+                key,
+                mods,
+                crate::screens::scenes::state::shell_msg,
+            )?,
+            crate::screens::Screen::Images(s) => panel_key(
+                &s.list,
+                &self.library,
+                key,
+                mods,
+                crate::screens::images::shell_msg,
+            )?,
             _ => return None,
+        };
+        let Some(msg) = msg else {
+            return Some(Step::none());
         };
         let mut step = self.shell(msg);
         // Keep the picker's highlighted row in view.
-        if let Some(Panel::Editor(editor)) = self.active_scenes().map(|s| &s.panel) {
+        if let Some(crate::screens::browse::state::Panel::Editor(editor)) = self.active_panel() {
             if let Some(y) = picker::reveal(&self.library, editor) {
                 step.effects.push(Effect::ScrollTo {
                     id: picker::LIST_ID.to_owned(),
@@ -818,15 +1057,36 @@ impl Session {
         )))
     }
 
-    /// The Scenes level's own keys (008 FR-003f): search, filter menu, saved filters.
-    fn scenes_key(&mut self, key: &Key, mods: Modifiers) -> Option<Step<Up>> {
-        self.active_scenes()?;
-        match keymap::resolve(key, mods, &[Level::Scenes])? {
-            Action::FocusSearch => Some(Step::effect(Effect::Focus(
-                crate::screens::scenes::state::SEARCH_ID,
-            ))),
-            Action::FilterMenu => Some(self.shell(ShellMsg::Scenes(ScenesMsg::FilterMenu(true)))),
-            Action::SavedFilters => Some(self.shell(ShellMsg::Scenes(ScenesMsg::SavedMenu(true)))),
+    /// A list level's own keys (008 FR-003f; Images since 012): search, filter menu, saved
+    /// filters.
+    fn list_key(&mut self, key: &Key, mods: Modifiers) -> Option<Step<Up>> {
+        use crate::screens::browse::state::SEARCH_ID;
+        use crate::screens::Screen;
+        let images = match self.shell.active().current() {
+            Screen::Scenes(_) => false,
+            Screen::Images(_) => true,
+            _ => return None,
+        };
+        let level = if images { Level::Images } else { Level::Scenes };
+        let open = |saved: bool| {
+            if images {
+                crate::screens::images::shell_msg(if saved {
+                    BrowseMsg::SavedMenu(true)
+                } else {
+                    BrowseMsg::FilterMenu(true)
+                })
+            } else {
+                crate::screens::scenes::state::shell_msg(if saved {
+                    BrowseMsg::SavedMenu(true)
+                } else {
+                    BrowseMsg::FilterMenu(true)
+                })
+            }
+        };
+        match keymap::resolve(key, mods, &[level])? {
+            Action::FocusSearch => Some(Step::effect(Effect::Focus(SEARCH_ID))),
+            Action::FilterMenu => Some(self.shell(open(false))),
+            Action::SavedFilters => Some(self.shell(open(true))),
             _ => None,
         }
     }
@@ -874,8 +1134,19 @@ impl Session {
                     .ok()
                     .and_then(|s| s.default_scene_filter.as_ref())
                     .map(stash_core::scenes::filter::saved::decode_default_filter);
+                let default_images = result
+                    .as_ref()
+                    .ok()
+                    .and_then(|s| s.default_image_filter.as_ref())
+                    .map(|v| {
+                        stash_core::scenes::filter::saved::decode_default_filter_for(
+                            stash_core::browse::entity::Entity::Images,
+                            v,
+                        )
+                    });
                 if let Ok(settings) = &result {
                     self.shell.default_scenes = default;
+                    self.shell.default_images = default_images;
                     self.playback.minimum_percent = Some(settings.minimum_play_percent);
                 }
                 let mut effects = self.library.ui_loaded(result);
@@ -885,6 +1156,48 @@ impl Session {
             Msg::Reply(Reply::SavedFilters(result)) => {
                 self.library.saved_loaded(result);
                 Step::none()
+            }
+            Msg::Reply(Reply::ImageDetails { tab, id, result }) => {
+                let loaded = result.is_ok();
+                let mut effects = Vec::new();
+                if self.shell.image_details(tab, &id, *result) && loaded {
+                    // Tag chips need the vocabulary for their types and colours (FR-003d).
+                    effects.extend(self.library.want(crate::library::Need::Vocabulary));
+                    effects.extend(self.thumbnails());
+                }
+                Step::effects(effects)
+            }
+            Msg::Reply(Reply::SlideshowDue {
+                tab,
+                generation,
+                due,
+            }) => {
+                let Step { effects, up } = self.shell.slideshow_due(tab, generation, due);
+                self.shell_up(Step::effects(effects), up)
+            }
+            Msg::Reply(Reply::ImageOpened { id, result }) => {
+                if let Err(e) = result {
+                    tracing::warn!(error = %e, "couldn't open the image");
+                    let reason = crate::messages::for_error(&e).title.to_owned();
+                    self.playback.image_open_failed(&id, reason);
+                    return self.image_events();
+                }
+                Step::none()
+            }
+            Msg::Reply(Reply::SavedImageFilters(result)) => {
+                self.library.saved_images_loaded(result);
+                Step::none()
+            }
+            Msg::Reply(Reply::ImagesPage {
+                tab,
+                generation,
+                result,
+            }) => {
+                let waiting = self.waiting();
+                let Step { mut effects, up } =
+                    self.shell.images_page(tab, generation, result, waiting);
+                effects.extend(self.thumbnails());
+                self.shell_up(Step::effects(effects), up)
             }
             Msg::Reply(Reply::Choices { kind, result }) => {
                 self.library.choices_loaded(kind, result);
@@ -1028,7 +1341,8 @@ impl Session {
                 }
             }
             Msg::Playback(m) => {
-                let effects = self.playback.update(m);
+                let mut effects = self.playback.update(m);
+                effects.extend(self.image_events().effects);
                 self.sync_queue_playing();
                 self.queue_follow();
                 let step = Step::effects(effects);
@@ -1208,15 +1522,21 @@ impl Session {
                 let step = self.key(&key, mods);
                 // The keyboard's card previews as the pointer's does (008 FR-019); the queue's
                 // compact rows don't preview (010).
-                let focused = self
-                    .active_scenes()
-                    .filter(|s| s.mode != Mode::Queue)
-                    .and_then(|s| {
-                        s.focused
-                            .and_then(|i| s.cards().get(i))
-                            .map(|c| (c.id.clone(), true))
-                    });
-                let more = self.previews.focus(focused);
+                let focused = match self.shell.active().current() {
+                    crate::screens::Screen::Scenes(s) if s.mode != Mode::Queue => s
+                        .focused
+                        .and_then(|i| s.cards().get(i))
+                        .map(|c| (c.id.clone(), true)),
+                    crate::screens::Screen::Images(s) if s.viewer.is_none() => s
+                        .focused
+                        .and_then(|i| self.image_preview_key(i))
+                        .map(|k| (k, true)),
+                    _ => None,
+                };
+                let mut more = self.previews.focus(focused);
+                if !self.cards_showing() {
+                    more.extend(self.previews.clear());
+                }
                 step.with_all(more)
             }
             Msg::PreviewFrame(now) => {
@@ -1224,7 +1544,7 @@ impl Session {
                 Step::none()
             }
             Msg::Reply(Reply::PreviewDue(generation)) => {
-                let width = self.shell.layout.card_width().ceil() as u32;
+                let width = self.shell.active_layout().card_width().ceil() as u32;
                 Step::effects(
                     self.previews
                         .due(generation, width, std::time::Instant::now()),
@@ -1366,6 +1686,39 @@ impl Session {
         }
     }
 
+    /// The image viewer with the player's picture while it shows this viewer's image (012).
+    fn viewer_view<'a>(
+        &'a self,
+        images: &'a crate::screens::ImagesState,
+        video: Option<&'a Arc<Shared>>,
+    ) -> Element<'a, Msg> {
+        let Some(v) = images.viewer.as_ref() else {
+            return Space::new().into();
+        };
+        let picture: Element<'a, ShellMsg> = if self.player_visible() {
+            crate::player::view::picture(video)
+        } else {
+            Space::new().into()
+        };
+        crate::screens::images::viewer::view(
+            v,
+            picture,
+            self.prefs.slideshow_delay_s,
+            &self.shell.layout,
+            &self.library,
+            &self.thumbs,
+        )
+        .map(Msg::Shell)
+    }
+
+    /// Whether the viewer's controls are showing and will fade (a timer redraws until then).
+    pub fn viewer_controls_fading(&self) -> bool {
+        self.shell
+            .active_viewer()
+            .and_then(|s| s.viewer.as_ref())
+            .is_some_and(|v| v.activity.is_some() && v.controls_visible(std::time::Instant::now()))
+    }
+
     /// Title, play/pause, back to the scene, and close, while the player is out of sight.
     fn now_playing_bar(&self) -> Element<'_, Msg> {
         let snap = self.playback.snapshot();
@@ -1428,7 +1781,11 @@ impl Session {
         };
         let base: Element<'a, Msg> =
             if self.playback.active() && self.playback.snapshot().fullscreen {
-                player()
+                // An image in fullscreen keeps the viewer's controls (012).
+                match self.shell.active_viewer() {
+                    Some(images) => self.viewer_view(images, video),
+                    None => player(),
+                }
             } else {
                 // The bell and the connection indicator at the bar's end.
                 let right: Element<'a, ShellMsg> = iced::widget::row![
@@ -1489,6 +1846,9 @@ impl Session {
                             Some(player),
                         )
                         .map(Msg::Shell)
+                    }
+                    crate::screens::Screen::Images(images) if images.viewer.is_some() => {
+                        self.viewer_view(images, video)
                     }
                     crate::screens::Screen::Scene(scene) if self.player_visible() => {
                         crate::screens::scene::layout(
@@ -1590,4 +1950,63 @@ impl Session {
         }
         layers.into()
     }
+}
+
+/// What a key does in `list`'s open filter panel (008 FR-003f): the message to send, `Some(None)`
+/// when the key is taken but does nothing, `None` when the panel doesn't take it.
+fn panel_key<K: Kind>(
+    list: &List<K>,
+    library: &crate::library::Library,
+    key: &Key,
+    mods: Modifiers,
+    msg: crate::screens::browse::controls::Map<K>,
+) -> Option<Option<ShellMsg>> {
+    use crate::screens::browse::editor::EditorMsg;
+    use crate::screens::browse::filters::{menu_target, MenuRow};
+    use crate::screens::browse::picker;
+    use crate::screens::browse::state::Panel;
+    use iced::keyboard::key::Named;
+    let named = match key {
+        Key::Named(n) => Some(*n),
+        _ => None,
+    };
+    let m = match (&list.panel, named) {
+        (Panel::None, _) => return None,
+        (Panel::Editor(_), Some(Named::Escape)) => BrowseMsg::Editor(EditorMsg::Cancel),
+        (Panel::Menu { .. }, Some(Named::Escape)) => BrowseMsg::FilterMenu(false),
+        (Panel::Saved { .. }, Some(Named::Escape)) => BrowseMsg::SavedMenu(false),
+        (_, Some(Named::ArrowDown)) => BrowseMsg::MenuMove(1),
+        (_, Some(Named::ArrowUp)) => BrowseMsg::MenuMove(-1),
+        (Panel::Menu { highlight }, Some(Named::Enter)) => match menu_target(list, *highlight)? {
+            MenuRow::Active { key, .. } => BrowseMsg::Edit(key),
+            MenuRow::Kind(kind) => BrowseMsg::Add(kind),
+            _ => return Some(None),
+        },
+        (Panel::Menu { highlight }, Some(Named::Delete | Named::Backspace)) => {
+            match menu_target(list, *highlight)? {
+                MenuRow::Active { key, .. } => BrowseMsg::Remove(key),
+                _ => return Some(None),
+            }
+        }
+        (Panel::Saved { highlight }, Some(Named::Enter)) => {
+            let saved = K::saved(library).ready()?;
+            let filter = saved.get((*highlight).min(saved.len().checked_sub(1)?))?;
+            BrowseMsg::ApplySaved(Box::new(filter.clone()))
+        }
+        (Panel::Editor(editor), Some(Named::Enter)) => match picker::highlighted(library, editor) {
+            Some(item) if editor.picker().is_some() && !mods.control() => {
+                BrowseMsg::Editor(EditorMsg::Toggle(item))
+            }
+            _ => BrowseMsg::Editor(EditorMsg::Apply),
+        },
+        (Panel::Editor(editor), None)
+            if mods.control()
+                && matches!(key, Key::Character(c) if c.eq_ignore_ascii_case("e")) =>
+        {
+            let item = picker::highlighted(library, editor)?;
+            BrowseMsg::Editor(EditorMsg::Exclude(item))
+        }
+        _ => return None,
+    };
+    Some(Some(msg(m)))
 }

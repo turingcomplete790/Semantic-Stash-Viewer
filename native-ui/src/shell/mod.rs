@@ -12,14 +12,18 @@ use stash_core::connection::ServerInfo;
 
 use crate::effects::Effect;
 use crate::machine::Step;
+use crate::screens::images::{ImagesMsg, ImagesUp};
 use crate::screens::scenes::keyboard::{grid_key, GridKeys};
 use crate::screens::scenes::layout::Layout;
+use crate::screens::scenes::thumbs::{thumb_key, ThumbKey};
 use crate::screens::scenes::{ScenesMsg, ScenesUp};
 use crate::screens::{Context, Screen, Section, SettingsPage};
 use crate::session::snapshot::{SavedSession, SavedTab};
 use crate::widgets::{icon, icon_button, one_line, theme, Icon};
 use iced::keyboard::{key::Named, Key, Modifiers};
-use stash_core::scenes::{SceneCard, ScenePage};
+use stash_core::images::{ImagePage, ImageSort};
+use stash_core::scenes::filter::saved::SavedFilterOf;
+use stash_core::scenes::ScenePage;
 use stash_core::AppError;
 
 pub use tab::{Tab, TabId, MAX_HISTORY};
@@ -47,6 +51,8 @@ pub struct Shell {
     touched: bool,
     /// The server's default scene filter: new Scenes screens start from it (008 FR-004).
     pub default_scenes: Option<stash_core::scenes::filter::saved::SavedFilter>,
+    /// The server's default image filter: new Images screens start from it (012 FR-005).
+    pub default_images: Option<SavedFilterOf<ImageSort>>,
 }
 
 #[derive(Debug, Clone)]
@@ -75,10 +81,17 @@ pub enum ShellMsg {
     Settings(crate::screens::settings::SettingsMsg),
     /// For the active Scenes screen.
     Scenes(ScenesMsg),
+    /// For the active Images screen (012).
+    Images(ImagesMsg),
     /// For the active Scene screen.
     Scene(crate::screens::scene::SceneMsg),
     /// Open Scenes filtered to a performer, tag, or studio (008 FR-006), here or in a new tab.
     FilterTo {
+        criterion: stash_core::scenes::filter::Criterion,
+        new_tab: bool,
+    },
+    /// Open Images filtered to a performer, tag, or studio (012 FR-018), here or in a new tab.
+    FilterImagesTo {
         criterion: stash_core::scenes::filter::Criterion,
         new_tab: bool,
     },
@@ -113,14 +126,25 @@ pub enum Up {
     },
     /// Settings → Playback changed (008).
     PlaybackChange(crate::screens::settings::playback::PlaybackChange),
+    /// Show an image in the player for the active tab's viewer (012).
+    ShowImage {
+        id: String,
+        title: String,
+        looped: bool,
+    },
+    /// The active tab's viewer closed: its image leaves the player.
+    ImageClosed,
 }
 
 impl Shell {
-    /// A fresh screen for a section: Scenes starts from the server's default filter.
+    /// A fresh screen for a section: Scenes and Images start from the server's default filters.
     fn fresh(&self, section: Section) -> Screen {
-        match (section, &self.default_scenes) {
-            (Section::Scenes, Some(filter)) => {
+        match (section, &self.default_scenes, &self.default_images) {
+            (Section::Scenes, Some(filter), _) => {
                 Screen::Scenes(Box::new(crate::screens::ScenesState::from_saved(filter)))
+            }
+            (Section::Images, _, Some(filter)) => {
+                Screen::Images(Box::new(crate::screens::ImagesState::from_saved(filter)))
             }
             _ => Screen::for_section(section),
         }
@@ -135,6 +159,7 @@ impl Shell {
             layout: Layout::default(),
             touched: false,
             default_scenes: None,
+            default_images: None,
         };
         let effects = shell.active_mut().enter();
         (shell, effects)
@@ -161,6 +186,7 @@ impl Shell {
             layout: Layout::default(),
             touched: false,
             default_scenes: None,
+            default_images: None,
         };
         let effects = shell.active_mut().enter();
         Some((shell, effects))
@@ -279,8 +305,16 @@ impl Shell {
             }
             ShellMsg::Open(screen) => self.active_mut().open(screen),
             ShellMsg::OpenInNewTab(screen) => self.new_tab(self.selected + 1, screen),
+            // Back closes the image viewer first (it's a mode of the Images screen).
+            ShellMsg::Back if self.active_viewer().is_some() => {
+                let Screen::Images(state) = self.active_mut().current_mut() else {
+                    return Step::none();
+                };
+                let step = state.close_viewer();
+                return self.images_up(step);
+            }
             ShellMsg::Back => self.active_mut().back(),
-            ShellMsg::Forward => self.active_mut().forward(),
+            ShellMsg::Forward => return self.forward(),
             ShellMsg::NewTab => self.new_tab(len, Screen::home()),
             ShellMsg::Close(id) => return self.close_tab(id),
             ShellMsg::CloseActive => return self.close_tab(self.active().id),
@@ -342,7 +376,23 @@ impl Shell {
                 }
                 effects
             }
+            ShellMsg::Images(m) => {
+                let (tab, layout) = (self.active().id, self.layout);
+                let Screen::Images(state) = self.active_mut().current_mut() else {
+                    return Step::none();
+                };
+                let had_viewer = state.viewer.is_some();
+                let step = state.update(m, tab, &layout);
+                // Opening the viewer is a new place: Forward no longer leads to what was ahead.
+                if !had_viewer && state.viewer.is_some() {
+                    self.active_mut().drop_forward();
+                }
+                return self.images_up(step);
+            }
             ShellMsg::FilterTo { criterion, new_tab } => self.filter_to(criterion, new_tab),
+            ShellMsg::FilterImagesTo { criterion, new_tab } => {
+                return self.filter_images_to(criterion, new_tab)
+            }
             ShellMsg::PlaybackChange(change) => return Step::up(Up::PlaybackChange(change)),
             ShellMsg::Scene(m) => {
                 let tab = self.active().id;
@@ -387,6 +437,190 @@ impl Shell {
             .unwrap_or_default()
     }
 
+    /// A page of images arrived for a request from tab `tab` (012), as [`Shell::scenes_page`];
+    /// the viewer may show an image from it.
+    pub fn images_page(
+        &mut self,
+        tab: TabId,
+        generation: u64,
+        result: Result<ImagePage, AppError>,
+        waiting: bool,
+    ) -> Step<Up> {
+        let Some(i) = self.index_of(tab) else {
+            return Step::none();
+        };
+        let active = i == self.selected;
+        let Some(state) = self.tabs[i]
+            .history
+            .iter_mut()
+            .find_map(|screen| match screen {
+                Screen::Images(state) if state.awaits(generation) => Some(state),
+                _ => None,
+            })
+        else {
+            return Step::none();
+        };
+        let step = state.page_loaded(generation, result, waiting);
+        // Only the tab on screen shows images (a background tab's viewer waits for its turn).
+        match step.up {
+            Some(ImagesUp::Show { .. }) if !active => Step::effects(step.effects),
+            _ => self.images_up(step),
+        }
+    }
+
+    /// An Images screen's event, as the shell's.
+    fn images_up(&mut self, step: Step<ImagesUp>) -> Step<Up> {
+        let Step { mut effects, up } = step;
+        let up = match up {
+            None => None,
+            Some(ImagesUp::Need(need)) => Some(Up::Need(need)),
+            Some(ImagesUp::Show { id, title, looped }) => Some(Up::ShowImage { id, title, looped }),
+            Some(ImagesUp::Closed) => Some(Up::ImageClosed),
+            Some(ImagesUp::OpenInNewTab(state)) => {
+                effects.extend(self.new_tab(self.selected + 1, Screen::Images(state)));
+                None
+            }
+        };
+        Step { effects, up }
+    }
+
+    /// Apply `f` to the active tab's open viewer (a key the session resolved).
+    pub fn with_viewer(
+        &mut self,
+        f: impl FnOnce(&mut crate::screens::ImagesState) -> Step<ImagesUp>,
+    ) -> Step<Up> {
+        self.touched = true;
+        let window = self.layout;
+        let step = match self.active_mut().current_mut() {
+            Screen::Images(s) if s.viewer.is_some() => {
+                s.window = window;
+                f(s)
+            }
+            _ => return Step::none(),
+        };
+        self.images_up(step)
+    }
+
+    /// Forward: the viewer Back closed opens again first; then the tab's next screen (leaving an
+    /// open viewer behind it, its image let go, as a chip's grid does).
+    fn forward(&mut self) -> Step<Up> {
+        let can_go_forward = self.active().can_go_forward();
+        let step = match self.active_mut().current_mut() {
+            Screen::Images(s) if s.viewer.is_none() && s.closed_viewer.is_some() => {
+                let step = s.reopen_viewer();
+                return self.images_up(step);
+            }
+            Screen::Images(s) if s.viewer.is_some() && can_go_forward => s.leave_viewer(),
+            _ => Step::none(),
+        };
+        let Step { mut effects, up } = self.images_up(step);
+        effects.extend(self.active_mut().forward());
+        Step { effects, up }
+    }
+
+    /// Whether Back does something here: the tab's history, or closing the viewer.
+    pub fn can_go_back(&self) -> bool {
+        self.active().can_go_back() || self.active_viewer().is_some()
+    }
+
+    /// Whether Forward does something here: the viewer Back closed, or the tab's history.
+    pub fn can_go_forward(&self) -> bool {
+        self.active().can_go_forward()
+            || matches!(
+                self.active().current(),
+                Screen::Images(s) if s.viewer.is_none() && s.closed_viewer.is_some()
+            )
+    }
+
+    /// The active tab's Images viewer, if one is open.
+    pub fn active_viewer(&self) -> Option<&crate::screens::ImagesState> {
+        match self.active().current() {
+            Screen::Images(s) if s.viewer.is_some() => Some(s),
+            _ => None,
+        }
+    }
+
+    /// The Images screen in tab `tab` whose viewer shows `id`.
+    fn viewer_in(&mut self, tab: TabId, id: &str) -> Option<&mut crate::screens::ImagesState> {
+        let i = self.index_of(tab)?;
+        self.tabs[i]
+            .history
+            .iter_mut()
+            .find_map(|screen| match screen {
+                Screen::Images(s) if s.viewer_image() == Some(id) => Some(&mut **s),
+                _ => None,
+            })
+    }
+
+    /// The image `id` is on screen in tab `tab`'s viewer.
+    pub fn image_shown(&mut self, tab: TabId, id: &str, picture: Option<(u32, u32)>) {
+        if let Some(s) = self.viewer_in(tab, id) {
+            s.image_shown(id, picture);
+        }
+    }
+
+    /// The image `id` couldn't be shown in tab `tab`'s viewer.
+    pub fn image_failed(&mut self, tab: TabId, id: &str, reason: String) {
+        if let Some(s) = self.viewer_in(tab, id) {
+            s.image_failed(id, reason);
+        }
+    }
+
+    /// The looping image `id` started over in tab `tab`'s viewer.
+    pub fn image_looped(&mut self, tab: TabId, id: &str) -> Step<Up> {
+        let active = self.index_of(tab) == Some(self.selected);
+        match self.viewer_in(tab, id) {
+            Some(s) if active => {
+                let step = s.image_looped(id);
+                self.images_up(step)
+            }
+            _ => Step::none(),
+        }
+    }
+
+    /// A slideshow timer came due in tab `tab`; a tab out of sight pauses its slideshow (only
+    /// the tab on screen moves the player).
+    pub fn slideshow_due(
+        &mut self,
+        tab: TabId,
+        generation: u64,
+        due: crate::screens::images::viewer::SlideDue,
+    ) -> Step<Up> {
+        let Some(i) = self.index_of(tab) else {
+            return Step::none();
+        };
+        let active = i == self.selected;
+        let Some(s) = self.tabs[i]
+            .history
+            .iter_mut()
+            .find_map(|screen| match screen {
+                Screen::Images(s) if s.awaits_slideshow(generation) => Some(&mut **s),
+                _ => None,
+            })
+        else {
+            return Step::none();
+        };
+        let step = if active {
+            s.slideshow_due(generation, due)
+        } else {
+            s.pause_slideshow()
+        };
+        self.images_up(step)
+    }
+
+    /// A scene took the player: every open viewer closes (one player, 012 FR-019).
+    pub fn close_viewers(&mut self) -> Vec<Effect> {
+        let mut effects = Vec::new();
+        for tab in &mut self.tabs {
+            for screen in &mut tab.history {
+                if let Screen::Images(s) = screen {
+                    effects.extend(s.close_viewer().effects);
+                }
+            }
+        }
+        effects
+    }
+
     /// A search's debounce came due for tab `tab`.
     pub fn search_due(&mut self, tab: TabId, generation: u64) -> Vec<Effect> {
         let Some(i) = self.index_of(tab) else {
@@ -396,10 +630,14 @@ impl Shell {
             .history
             .iter_mut()
             .find_map(|screen| match screen {
-                Screen::Scenes(state) if state.awaits_search(generation) => Some(state),
+                Screen::Scenes(state) if state.awaits_search(generation) => {
+                    Some(state.search_due(generation))
+                }
+                Screen::Images(state) if state.awaits_search(generation) => {
+                    Some(state.search_due(generation))
+                }
                 _ => None,
             })
-            .map(|state| state.search_due(generation))
             .unwrap_or_default()
     }
 
@@ -417,6 +655,54 @@ impl Shell {
             self.new_tab(self.selected + 1, screen)
         } else {
             self.active_mut().open(screen)
+        }
+    }
+
+    /// Open Images filtered to `criterion` (an image's chip), here or in a new tab (012 FR-018).
+    /// Here, the viewer is left open behind it (its image leaves the player until Back).
+    pub fn filter_images_to(
+        &mut self,
+        criterion: stash_core::scenes::filter::Criterion,
+        new_tab: bool,
+    ) -> Step<Up> {
+        let mut state = crate::screens::ImagesState::default();
+        state.list.query.criteria = vec![criterion];
+        let screen = Screen::Images(Box::new(state));
+        if new_tab {
+            return Step::effects(self.new_tab(self.selected + 1, screen));
+        }
+        // The viewer stays in the history (Back returns to the image); the player lets it go.
+        let closed = match self.active_mut().current_mut() {
+            Screen::Images(s) => s.leave_viewer(),
+            _ => Step::none(),
+        };
+        let Step { mut effects, up } = self.images_up(closed);
+        effects.extend(self.active_mut().open(screen));
+        Step { effects, up }
+    }
+
+    /// `id`'s details arrived for tab `tab`'s viewer; whether a panel took them.
+    pub fn image_details(
+        &mut self,
+        tab: TabId,
+        id: &str,
+        result: Result<stash_core::images::ImageDetails, AppError>,
+    ) -> bool {
+        let Some(i) = self.index_of(tab) else {
+            return false;
+        };
+        match self.tabs[i]
+            .history
+            .iter_mut()
+            .find_map(|screen| match screen {
+                Screen::Images(s) if s.awaits_details(id) => Some(s),
+                _ => None,
+            }) {
+            Some(s) => {
+                s.details_loaded(id, result);
+                true
+            }
+            None => false,
         }
     }
 
@@ -597,6 +883,7 @@ impl Shell {
         let tab = self.active().id;
         match self.active_mut().current_mut() {
             Screen::Scenes(state) => state.cache_changed(key, tab),
+            Screen::Images(state) => state.cache_changed(key, tab),
             _ => Vec::new(),
         }
     }
@@ -610,30 +897,57 @@ impl Shell {
         }
     }
 
-    /// The cards the active screen shows.
-    pub fn active_cards(&self) -> &[SceneCard] {
+    /// The thumbnails of the cards the active screen shows.
+    pub fn active_thumbs(&self) -> Vec<ThumbKey> {
         match self.active().current() {
-            Screen::Scenes(state) => state.cards(),
-            _ => &[],
+            Screen::Scenes(state) => state.cards().iter().filter_map(thumb_key).collect(),
+            Screen::Images(state) => state
+                .cards()
+                .iter()
+                .filter_map(|c| {
+                    c.thumb
+                        .as_deref()
+                        .and_then(crate::screens::scenes::thumbs::key_of)
+                })
+                .collect(),
+            _ => Vec::new(),
         }
     }
 
-    /// A key for the active screen (the grid's keys on Scenes); `None` when it isn't one.
+    /// The active screen's grid geometry: Images' cards are their own size (012).
+    pub fn active_layout(&self) -> Layout {
+        match self.active().current() {
+            Screen::Images(state) => state.layout(&self.layout),
+            _ => self.layout,
+        }
+    }
+
+    /// A key for the active screen (the grid's keys on Scenes and Images); `None` when it isn't
+    /// one.
     pub fn screen_key(&mut self, key: &Key, mods: Modifiers) -> Option<Step<Up>> {
         if mods.alt() || mods.logo() || (mods.control() && *key != Key::Named(Named::Enter)) {
             return None;
         }
-        let Screen::Scenes(state) = self.active().current() else {
-            return None;
+        let layout = self.active_layout();
+        let (focused, count, mode) = match self.active().current() {
+            Screen::Scenes(s) => (s.focused, s.cards().len(), s.mode),
+            Screen::Images(s) => (s.focused, s.cards().len(), s.mode),
+            _ => return None,
         };
         let keys = GridKeys {
-            index: state.focused,
-            count: state.cards().len(),
-            cols: self.layout.cols(state.mode),
+            index: focused,
+            count,
+            cols: layout.cols(mode),
             ctrl: mods.control(),
         };
         let action = grid_key(key, keys)?;
-        Some(self.update(ShellMsg::Scenes(ScenesMsg::Grid(action))))
+        let msg = match self.active().current() {
+            Screen::Images(_) => ShellMsg::Images(ImagesMsg::List(
+                crate::screens::browse::state::BrowseMsg::Grid(action),
+            )),
+            _ => ShellMsg::Scenes(ScenesMsg::Grid(action)),
+        };
+        Some(self.update(msg))
     }
 
     /// A summary read for tab `tab`'s Home screen.
@@ -689,15 +1003,16 @@ impl Shell {
                 icon_button(
                     Icon::Back,
                     16.0,
-                    tab.can_go_back().then_some(ShellMsg::Back)
+                    self.can_go_back().then_some(ShellMsg::Back)
                 ),
                 icon_button(
                     Icon::Forward,
                     16.0,
-                    tab.can_go_forward().then_some(ShellMsg::Forward)
+                    self.can_go_forward().then_some(ShellMsg::Forward)
                 ),
                 section(Section::Home, Icon::Home, "Home"),
                 section(Section::Scenes, Icon::Scenes, "Scenes"),
+                section(Section::Images, Icon::Images, "Images"),
                 section(Section::Settings, Icon::Settings, "Settings"),
                 Space::new().width(Length::Fill),
                 right,

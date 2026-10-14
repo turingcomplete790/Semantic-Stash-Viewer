@@ -136,9 +136,14 @@ impl App {
             Message::Session(m) => {
                 if let (
                     Some(bench),
-                    session::Msg::Shell(crate::shell::ShellMsg::Scenes(
-                        crate::screens::scenes::ScenesMsg::AutoScrolled(result),
-                    )),
+                    session::Msg::Shell(
+                        crate::shell::ShellMsg::Scenes(
+                            crate::screens::scenes::ScenesMsg::AutoScrolled(result),
+                        )
+                        | crate::shell::ShellMsg::Images(crate::screens::images::ImagesMsg::List(
+                            crate::screens::browse::state::BrowseMsg::AutoScrolled(result),
+                        )),
+                    ),
                 ) = (self.bench.as_mut(), &m)
                 {
                     bench.scrolled(result.clone());
@@ -418,6 +423,10 @@ impl App {
                     iced::time::every(Duration::from_millis(16))
                         .map(|now| Message::Session(session::Msg::PreviewFrame(now))),
                 );
+            }
+            // The image viewer's controls fade after a while still (012).
+            if session.viewer_controls_fading() {
+                subs.push(iced::time::every(Duration::from_millis(250)).map(|_| Message::Tick));
             }
             if session.playback.active() {
                 subs.push(Subscription::run(video::frames).map(|()| Message::FrameReady));

@@ -45,7 +45,11 @@ fn the_tags_picker_survives_the_vocabulary_arriving() {
         .choices
         .insert(ChoiceKind::Tags, Loadable::Ready(tags()));
     let ui = UserInterface::build(
-        picker::view(&library, &editor, &thumbs),
+        picker::view(&library, &editor, &thumbs, |m| {
+            semantic_stash_viewer_native::shell::ShellMsg::Scenes(
+                semantic_stash_viewer_native::screens::scenes::ScenesMsg::Editor(m),
+            )
+        }),
         size,
         Cache::default(),
         &mut renderer,
@@ -62,7 +66,11 @@ fn the_tags_picker_survives_the_vocabulary_arriving() {
     );
     library.vocabulary = Loadable::Ready(Arc::new(vocabulary));
     let ui = UserInterface::build(
-        picker::view(&library, &editor, &thumbs),
+        picker::view(&library, &editor, &thumbs, |m| {
+            semantic_stash_viewer_native::shell::ShellMsg::Scenes(
+                semantic_stash_viewer_native::screens::scenes::ScenesMsg::Editor(m),
+            )
+        }),
         size,
         cache,
         &mut renderer,
@@ -72,7 +80,11 @@ fn the_tags_picker_survives_the_vocabulary_arriving() {
     // And back again (the vocabulary refreshed away): still no panic.
     library.vocabulary = Loadable::NotLoaded;
     let _ = UserInterface::build(
-        picker::view(&library, &editor, &thumbs),
+        picker::view(&library, &editor, &thumbs, |m| {
+            semantic_stash_viewer_native::shell::ShellMsg::Scenes(
+                semantic_stash_viewer_native::screens::scenes::ScenesMsg::Editor(m),
+            )
+        }),
         size,
         cache,
         &mut renderer,

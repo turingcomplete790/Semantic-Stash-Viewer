@@ -3,7 +3,9 @@
 //! fields are saved with the session; transient ones (`#[serde(skip)]`) are rebuilt by its entry
 //! effects. Home is complete here; Scenes, Scene, and Settings fill in with US3 and US4.
 
+pub mod browse;
 pub mod home;
+pub mod images;
 pub mod scene;
 pub mod scenes;
 pub mod settings;
@@ -31,6 +33,7 @@ pub struct Context<'a> {
     pub previews: &'a scenes::preview::Previews,
 }
 
+pub use images::ImagesState;
 pub use scene::SceneState;
 pub use scenes::ScenesState;
 pub use settings::{SettingsPage, SettingsState};
@@ -40,6 +43,8 @@ pub use settings::{SettingsPage, SettingsState};
 pub enum Section {
     Home,
     Scenes,
+    /// 012.
+    Images,
     Settings,
 }
 
@@ -62,6 +67,8 @@ pub enum Screen {
     Scenes(Box<ScenesState>),
     Scene(SceneState),
     Settings(SettingsState),
+    /// Boxed, as Scenes (012).
+    Images(Box<ImagesState>),
 }
 
 impl Screen {
@@ -71,6 +78,10 @@ impl Screen {
 
     pub fn scenes() -> Self {
         Screen::Scenes(Box::default())
+    }
+
+    pub fn images() -> Self {
+        Screen::Images(Box::default())
     }
 
     pub fn scene(id: &str, title: &str) -> Self {
@@ -86,6 +97,7 @@ impl Screen {
         match section {
             Section::Home => Screen::home(),
             Section::Scenes => Screen::scenes(),
+            Section::Images => Screen::images(),
             Section::Settings => Screen::settings(SettingsPage::default()),
         }
     }
@@ -94,6 +106,7 @@ impl Screen {
         match self {
             Screen::Home(_) => Some(Section::Home),
             Screen::Scenes(_) => Some(Section::Scenes),
+            Screen::Images(_) => Some(Section::Images),
             Screen::Settings(_) => Some(Section::Settings),
             Screen::Scene(_) => None,
         }
@@ -104,6 +117,7 @@ impl Screen {
         match self {
             Screen::Home(_) => "Home".into(),
             Screen::Scenes(_) => "Scenes".into(),
+            Screen::Images(_) => "Images".into(),
             Screen::Scene(s) => s.title.clone(),
             Screen::Settings(_) => "Settings".into(),
         }
@@ -114,6 +128,7 @@ impl Screen {
         match self {
             Screen::Home(_) => Screen::home(),
             Screen::Scenes(s) => Screen::Scenes(Box::new(s.persistent())),
+            Screen::Images(s) => Screen::Images(Box::new(s.persistent())),
             Screen::Scene(s) => Screen::Scene(s.persistent()),
             Screen::Settings(s) => Screen::Settings(s.persistent()),
         }
@@ -142,6 +157,7 @@ impl Screen {
         match self {
             Screen::Home(h) if h.needs_load() => vec![Effect::LoadSummary { tab }],
             Screen::Scenes(s) => s.enter(tab),
+            Screen::Images(s) => s.enter(tab),
             Screen::Scene(s) => s.enter(tab),
             Screen::Settings(s) => s.enter(),
             _ => Vec::new(),
@@ -153,6 +169,7 @@ impl Screen {
         match self {
             Screen::Home(h) => h.needs_load(),
             Screen::Scenes(s) => s.needs_load(),
+            Screen::Images(s) => s.needs_load(),
             Screen::Scene(s) => s.needs_load(),
             _ => false,
         }
@@ -163,6 +180,7 @@ impl Screen {
         match self {
             Screen::Home(h) => h.view(ctx),
             Screen::Scenes(s) => scenes::view(s, ctx, tab),
+            Screen::Images(s) => images::view(s, ctx, tab),
             Screen::Scene(s) => s.view(&ctx.layout, ctx.library, ctx.thumbs),
             Screen::Settings(s) => s.view(ctx),
         }

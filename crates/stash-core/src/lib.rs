@@ -7,9 +7,11 @@
 #![forbid(unsafe_code)]
 
 pub mod adapter;
+pub mod browse;
 pub mod cache;
 pub mod connection;
 pub mod error;
+pub mod images;
 pub mod jobs;
 pub mod playback;
 pub mod previews;
