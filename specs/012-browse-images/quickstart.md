@@ -35,9 +35,10 @@ Expected: every 012 row within budget ([plan](plan.md), [contract](contracts/ima
 | `images-scroll-1000-grid` / `-wall` | ≤ 3% / ≤ 1% missed frames at 144 Hz |
 | `image-open` | ≤ 500 ms (median) |
 | `image-next` | ≤ 150 ms (p95), including a page boundary |
-| `image-zoom` | ≤ 1 frame |
-| `slideshow-drift` | ≤ 0.3 s |
-| `gql-images-page` / `gql-image-details` / `gql-image-step-prefetched` | 1 / 1 / 0 |
+| `image-next-large` | info (files over 12 MP: mpv's decode grows with the pixels, research R3) |
+| `image-zoom-shown` / `image-pan-drag-shown` | ≤ 1 frame to mpv's picture moving on screen (p95 within 1.5× this display's frame time); `image-zoom` / `image-pan-drag` (the UI's own frame) as info |
+| `slideshow-drift` | ≤ 0.3 s (p95, at a 1 s delay over stills) |
+| `gql-images-page` / `gql-image-details` / `gql-image-step-prefetched` | 2 / 1 / 0 GraphQL (the page and its neighbour's prefetch, as `gql-page-50`; the files are GETs) |
 
 ## V1: Find images (US1)
 
@@ -65,3 +66,37 @@ the slideshow waits for a loop.
 `I` on an image with performers and tags: every field of the web UI's image page for the same
 image; tags coloured as on the scene page. Step with → : the panel follows. Click a tag chip: Images
 filtered to it (Ctrl: in a new tab). An image without tags or galleries: those sections absent.
+
+## Requirements and their tests
+
+| Requirement | Automated | By hand |
+|---|---|---|
+| FR-001 paged grid, sized thumbnails | `native-ui/tests/images.rs` (opening, paging, thumbnails asked for); `images-page-change` | V1 |
+| FR-002 search and every image criterion | `stash-core/tests/image_filters.rs`; `images.rs` (requery, scene-only criteria not offered, the folder picker) | V1 |
+| FR-003 every image sort, both directions, random | `images.rs` (sort, direction, reshuffle); `stash-core/tests/images_page.rs` | V1 |
+| FR-004 page sizes, grid and wall, card size | `images.rs` (card size keeps the first card, square pictures); `images-scroll-1000-*` | V1 |
+| FR-005 saved and default image filters | `images.rs` (saved filter applied, default from the UI settings, the menu asks for image filters) | V1 |
+| FR-006 the tab saved and restored | `native-ui/tests/snapshot.rs` (an Images tab round-trips; older sessions load) | V1 restart |
+| FR-007 the grid's keys | `images.rs` (arrows, End, `]`, `/`, F, S); `keymap.rs` (Images has the Scenes grid's keys) | V1 |
+| FR-008 full screen in the embedded player, full resolution | `player/tests/image_mode.rs`; `native-ui/tests/image_viewer.rs` (Enter opens an image of that id); `image-open` | V2 |
+| FR-009 next and previous across pages | `stash-core/tests/image_viewer.rs`; `image_viewer.rs` (past the page's last card); `image-next` | V2 |
+| FR-010 zoom, pan, rotation, fit, actual size | `stash-core/tests/image_viewer.rs` (clamps, anchor, pan rules); `image_viewer.rs` (keys and wheel through the player); `image-zoom-shown`, `image-pan-drag-shown` | V2 |
+| FR-011 position, title, controls that fade | `image_viewer.rs` (position and state); the view by hand | V2 |
+| FR-012 close to the grid on the last image's page | `image_viewer.rs` (Escape, Back, Forward reopens) | V2 |
+| FR-013 an image that can't be shown | `image_viewer.rs` (failed open, decode failure, arrows still move) | V2 (id 15) |
+| FR-014 slideshow at a chosen delay | `stash-core/tests/image_viewer.rs`; `image_viewer.rs` (timer, delay saved, a hidden tab pauses); `slideshow-drift` | V3 |
+| FR-015 animated and clip images loop silently | `player/tests/image_mode.rs`; `image_viewer.rs` (looped opens, a slideshow waits for the loop, the 60 s cap) | V3 |
+| FR-016 animated card previews | `stash-core/tests/previews.rs` (GIF, WebP, APNG, 16 MB limit); `image_viewer.rs` (hover) | V3 |
+| FR-017 the details panel | `image_viewer.rs` (once per image, follows the arrows, fields, overlay under 900 px) | V4 |
+| FR-018 chips filter Images | `image_viewer.rs` (here and in a new tab; Back returns to the viewer) | V4 |
+| FR-019 one player | `image_viewer.rs` (an image stops a scene; a scene closes viewers; no now-playing bar) | V2 |
+| FR-020 GraphQL rules | `stash-core/tests/graphql_operations.rs` (golden files, tiers); `query_budget.rs`; `gql-images-page`, `gql-image-details`, `gql-image-step-prefetched` | — |
+| FR-021 keys listed, no clashes | `native-ui/tests/keymap.rs` (Images and Image viewer levels) | F1 |
+| SC-001 page change ≤ 150 ms | `images-page-change` | — |
+| SC-002 scrolling ≤ 3% / ≤ 1% | `images-scroll-1000-grid`, `-wall` | — |
+| SC-003 next ≤ 150 ms | `image-next` (`image-next-large` apart) | V2 |
+| SC-004 open ≤ 500 ms | `image-open` | V2 |
+| SC-005 results match the web UI | `stash-core/tests/image_filters.rs`, `images_page.rs` (the filter and sort sent) | V1 (ids compared) |
+| SC-006 zoom, pan, rotation within a frame | `image-zoom-shown`, `image-pan-drag-shown` | V2 |
+| SC-007 slideshow within 0.3 s | `slideshow-drift` (5 steps at 1 s; 100 by hand) | V3 |
+| SC-008 request budgets | the `gql-*` rows; `image_viewer.rs` (no details read without the panel) | — |

@@ -208,6 +208,11 @@ pub const GQL_BUDGETS: &[(&str, f64)] = &[
     // 011 FR-003: the rest also plays the scene, so its PlayableScene read (0 when cached).
     ("gql-queue-sweep", 0.0),
     ("gql-queue-rest", 2.0),
+    // 012: a fresh Images page and its neighbour's prefetch (as gql-page-50); the details panel
+    // once per image; a step whose neighbour is on disk sends no GraphQL (its downloads are GETs).
+    ("gql-images-page", 2.0),
+    ("gql-image-details", 1.0),
+    ("gql-image-step-prefetched", 0.0),
 ];
 
 /// Scrolling budgets by view (constitution 5.1.0, Principle VI): measured on a 144 Hz display, the

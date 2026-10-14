@@ -185,6 +185,17 @@ impl Playback {
         self.update(Msg::Close)
     }
 
+    /// The image the player shows now (its first frame is on screen), if any.
+    pub fn image_on_screen(&self) -> Option<&str> {
+        self.image.as_deref().filter(|_| {
+            !self.image_pending
+                && matches!(
+                    self.snapshot().state,
+                    PlayerStateKind::Playing | PlayerStateKind::Paused
+                )
+        })
+    }
+
     /// What became of the image shown since the last call, once each.
     pub fn take_image_events(&mut self) -> Vec<ImageEvent> {
         std::mem::take(&mut self.image_events)

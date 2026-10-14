@@ -169,6 +169,7 @@ fn run(options: &Options) -> Result<Report, String> {
     measurements.push(cold_start("cold-start-cleared", None, &cleared));
     measurements.extend(bench_measurements(&bench));
     measurements.extend(scenes_measurements(&bench));
+    measurements.extend(images_measurements(&bench));
     measurements.extend(picker_measurements(&bench));
     measurements.extend(gql_rows(&bench));
     measurements.extend(playback_measurements(&playback));
@@ -749,6 +750,83 @@ fn scenes_measurements(launch: &Launch) -> Vec<Measurement> {
             line.and_then(|l| number(l, "refreshHz")),
             invalid,
         ));
+    }
+    out
+}
+
+/// Images (012 SC-001–SC-006): paging and scrolling as Scenes; opening a typical photo within
+/// 500 ms (median); next and previous within 150 ms at p95 with the neighbour on disk (files over
+/// 12 MP reported apart, research R3); zoom and a drag within one frame of this display; the
+/// slideshow within 0.3 s of its delay.
+fn images_measurements(launch: &Launch) -> Vec<Measurement> {
+    let mut out = vec![
+        from_bench(
+            launch,
+            "images-page-change",
+            "images-page-change",
+            Some(150.0),
+            Check::P95,
+        ),
+        from_bench(
+            launch,
+            "images-page-jump",
+            "images-page-jump",
+            Some(1000.0),
+            Check::P95,
+        ),
+    ];
+    for mode in ["grid", "wall"] {
+        let line = bench_line(launch, &format!("images-scroll-1000-{mode}"));
+        let invalid = line
+            .and_then(|l| l.get("invalid").and_then(Value::as_str).map(str::to_owned))
+            .or_else(|| launch.invalid())
+            .or_else(|| line.is_none().then(|| "not measured".to_owned()));
+        out.push(scroll_measurement(
+            &format!("images-scroll-1000-{mode}-missed-frames"),
+            mode == "grid",
+            line.and_then(|l| number(l, "missedPercent")),
+            line.and_then(|l| number(l, "refreshHz")),
+            invalid,
+        ));
+    }
+    out.extend([
+        from_bench(
+            launch,
+            "image-open",
+            "image-open",
+            Some(500.0),
+            Check::Median,
+        ),
+        from_bench(launch, "image-next", "image-next", Some(150.0), Check::P95),
+        from_bench(
+            launch,
+            "image-next-large",
+            "image-next-large",
+            None,
+            Check::Median,
+        ),
+        from_bench(
+            launch,
+            "slideshow-drift",
+            "slideshow-drift",
+            Some(300.0),
+            Check::P95,
+        ),
+    ]);
+    // To mpv's picture moving on screen, within one frame of the display the bench measured (a
+    // frame over 1.5× its time is a missed one, as in the scroll rows); the UI's own frame
+    // after the input as info.
+    for row in ["image-zoom", "image-pan-drag"] {
+        let shown = format!("{row}-shown");
+        let frame = bench_line(launch, &shown).and_then(|l| number(l, "frameMs"));
+        out.push(from_bench(
+            launch,
+            &shown,
+            &shown,
+            frame.map(|f| (f * 1.5 * 10.0).round() / 10.0),
+            Check::P95,
+        ));
+        out.push(from_bench(launch, row, row, None, Check::P95));
     }
     out
 }

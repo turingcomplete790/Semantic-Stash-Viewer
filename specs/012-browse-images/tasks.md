@@ -270,9 +270,9 @@ actual size, close to the card (FR-008–FR-013, FR-019).
 
 ## Phase 7: Polish & Cross-Cutting Concerns
 
-- [ ] T045 [P] Keymap test in `native-ui/tests/keymap.rs`: the Images and viewer keys are listed;
+- [X] T045 [P] Keymap test in `native-ui/tests/keymap.rs`: the Images and viewer keys are listed;
       none clash at `Level::Shell`, `Level::Images`, `Level::Viewer`
-- [ ] T046 [P] Bench rows in `native-ui/src/measure/bench.rs` (research R9; "shown" = the new file's
+- [X] T046 [P] Bench rows in `native-ui/src/measure/bench.rs` (research R9; "shown" = the new file's
       first frame from the snapshot): `images-page-change`, `images-page-jump`,
       `images-scroll-1000-grid`/`-wall`, `image-open`, `image-next` (20 steps incl. a page boundary),
       `image-zoom`, `slideshow-drift`, and `gql-images-page`, `gql-image-details`,
@@ -281,15 +281,24 @@ actual size, close to the card (FR-008–FR-013, FR-019).
       image a little laggy (2026-10-12). Suspects to check: every pointer move sends all four view
       properties to mpv (`ActualSize`, `Zoom`, `Pan`, `Rotate`) where only the pan changed, and
       moves aren't coalesced to one per frame; each move also rebuilds the viewer's widget tree
-- [ ] T047 [P] Budgets in `crates/perf-harness/src/main.rs` and `crates/perf-harness/src/report.rs`:
+      (2026-10-13: those weren't it. Measured to mpv's picture on screen (`image-zoom-shown`,
+      `image-pan-drag-shown`), each zoom or pan step took a steady 97 ms: mpv's own redraw of a
+      held picture comes about 100 ms after a view change. Fixed by the player calling a host
+      hook after applying view settings, which wakes the render thread to render at once (mpv
+      redraws the previous frame with the new settings): 7.7 / 8.2 ms p95 at 144 Hz. Changed
+      settings only and coalescing the queue stay, as they cut mpv's work)
+- [X] T047 [P] Budgets in `crates/perf-harness/src/main.rs` and `crates/perf-harness/src/report.rs`:
       ≤ 150 ms p95, ≤ 1 s, ≤ 3% / ≤ 1%, ≤ 500 ms median, ≤ 150 ms p95, ≤ 1 frame, ≤ 0.3 s; requests
       1 / 1 / 0
-- [ ] T048 Run `cargo run -p perf-harness -- --profile "localhost:9998" --quick` on a quiet machine
-      (load under 4, window visible): every 012 row and every 005–011 row within budget
-- [ ] T049 [P] Docs: README (Images, the viewer's keys), `ROADMAP.md` (tick the Images items, link
+- [X] T048 Run `cargo run -p perf-harness -- --profile "localhost:9998" --quick` on a quiet machine
+      (load under 4, window visible): every 012 row and every 005–011 row within budget (2026-10-13:
+      all pass; invalid rows are the known ones: scene 1022 undecodable, the playback window not
+      drawn, the old scroll row not measured; `image-next-large` had no file over 12 MP in its 20
+      steps)
+- [X] T049 [P] Docs: README (Images, the viewer's keys), `ROADMAP.md` (tick the Images items, link
       012), and a requirement-to-test table (FR-001–FR-021, SC-001–SC-008) in
       `specs/012-browse-images/quickstart.md`
-- [ ] T050 Gate: `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
+- [X] T050 Gate: `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
       `cargo test --workspace`; then quickstart V1–V4 on Testing (the user verifies before any
       commit)
 

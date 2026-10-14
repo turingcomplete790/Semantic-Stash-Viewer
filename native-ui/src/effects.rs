@@ -42,8 +42,12 @@ pub enum PlayerAction {
     FrameStep(Direction),
     Replay,
     Close,
-    /// The image viewer's view (012): zoom, pan, rotation, actual size.
-    View(stash_core::images::viewer::View),
+    /// The image viewer's view (012): zoom, pan, rotation, actual size; only what differs from
+    /// `from` goes to mpv (a drag changes the pan alone).
+    View {
+        from: stash_core::images::viewer::View,
+        to: stash_core::images::viewer::View,
+    },
 }
 
 /// A change to the notification centre, asked for by the UI.
@@ -1441,15 +1445,23 @@ fn player_command(p: &player::Player, action: PlayerAction) {
         PlayerAction::FrameStep(Direction::Back) => p.frame_step_back(),
         PlayerAction::Replay => p.replay(),
         PlayerAction::Close => p.close(),
-        PlayerAction::View(v) => {
+        PlayerAction::View { from, to } => {
             use player::PlayerCommand as C;
-            p.dispatch(C::ActualSize(v.actual));
-            p.dispatch(C::Zoom(f64::from(v.zoom)));
-            p.dispatch(C::Pan {
-                x: f64::from(v.pan.0),
-                y: f64::from(v.pan.1),
-            });
-            p.dispatch(C::Rotate(v.quarter_turns));
+            if to.actual != from.actual {
+                p.dispatch(C::ActualSize(to.actual));
+            }
+            if to.zoom != from.zoom {
+                p.dispatch(C::Zoom(f64::from(to.zoom)));
+            }
+            if to.pan != from.pan {
+                p.dispatch(C::Pan {
+                    x: f64::from(to.pan.0),
+                    y: f64::from(to.pan.1),
+                });
+            }
+            if to.quarter_turns != from.quarter_turns {
+                p.dispatch(C::Rotate(to.quarter_turns));
+            }
         }
     }
 }

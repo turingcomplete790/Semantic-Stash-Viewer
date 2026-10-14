@@ -294,7 +294,7 @@ fn the_viewers_keys_zoom_rotate_and_fit_through_the_player() {
         effects
             .iter()
             .filter_map(|e| match e {
-                Effect::Player(PlayerAction::View(v)) => Some(*v),
+                Effect::Player(PlayerAction::View { to, .. }) => Some(*to),
                 _ => None,
             })
             .collect()

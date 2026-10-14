@@ -322,10 +322,11 @@ impl ImagesState {
         let Some(v) = &mut self.viewer else {
             return Step::none();
         };
+        let before = v.machine.view;
         let (next, command) = machine::step(&v.machine, event);
         v.machine = next;
         let timer = self.slideshow_timer(&command);
-        let step = self.apply(command).with_all(timer);
+        let step = self.apply(command, before).with_all(timer);
         let details = self.want_details();
         step.with_all(details)
     }
@@ -479,10 +480,14 @@ impl ImagesState {
         }
     }
 
-    fn apply(&mut self, command: Command) -> Step<ImagesUp> {
+    /// `before`: the view the player has (a view change sends only what differs).
+    fn apply(&mut self, command: Command, before: machine::View) -> Step<ImagesUp> {
         match command {
             Command::Show { at, prefetch } => self.show(at, prefetch),
-            Command::SetView(view) => Step::effect(Effect::Player(PlayerAction::View(view))),
+            Command::SetView(view) => Step::effect(Effect::Player(PlayerAction::View {
+                from: before,
+                to: view,
+            })),
             Command::Prefetch(indices) => self.prefetch(&indices),
             Command::Close { at } => self.close(at),
             Command::Nothing => Step::none(),

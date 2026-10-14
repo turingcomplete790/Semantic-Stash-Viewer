@@ -136,9 +136,14 @@ impl App {
             Message::Session(m) => {
                 if let (
                     Some(bench),
-                    session::Msg::Shell(crate::shell::ShellMsg::Scenes(
-                        crate::screens::scenes::ScenesMsg::AutoScrolled(result),
-                    )),
+                    session::Msg::Shell(
+                        crate::shell::ShellMsg::Scenes(
+                            crate::screens::scenes::ScenesMsg::AutoScrolled(result),
+                        )
+                        | crate::shell::ShellMsg::Images(crate::screens::images::ImagesMsg::List(
+                            crate::screens::browse::state::BrowseMsg::AutoScrolled(result),
+                        )),
+                    ),
                 ) = (self.bench.as_mut(), &m)
                 {
                     bench.scrolled(result.clone());

@@ -72,6 +72,12 @@ fn run(
             return;
         }
     };
+    // A view change (the image viewer's zoom or pan) redraws at once: mpv's own callback for a
+    // held picture came about 100 ms later (012).
+    let redraw = wake.clone();
+    player.set_view_hook(Some(Box::new(move || {
+        let _ = redraw.send(Event::Wake);
+    })));
     renderer.set_update_callback(move || {
         let _ = wake.send(Event::Wake);
     });
@@ -111,6 +117,7 @@ fn run(
             render(&renderer, shared, &frames);
         }
     }
+    player.set_view_hook(None);
     // Teardown order (SC-010): mpv's render context, then the GL objects, then (as `target`
     // goes out of scope) the context and the Wayland connection.
     drop(renderer);

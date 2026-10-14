@@ -177,6 +177,45 @@ impl Inner {
 }
 
 /// Start the `mpv-commands` worker. It exits when the returned sender is dropped.
+/// The batch with each absolute view setting (zoom, pan, rotation, actual size) only at its last
+/// occurrence: each replaces the one before, so the picture ends the same with fewer property
+/// writes. Everything else stays, in order.
+pub fn coalesce(batch: Vec<PlayerCommand>) -> Vec<PlayerCommand> {
+    fn kind(c: &PlayerCommand) -> Option<u8> {
+        match c {
+            PlayerCommand::Zoom(_) => Some(0),
+            PlayerCommand::Pan { .. } => Some(1),
+            PlayerCommand::Rotate(_) => Some(2),
+            PlayerCommand::ActualSize(_) => Some(3),
+            _ => None,
+        }
+    }
+    let mut last = [None; 4];
+    for (i, c) in batch.iter().enumerate() {
+        if let Some(k) = kind(c) {
+            last[usize::from(k)] = Some(i);
+        }
+    }
+    batch
+        .into_iter()
+        .enumerate()
+        .filter(|(i, c)| kind(c).is_none_or(|k| last[usize::from(k)] == Some(*i)))
+        .map(|(_, c)| c)
+        .collect()
+}
+
+/// A view setting (zoom, pan, rotation, actual size).
+fn is_view(c: &PlayerCommand) -> bool {
+    matches!(
+        c,
+        PlayerCommand::Zoom(_)
+            | PlayerCommand::Pan { .. }
+            | PlayerCommand::Rotate(_)
+            | PlayerCommand::ActualSize(_)
+            | PlayerCommand::ResetView
+    )
+}
+
 pub(crate) fn spawn_worker(
     inner: Arc<Inner>,
 ) -> std::io::Result<(mpsc::Sender<PlayerCommand>, JoinHandle<()>)> {
@@ -184,8 +223,19 @@ pub(crate) fn spawn_worker(
     let handle = std::thread::Builder::new()
         .name("mpv-commands".into())
         .spawn(move || {
-            for command in rx {
-                inner.apply(command);
+            // Whatever queued up meanwhile goes as one batch, its view settings coalesced (a
+            // drag sends a pan per pointer move; only the last one matters, 012).
+            while let Ok(first) = rx.recv() {
+                let mut batch = vec![first];
+                batch.extend(rx.try_iter());
+                let batch = coalesce(batch);
+                let view = batch.iter().any(is_view);
+                for command in batch {
+                    inner.apply(command);
+                }
+                if view {
+                    inner.view_changed();
+                }
             }
         })?;
     Ok((tx, handle))
@@ -193,6 +243,27 @@ pub(crate) fn spawn_worker(
 
 #[cfg(test)]
 mod tests {
+    use super::{coalesce, PlayerCommand as C};
+
+    #[test]
+    fn a_drags_pans_coalesce_to_the_last_and_nothing_else_moves() {
+        let batch = vec![
+            C::Pan { x: 0.1, y: 0.0 },
+            C::TogglePause,
+            C::Pan { x: 0.2, y: 0.0 },
+            C::Zoom(1.0),
+            C::Pan { x: 0.3, y: 0.1 },
+        ];
+        let out = coalesce(batch);
+        assert_eq!(out.len(), 3);
+        assert!(matches!(out[0], C::TogglePause));
+        assert!(matches!(out[1], C::Zoom(z) if z == 1.0));
+        assert!(matches!(out[2], C::Pan { x, y } if x == 0.3 && y == 0.1));
+    }
+}
+
+#[cfg(test)]
+mod guard_tests {
     use super::source_allowed;
     use crate::error::PlayerError;
 

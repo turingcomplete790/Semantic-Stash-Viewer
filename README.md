@@ -15,10 +15,14 @@ Jellyfin server.
 > Shuffle, and Repeat (all or one); the full
 > scene page (performers, tags marked by semantic type and coloured by rules you set, groups,
 > markers, files, galleries); mpv playback inside the window with resume, markers as chapters,
-> seek-bar thumbnails, play history saved to Stash, and an explicit transcode fallback; a
-> notification centre with live Stash jobs; and Settings. Screens open from a local cache and stay
+> seek-bar thumbnails, play history saved to Stash, and an explicit transcode fallback; the
+> image library as a paged grid or wall with the web UI's image search, filters, and sorts, a card
+> size control, and animated previews, and an image viewer in mpv (next and previous across pages
+> from files fetched ahead, zoom, pan, rotation, fit or actual size, a slideshow, looping animated
+> images and clips, and the image's details); a notification centre with live Stash jobs; and
+> Settings. Screens open from a local cache and stay
 > usable offline, every Stash request has a written budget, and one command measures every
-> performance budget. Images, galleries, the other entities, and the semantic recommendations
+> performance budget. Galleries, the other entities, and the semantic recommendations
 > come next (see the [roadmap](ROADMAP.md)). The project is specified with
 > [Spec Kit](https://github.com/github/spec-kit), and its governing rules live in the
 > [constitution](.specify/memory/constitution.md).
@@ -97,6 +101,13 @@ from inside the app. If you used the earlier web demo, its `semantic-stash-viewe
   focused; the scene the selection rests on plays), F6 moves between the list and the panel,
   N / P play the next / previous scene, A turns Autoplay on or off, X Shuffle, R cycles Repeat
   (off, all, one), O opens the scene's page (Ctrl+O in a new tab)
+- In Images: the Scenes grid's keys (arrows, Home/End, `[` `]`, Enter opens the viewer,
+  Ctrl+Enter in a new tab, `/`, F, S)
+- In the image viewer: →/← (also Space/Backspace, and the wheel) for the next/previous image
+  across pages, Home/End for the first/last, `+` `-` (and Ctrl+wheel) to zoom about the pointer,
+  the arrows to pan while zoomed (or drag), `0` to fit, `1` for actual size (double-click toggles),
+  R / Shift+R to rotate, P to start or pause the slideshow and `[` `]` for its delay, I for the
+  details, F for fullscreen, Esc (or Back) to close; Forward reopens it
 - In the player: Space, ←/→, ↑/↓, `[` `]` `\`, `.` `,`, F, M, Esc, PageUp/PageDown for the
   previous/next chapter (scene markers)
 - F1 or `?` lists every shortcut
@@ -129,7 +140,9 @@ doing one thing, in the two crates that need it (`player`, `native-ui`); none in
 Measures every budget from the constitution against one of your saved servers: cold start,
 navigation, control presses, tab switching with a video playing, Scenes paging and 1000-card
 scrolling (grid, list, wall, and queue), the queue view (choosing a row, a click to it playing,
-Autoplay starting, a scene's end to the next playing, Repeat, and Shuffle), card previews, pickers, playback (open, seek, dropped and
+Autoplay starting, a scene's end to the next playing, Repeat, and Shuffle), Images paging and
+1000-card scrolling (grid and wall), the image viewer (opening, next across a page edge, zoom and
+a drag within a frame, the slideshow's timing), card previews, pickers, playback (open, seek, dropped and
 displayed frames), memory and CPU, and the requests each action sends to Stash against its
 budget (the `gql-*` rows):
 

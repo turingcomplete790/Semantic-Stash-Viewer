@@ -119,7 +119,12 @@ pub(crate) struct Inner {
     /// mpv's `width` and `height` as they arrive (separately): the snapshot's `picture` only once
     /// both are known, so a reader never sees half a size.
     picture_size: Mutex<(u32, u32)>,
+    /// Called after view settings are applied (the host's render thread redraws).
+    view_hook: Mutex<Option<ViewHook>>,
 }
+
+/// What the host runs after the view settings change.
+pub type ViewHook = Box<dyn Fn() + Send>;
 
 /// One mpv core. At most one scene plays at a time.
 pub struct Player {
@@ -222,6 +227,7 @@ impl Player {
             last_seek_target: Mutex::new(None),
             timing: Mutex::new(Timing::default()),
             picture_size: Mutex::new((0, 0)),
+            view_hook: Mutex::new(None),
         });
 
         let for_thread = Arc::clone(&inner);
@@ -251,6 +257,12 @@ impl Player {
 
     pub fn snapshot(&self) -> PlayerSnapshot {
         lock(&self.inner.state).clone()
+    }
+
+    /// Run `hook` whenever view settings (zoom, pan, rotation, actual size) have been applied, so
+    /// the render thread can redraw at once (`None` removes it).
+    pub fn set_view_hook(&self, hook: Option<ViewHook>) {
+        *lock(&self.inner.view_hook) = hook;
     }
 
     /// Start playing `request.source`. Errors arrive as `state: error` snapshots.
@@ -578,6 +590,15 @@ impl Inner {
                     }
                 }
             }
+        }
+    }
+
+    /// The view settings changed: the host redraws now (012). mpv's own redraw of a held picture
+    /// came about 100 ms after each zoom or pan; rendering again shows the previous frame with
+    /// the new settings at once.
+    pub(crate) fn view_changed(&self) {
+        if let Some(hook) = lock(&self.view_hook).as_ref() {
+            hook();
         }
     }
 

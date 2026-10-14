@@ -106,10 +106,13 @@ mpv.
       one), decided by a pure state machine in the core (011)
 
 ### Images
-- [ ] Image grid (sized thumbnails), filters, and sorting
-- [ ] Full-screen image viewer in mpv (Principle V): keyboard/mouse navigation, zoom, pan,
+- [x] Image grid (sized thumbnails), filters, and sorting: the web UI's image search, filters,
+      sorts, saved and default filters, a card size control, the wall, and animated card
+      previews ([012](specs/012-browse-images/))
+- [x] Full-screen image viewer in mpv (Principle V): keyboard/mouse navigation, zoom, pan,
       rotation, fit/actual size, animated GIF/WebP, slideshow, and full resolution loaded on
-      demand with the neighbouring items prefetched (next/previous shown within 150 ms)
+      demand with the neighbouring items prefetched (next/previous shown within 150 ms), with the
+      image's details and chips that filter Images ([012](specs/012-browse-images/))
 
 ### Galleries (Principle X: designed fresh, not copied from Stash)
 
